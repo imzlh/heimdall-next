@@ -1,0 +1,59 @@
+{
+    "id": "heimdall.protocol.openai",
+    "version": "0.1.0",
+    "apiVersion": "1",
+    "name": "OpenAI HTTP protocol",
+    "kind": "protocol",
+    "trust": "trusted",
+    "capabilities": [
+        "openai.chat.completions",
+        "openai.responses",
+        "openai.completions",
+        "openai.embeddings",
+        "openai.images",
+        "streaming"
+    ],
+    "routes": [
+        {
+            "method": "POST",
+            "path": "/v1/chat/completions",
+            "operation": "generation.create",
+            "variant": "chat.completions"
+        },
+        {
+            "method": "POST",
+            "path": "/v1/responses",
+            "operation": "generation.create",
+            "variant": "responses"
+        },
+        {
+            "method": "POST",
+            "path": "/v1/completions",
+            "operation": "completion.create",
+            "variant": "completions"
+        },
+        {
+            "method": "POST",
+            "path": "/v1/embeddings",
+            "operation": "embedding.create",
+            "variant": "embeddings"
+        },
+        {
+            "method": "POST",
+            "path": "/v1/images/generations",
+            "operation": "image.generate",
+            "variant": "images.generations"
+        },
+        {
+            "method": "POST",
+            "path": "/v1/images/edits",
+            "operation": "image.edit",
+            "variant": "images.edits"
+        }
+    ],
+    "permissions": {
+        "network": false,
+        "filesystem": "none",
+        "subprocess": false
+    }
+}

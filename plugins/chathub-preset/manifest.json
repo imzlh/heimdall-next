@@ -1,0 +1,22 @@
+{
+    "id": "heimdall.preset.chathub",
+    "version": "0.1.0",
+    "apiVersion": "1",
+    "name": "Microsoft ChatHub",
+    "description": "在添加渠道的模态内完成 Microsoft 授权并保存 ChatHub 渠道。",
+    "kind": "preset",
+    "dependencies": [
+        "heimdall.source.chathub",
+        "heimdall.api.chathub-auth"
+    ],
+    "presetPage": {
+        "modulePath": "/admin/assets/plugins/chathub-setup.js"
+    },
+    "trust": "trusted",
+    "capabilities": ["source.chathub"],
+    "permissions": {
+        "network": false,
+        "filesystem": "none",
+        "subprocess": false
+    }
+}

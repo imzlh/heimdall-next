@@ -1,0 +1,117 @@
+{
+    "id": "heimdall.source.anthropic",
+    "version": "0.1.0",
+    "apiVersion": "1",
+    "name": "Anthropic Messages upstream",
+    "description": "连接 Anthropic Messages 接口，支持流式输出、图片输入与工具调用。",
+    "kind": "source",
+    "trust": "trusted",
+    "capabilities": [
+        "generation.create",
+        "streaming",
+        "tools",
+        "structured_output",
+        "image.input"
+    ],
+    "permissions": {
+        "network": true,
+        "filesystem": "none",
+        "subprocess": false
+    },
+    "ui": [
+        {
+            "pluginId": "heimdall.source.anthropic",
+            "id": "connection-status",
+            "slot": "source.status",
+            "sourcePluginId": "heimdall.source.anthropic",
+            "title": "Messages 状态",
+            "schema": {
+                "blocks": [
+                    {
+                        "kind": "badge",
+                        "label": "状态未知",
+                        "labelFrom": ["source", "state"]
+                    },
+                    {
+                        "kind": "metric",
+                        "label": "已发布模型",
+                        "value": "—",
+                        "valueFrom": ["source", "modelCount"],
+                        "unit": "个"
+                    },
+                    {
+                        "kind": "text",
+                        "text": "尚无探测结果",
+                        "textFrom": ["source", "probeStatus"]
+                    }
+                ]
+            }
+        }
+    ],
+    "configSchema": {
+        "version": 1,
+        "id": "heimdall.source.anthropic",
+        "title": "Anthropic 渠道",
+        "fields": [
+            {
+                "type": "group",
+                "id": "connection",
+                "label": "连接参数",
+                "fields": [
+                    {
+                        "type": "string",
+                        "name": "baseUrl",
+                        "label": "服务地址",
+                        "format": "url",
+                        "default": "https://api.anthropic.com",
+                        "help": "留空时使用 Anthropic 官方地址，不含 /v1/messages。"
+                    },
+                    {
+                        "type": "secret",
+                        "name": "apiKey",
+                        "label": "API 密钥",
+                        "preserveOnBlank": true,
+                        "help": "密钥只写入，不会返回页面。"
+                    }
+                ]
+            },
+            {
+                "type": "group",
+                "id": "raw",
+                "label": "原始参数",
+                "fields": [
+                    {
+                        "type": "string",
+                        "name": "endpoint",
+                        "label": "消息接口路径",
+                        "default": "/v1/messages",
+                        "help": "以 / 开头，接在服务地址之后。"
+                    },
+                    {
+                        "type": "string",
+                        "name": "anthropicVersion",
+                        "label": "Anthropic API 版本",
+                        "default": "2023-06-01",
+                        "help": "对应 anthropic-version 请求头。"
+                    },
+                    {
+                        "type": "string",
+                        "name": "modelMap",
+                        "label": "模型映射",
+                        "format": "string-map",
+                        "default": "{}",
+                        "help": "填写 JSON 对象，例如 {\"对外模型名\":\"上游模型名\"}。"
+                    },
+                    {
+                        "type": "string",
+                        "name": "headers",
+                        "label": "附加请求头",
+                        "format": "string-map",
+                        "default": "{}",
+                        "help": "填写 JSON 对象；仅用于非敏感请求头，认证信息请使用 API 密钥。"
+                    }
+                ]
+            }
+        ]
+    }
+}

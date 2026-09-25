@@ -1,0 +1,60 @@
+{
+    "tasks": {
+        "dev": "deno task prepare && deno run --allow-run --allow-read=plugins scripts/dev.ts",
+        "dev:server": "deno run --unstable-kv --watch=main.ts,src,packages,plugins --watch-exclude=public --allow-net --allow-env --allow-read --allow-write ./main.ts",
+        "dev:web": "deno run --allow-run --allow-read=plugins scripts/dev.ts --web-only",
+        "build:web": "deno run --allow-run --allow-read=plugins scripts/build-web.ts",
+        "prepare": "deno cache --node-modules-dir=none --unstable-kv ./main.ts plugins/*/mod.ts && deno task build:web",
+        "preview:ui": "deno run --node-modules-dir=none --allow-read=src/web/client --allow-write=docs/previews scripts/render-ui-preview.tsx",
+        "preview:chat": "deno run --node-modules-dir=none --allow-read=src/web/client --allow-write=docs/previews scripts/render-chat-preview.tsx",
+        "start": "deno task prepare && deno task serve",
+        "serve": "deno run --cached-only --node-modules-dir=none --unstable-kv --allow-net --allow-env --allow-read --allow-write ./main.ts",
+        "check": "deno task check:server && deno task check:web && deno task check:packages && deno task check:plugins && deno task check:tests && deno check scripts",
+        "check:web": "deno check --config deno.browser.json src/web/client plugins/*/ui.tsx",
+        "check:server": "deno check --node-modules-dir=none --unstable-kv ./main.ts src/http src/composition src/storage src/stats src/chat src/web/components src/web/pages src/web/server src/web/shared",
+        "check:packages": "deno check --node-modules-dir=none --unstable-kv packages",
+        "check:plugins": "deno check --node-modules-dir=none --unstable-kv plugins/*/mod.ts",
+        "check:tests": "deno check --node-modules-dir=none --unstable-kv tests",
+        "test": "deno test --node-modules-dir=none --unstable-kv -A tests",
+        "test:architecture": "deno test --node-modules-dir=none --unstable-kv -A tests/architecture.test.ts",
+        "fmt": "deno fmt ./src ./main.ts packages plugins tests scripts",
+        "fmt:check": "deno fmt --check ./src ./main.ts packages plugins tests scripts",
+        "lint": "deno lint ./src ./main.ts packages plugins tests scripts",
+        "verify": "deno task fmt:check && deno task lint && deno task check && deno task build:web && deno task test"
+    },
+    "imports": {
+        "@std/assert": "jsr:@std/assert@1.0.19",
+        "hono": "jsr:@hono/hono@4.12.16",
+        "marked": "npm:marked@15.0.12",
+        "entities": "npm:entities@6.0.1",
+        "lucide": "npm:lucide@1.47.0/dist/esm/lucide.mjs",
+        "@hono/hono": "jsr:@hono/hono@4.12.16",
+        "@heimdall/hip": "./packages/hip/mod.ts",
+        "@heimdall/hip/": "./packages/hip/",
+        "@heimdall/contracts": "./packages/contracts/mod.ts",
+        "@heimdall/contracts/": "./packages/contracts/",
+        "@heimdall/kernel": "./packages/kernel/mod.ts",
+        "@heimdall/kernel/": "./packages/kernel/",
+        "@heimdall/storage": "./packages/storage/mod.ts",
+        "@heimdall/storage/": "./packages/storage/",
+        "@heimdall/plugin-host": "./packages/plugin-host/mod.ts",
+        "@heimdall/plugin-host/": "./packages/plugin-host/",
+        "@heimdall/admin-contracts": "./packages/admin-contracts/mod.ts",
+        "@heimdall/admin-contracts/": "./packages/admin-contracts/",
+        "@heimdall/core/": "./src/"
+    },
+    "compilerOptions": {
+        "strict": true,
+        "noUncheckedIndexedAccess": true,
+        "lib": [
+            "deno.window",
+            "deno.unstable",
+            "dom"
+        ],
+        "jsx": "react-jsx",
+        "jsxImportSource": "hono/jsx"
+    },
+    "fmt": {
+        "indentWidth": 4
+    }
+}

@@ -1,0 +1,139 @@
+{
+    "id": "heimdall.source.openai-compatible",
+    "version": "0.1.0",
+    "apiVersion": "1",
+    "name": "OpenAI-compatible upstream",
+    "description": "连接 OpenAI 兼容接口，提供对话、向量、图像与工具调用能力。",
+    "kind": "source",
+    "trust": "trusted",
+    "capabilities": [
+        "generation.create",
+        "completion.create",
+        "embedding.create",
+        "image.generate",
+        "image.edit",
+        "streaming",
+        "tools",
+        "structured_output",
+        "image.input"
+    ],
+    "permissions": {
+        "network": true,
+        "filesystem": "none",
+        "subprocess": false
+    },
+    "ui": [
+        {
+            "pluginId": "heimdall.source.openai-compatible",
+            "id": "connection-status",
+            "slot": "source.status",
+            "sourcePluginId": "heimdall.source.openai-compatible",
+            "title": "接口状态",
+            "schema": {
+                "blocks": [
+                    {
+                        "kind": "badge",
+                        "label": "状态未知",
+                        "labelFrom": ["source", "state"]
+                    },
+                    {
+                        "kind": "metric",
+                        "label": "已发布模型",
+                        "value": "—",
+                        "valueFrom": ["source", "modelCount"],
+                        "unit": "个"
+                    },
+                    {
+                        "kind": "text",
+                        "text": "尚无探测结果",
+                        "textFrom": ["source", "probeStatus"]
+                    }
+                ]
+            }
+        }
+    ],
+    "configSchema": {
+        "version": 1,
+        "id": "heimdall.source.openai-compatible",
+        "title": "OpenAI 兼容渠道",
+        "fields": [
+            {
+                "type": "group",
+                "id": "connection",
+                "label": "连接参数",
+                "fields": [
+                    {
+                        "type": "string",
+                        "name": "baseUrl",
+                        "label": "服务地址",
+                        "format": "url",
+                        "required": true,
+                        "placeholder": "https://api.openai.com/v1",
+                        "help": "填写包含路径前缀的完整地址，不含密钥或查询参数。"
+                    },
+                    {
+                        "type": "secret",
+                        "name": "apiKey",
+                        "label": "API 密钥",
+                        "preserveOnBlank": true,
+                        "help": "密钥只写入，不会返回页面。"
+                    }
+                ]
+            },
+            {
+                "type": "group",
+                "id": "raw",
+                "label": "原始参数",
+                "fields": [
+                    {
+                        "type": "string",
+                        "name": "endpoint",
+                        "label": "对话接口路径",
+                        "default": "/chat/completions",
+                        "help": "以 / 开头，接在服务地址之后。"
+                    },
+                    {
+                        "type": "enum",
+                        "name": "compat",
+                        "label": "接口能力",
+                        "default": "full",
+                        "options": [
+                            {
+                                "value": "full",
+                                "label": "全部能力"
+                            },
+                            {
+                                "value": "chat",
+                                "label": "对话与补全"
+                            },
+                            {
+                                "value": "embeddings",
+                                "label": "向量嵌入"
+                            },
+                            {
+                                "value": "images",
+                                "label": "图像生成与编辑"
+                            }
+                        ]
+                    },
+                    {
+                        "type": "string",
+                        "name": "modelMap",
+                        "label": "模型映射",
+                        "format": "string-map",
+                        "default": "{}",
+                        "help": "填写 JSON 对象，例如 {\"对外模型名\":\"上游模型名\"}。"
+                    },
+                    {
+                        "type": "string",
+                        "name": "headers",
+                        "label": "附加请求头",
+                        "format": "string-map",
+                        "default": "{}",
+                        "help": "填写 JSON 对象；仅用于非敏感请求头，认证信息请使用 API 密钥。"
+                    }
+                ]
+            }
+        ]
+    }
+}

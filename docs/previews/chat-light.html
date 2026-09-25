@@ -1,0 +1,2611 @@
+<!doctype html>
+<html lang="zh" data-theme="light"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Heimdall Chat</title><meta name="color-scheme" content="light dark"/><meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; style-src &#39;unsafe-inline&#39;; form-action &#39;none&#39;; base-uri &#39;none&#39;"/><style>/* Heimdall's original visual language, shared by SSR and browser islands. */
+:root {
+    color-scheme: light;
+    --bg: #f5f6f7;
+    --surface: #ffffff;
+    --surface-muted: #f1f2f3;
+    --surface-raised: #e9ebee;
+    --sidebar-bg: #ffffff;
+    --text: #15181e;
+    --muted: #4d525c;
+    --subtle: #6d737e;
+    --border: #d9dce1;
+    --border-strong: #b9bec7;
+    --accent: #2264d6;
+    --accent-hover: #174da9;
+    --accent-soft: #edf4ff;
+    --button-bg: #2264d6;
+    --button-hover: #174da9;
+    --success: #117a54;
+    --success-soft: #e8f5ef;
+    --warning: #9a5b08;
+    --warning-soft: #fcf3e3;
+    --danger: #b53b45;
+    --danger-soft: #fbebed;
+    --radius: 22px;
+    --radius-sm: 14px;
+    --radius-control: 999px;
+    --shadow: 0 1px 2px rgb(97 104 117 / 8%);
+    --shadow-lg: 0 18px 48px rgb(42 47 55 / 14%);
+    --motion-fast: 160ms;
+    --motion-enter: 220ms;
+    --motion-exit: 150ms;
+    --motion-ease: cubic-bezier(.22, 1, .36, 1);
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    background: var(--bg);
+}
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0d0e12;
+    --surface: #15181e;
+    --surface-muted: #1b1f26;
+    --surface-raised: #20242c;
+    --sidebar-bg: #111318;
+    --text: #f3f4f6;
+    --muted: #a3a9b4;
+    --subtle: #848c9a;
+    --border: #2b3039;
+    --border-strong: #414956;
+    --accent: #2b89ff;
+    --accent-hover: #5aa3ff;
+    --accent-soft: #17283f;
+    --success: #36c997;
+    --success-soft: #162c27;
+    --warning: #e5a84b;
+    --warning-soft: #30271b;
+    --danger: #f06b72;
+    --danger-soft: #321e25;
+    --shadow: 0 1px 2px rgb(0 0 0 / 18%);
+    --shadow-lg: 0 18px 50px rgb(0 0 0 / 32%);
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+        color-scheme: dark;
+        --bg: #0d0e12;
+        --surface: #15181e;
+        --surface-muted: #1b1f26;
+        --surface-raised: #20242c;
+        --sidebar-bg: #111318;
+        --text: #f3f4f6;
+        --muted: #a3a9b4;
+        --subtle: #848c9a;
+        --border: #2b3039;
+        --border-strong: #414956;
+        --accent: #2b89ff;
+        --accent-hover: #5aa3ff;
+        --accent-soft: #17283f;
+        --success: #36c997;
+        --success-soft: #162c27;
+        --warning: #e5a84b;
+        --warning-soft: #30271b;
+        --danger: #f06b72;
+        --danger-soft: #321e25;
+        --shadow: 0 1px 2px rgb(0 0 0 / 18%);
+        --shadow-lg: 0 18px 50px rgb(0 0 0 / 32%);
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+[hidden] {
+    display: none !important;
+}
+body {
+    margin: 0;
+    min-width: 320px;
+    -webkit-font-smoothing: antialiased;
+}
+button,
+input,
+select,
+textarea {
+    font: inherit;
+}
+button,
+a,
+input,
+select,
+textarea {
+    -webkit-tap-highlight-color: transparent;
+}
+button {
+    cursor: pointer;
+}
+button:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+a {
+    color: var(--accent);
+    text-decoration: none;
+}
+a:hover {
+    text-decoration: underline;
+}
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+}
+::selection {
+    background: var(--accent-soft);
+    color: var(--text);
+}
+h1,
+h2,
+h3,
+p {
+    margin: 0;
+}
+h1 {
+    font-size: 28px;
+    line-height: 1.25;
+    font-weight: 650;
+    letter-spacing: -.025em;
+}
+h2 {
+    font-size: 16px;
+    line-height: 1.5;
+    font-weight: 650;
+}
+h3 {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.5;
+}
+p {
+    color: var(--muted);
+}
+small {
+    font-size: 12px;
+}
+code,
+pre {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 12px;
+}
+pre {
+    overflow: auto;
+    max-height: 360px;
+    padding: 16px;
+    background: var(--surface-muted);
+    border-radius: var(--radius-sm);
+}
+svg {
+    flex-shrink: 0;
+}
+.eyebrow {
+    color: var(--subtle);
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: .06em;
+}
+.muted-text,
+.field-help,
+.section-hint {
+    color: var(--subtle);
+    font-size: 12px;
+}
+.field-error,
+.form-error,
+.error-message {
+    color: var(--danger);
+    font-size: 12px;
+}
+.field-required {
+    color: var(--subtle);
+    font-size: 10px;
+    font-weight: 400;
+}
+.panel {
+    min-width: 0;
+    padding: 20px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+.panel-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+.panel-heading p {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--subtle);
+}
+.panel-count {
+    color: var(--subtle);
+    font-size: 12px;
+    flex-shrink: 0;
+}
+.section-link {
+    font-size: 12px;
+    font-weight: 500;
+}
+.empty-state {
+    padding: 24px 20px;
+    color: var(--subtle);
+}
+.empty-state h3 {
+    color: var(--text);
+    margin-bottom: 6px;
+}
+.empty-state .primary-button {
+    margin-top: 16px;
+}
+.notice,
+.form-error,
+.form-success {
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+.notice {
+    color: var(--muted);
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+}
+.form-error {
+    background: var(--danger-soft);
+}
+.form-success {
+    background: var(--success-soft);
+    color: var(--success);
+}
+form > .form-error,
+form > .form-success,
+.config-panel > .form-error,
+.config-panel > .form-success {
+    margin-top: 16px;
+}
+.status-chip,
+.slot-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 1.6;
+    font-weight: 500;
+    max-width: 100%;
+    white-space: nowrap;
+}
+.status-chip::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+}
+.chip-green,
+.tone-success {
+    color: var(--success);
+    background: var(--success-soft);
+}
+.chip-muted,
+.tone-neutral {
+    color: var(--muted);
+    background: var(--surface-muted);
+}
+.chip-amber,
+.tone-warning {
+    color: var(--warning);
+    background: var(--warning-soft);
+}
+.chip-red,
+.tone-danger {
+    color: var(--danger);
+    background: var(--danger-soft);
+}
+.primary-button,
+.text-button,
+.secondary-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 36px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 550;
+    line-height: 1.5;
+    text-align: center;
+    white-space: nowrap;
+    transition: background var(--motion-fast) ease,
+        border-color var(--motion-fast) ease, color var(--motion-fast) ease,
+        box-shadow var(--motion-fast) ease, opacity var(--motion-fast) ease,
+        transform var(--motion-fast) var(--motion-ease);
+}
+.primary-button {
+    color: #fff;
+    background: var(--button-bg);
+}
+.primary-button:hover:not(:disabled) {
+    background: var(--button-hover);
+    text-decoration: none;
+}
+.text-button,
+.secondary-button {
+    color: var(--muted);
+    background: var(--surface);
+    border-color: var(--border);
+}
+.text-button:hover:not(:disabled),
+.secondary-button:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--border-strong);
+    background: var(--surface-muted);
+    text-decoration: none;
+}
+.primary-button:active:not(:disabled),
+.text-button:active:not(:disabled),
+.secondary-button:active:not(:disabled) {
+    transform: translateY(1px);
+}
+.icon-button {
+    display: inline-flex;
+    flex: 0 0 36px;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    color: var(--muted);
+    background: transparent;
+    transition: background var(--motion-fast) ease, color var(--motion-fast)
+        ease;
+}
+.icon-button:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--surface-muted);
+}
+.icon {
+    display: block;
+    flex-shrink: 0;
+}
+label {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 500;
+}
+input,
+select,
+textarea {
+    width: 100%;
+    min-width: 0;
+    min-height: 40px;
+    padding: 9px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    background: var(--bg);
+    font-size: 13px;
+    line-height: 1.5;
+    transition: border-color var(--motion-fast) ease,
+        background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+input::placeholder,
+textarea::placeholder {
+    color: var(--subtle);
+    opacity: .85;
+}
+input:focus,
+select:focus,
+textarea:focus {
+    border-color: var(--accent);
+    outline: 2px solid var(--accent-soft);
+    outline-offset: 0;
+}
+input[aria-invalid="true"],
+select[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+    border-color: var(--danger);
+}
+input:disabled,
+select:disabled,
+textarea:disabled {
+    background: var(--surface-muted);
+    color: var(--subtle);
+    cursor: not-allowed;
+    opacity: .8;
+}
+textarea {
+    resize: vertical;
+    min-height: 104px;
+}
+input[type="checkbox"],
+input[type="radio"] {
+    width: 17px;
+    height: 17px;
+    min-height: 0;
+    margin: 3px 0;
+    accent-color: var(--accent);
+}
+.field-grid,
+.schema-form,
+.schema-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px 24px;
+}
+.schema-group {
+    grid-column: 1 / -1;
+    border: 0;
+    border-top: 1px solid var(--border);
+    padding: 20px 0 0;
+    margin: 6px 0 0;
+    min-width: 0;
+}
+.schema-group legend {
+    padding: 0 12px 0 0;
+    font-size: 13px;
+    font-weight: 600;
+}
+.schema-group > .field-help {
+    grid-column: 1 / -1;
+}
+.schema-field {
+    min-width: 0;
+    display: grid;
+    align-content: start;
+    justify-items: stretch;
+    gap: 7px;
+}
+.schema-field > label {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 6px;
+}
+.schema-field:has(input[type="checkbox"]) {
+    background: var(--surface-muted);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+}
+.wide-field,
+.schema-group > legend {
+    grid-column: 1 / -1;
+}
+.secret-control,
+.authorization-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.secret-control input {
+    flex: 1;
+}
+.authorization-control {
+    flex-wrap: wrap;
+}
+.config-mode {
+    max-width: 360px;
+    margin-bottom: 24px;
+}
+.preset-help {
+    margin: -10px 0 22px;
+}
+.preset-preview {
+    margin-top: 20px;
+}
+.config-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+form > .config-actions,
+.settings-form > .config-actions {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+}
+.config-actions > span {
+    color: var(--subtle);
+    font-size: 12px;
+}
+.config-panel {
+    border: 1px solid var(--border);
+}
+.settings-form {
+    max-width: 760px;
+}
+.settings-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    margin: 0;
+}
+.settings-summary dt,
+.settings-summary dd {
+    border-bottom: 1px solid var(--border);
+    padding: 16px 0;
+}
+.settings-summary dt {
+    color: var(--muted);
+    font-size: 13px;
+}
+.settings-summary dd {
+    margin: 0;
+    text-align: right;
+    font-size: 13px;
+}
+.auth-panel {
+    max-width: 520px;
+}
+.auth-panel > p {
+    margin: 8px 0 22px;
+    font-size: 13px;
+}
+.auth-panel form {
+    display: grid;
+    gap: 12px;
+}
+.auth-form {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    max-width: 580px;
+}
+.auth-form label {
+    flex: 1;
+}
+.source-dialog {
+    width: min(520px, calc(100vw - 32px));
+    max-height: calc(100dvh - 40px);
+    padding: 24px;
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    box-shadow: var(--shadow-lg);
+    color: var(--text);
+    background: var(--surface);
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+}
+.source-create-dialog {
+    width: min(560px, calc(100vw - 32px));
+    height: min(520px, calc(100dvh - 48px));
+    max-height: calc(100dvh - 48px);
+    padding: 28px;
+    overflow: hidden;
+}
+.source-create-dialog[open],
+.source-create-dialog.preview-dialog {
+    display: flex;
+    flex-direction: column;
+}
+.source-dialog::backdrop {
+    background: rgb(6 10 18 / 58%);
+    backdrop-filter: blur(4px);
+}
+.source-dialog .panel-heading {
+    align-items: flex-start;
+}
+.source-dialog h2 {
+    font-size: 20px;
+    margin-top: 0;
+}
+.source-dialog form > label,
+.source-dialog .config-actions {
+    margin-top: 20px;
+}
+.source-dialog .notice {
+    font-size: 12px;
+}
+.source-dialog-header {
+    flex-shrink: 0;
+    margin-bottom: 20px;
+}
+.source-dialog-header > div {
+    min-width: 0;
+}
+.source-dialog-header h2 {
+    overflow-wrap: anywhere;
+}
+.source-dialog-header .source-flow-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+    color: var(--subtle);
+    font-size: 12px;
+}
+.source-flow-progress span:first-child {
+    color: var(--accent);
+    font-weight: 600;
+}
+.source-flow-context {
+    display: flex;
+    flex-shrink: 0;
+    align-items: baseline;
+    gap: 12px;
+    margin: -12px 0 18px;
+    font-size: 12px;
+    color: var(--subtle);
+}
+.source-flow-context span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.source-flow-context span:last-child {
+    flex-shrink: 0;
+}
+.source-flow-content {
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+.source-create-dialog .source-flow-details > form,
+.source-create-dialog .source-config-form,
+.source-create-dialog .source-preset-config,
+.source-create-dialog .preset-editor,
+.source-create-dialog .preset-editor-root:not([hidden]),
+.source-create-dialog .preset-editor-stage,
+.source-create-dialog .source-preset-form {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    gap: 0;
+    margin: 0;
+}
+.source-create-dialog .source-flow-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+    padding: 2px;
+    margin: -2px;
+}
+.source-create-dialog .source-flow-details .source-flow-body,
+.source-create-dialog .source-preset-form > .source-flow-body {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+.source-create-dialog .source-flow-details label {
+    margin: 0;
+}
+.source-create-dialog .template-options {
+    align-content: start;
+    margin: 0;
+    max-height: none;
+    min-height: 0;
+    overflow: visible;
+}
+.source-dialog.source-create-dialog .source-config-source {
+    max-width: none;
+    margin: 0 0 18px;
+}
+.source-create-dialog .source-config-form .empty-state {
+    padding: 0;
+    font-size: 12px;
+}
+.source-create-dialog .field-grid,
+.source-create-dialog .schema-form,
+.source-create-dialog .schema-group {
+    gap: 16px 20px;
+}
+.source-dialog.source-create-dialog .source-flow-footer {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    gap: 8px;
+    min-height: 53px;
+    margin: 18px 0 0;
+    padding: 16px 0 0;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+}
+.source-flow-footer > .icon-button:first-child {
+    margin-right: auto;
+}
+.source-create-dialog .source-preset-config {
+    position: relative;
+}
+.source-preset-config .source-flow-footer:not(.source-flow-back) {
+    padding-left: 48px;
+}
+.source-dialog.source-create-dialog .source-flow-back {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    z-index: 1;
+    min-height: 36px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+}
+.source-preset-config,
+.source-config-form {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.source-preset-config {
+    margin-top: 20px;
+}
+.source-dialog .source-config-source {
+    max-width: 420px;
+    margin: 20px 0 24px;
+}
+.source-dialog .schema-group:first-child {
+    margin-top: 0;
+}
+.preset-editor {
+    min-width: 0;
+    max-width: 100%;
+}
+.preset-editor form {
+    display: grid;
+    gap: 18px;
+}
+.preset-editor form > .config-actions {
+    margin-top: 6px;
+}
+.template-options {
+    display: grid;
+    gap: 10px;
+    padding: 2px;
+    border: 0;
+    margin: 18px 0 0;
+    min-width: 0;
+    max-height: 340px;
+    overflow-y: auto;
+}
+.template-option {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--surface);
+    cursor: pointer;
+    transition: border-color var(--motion-fast) ease,
+        background var(--motion-fast) ease, box-shadow var(--motion-fast) ease,
+        transform var(--motion-fast) var(--motion-ease);
+}
+.template-option:hover {
+    border-color: var(--border-strong);
+}
+.template-option-link {
+    width: 100%;
+    color: var(--text);
+    text-align: left;
+    justify-content: space-between;
+    align-items: center;
+    line-height: 1.6;
+}
+.template-option-link:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    text-decoration: none;
+}
+.template-option-arrow {
+    flex-shrink: 0;
+    color: var(--accent);
+    font-size: 20px;
+    transition: transform var(--motion-fast) var(--motion-ease);
+}
+.template-option.selected,
+.template-option[aria-pressed="true"],
+.template-option:has(input:checked) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+.template-option:focus-within {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.template-option input[type="radio"] {
+    flex-shrink: 0;
+    margin-top: 3px;
+}
+.template-option-body {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+.template-option-title {
+    font-size: 13px;
+    font-weight: 600;
+}
+.template-option-description {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 400;
+}
+.template-option-meta {
+    color: var(--subtle);
+    font-size: 10px;
+    font-weight: 400;
+    overflow-wrap: anywhere;
+}
+.source-dialog .config-actions {
+    justify-content: flex-end;
+}
+.source-created-toast {
+    position: fixed;
+    z-index: 100;
+    right: 24px;
+    bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: fit-content;
+    max-width: min(520px, calc(100vw - 32px));
+    padding: 10px 12px 10px 18px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text);
+    background: var(--surface);
+    box-shadow: var(--shadow-lg);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+.source-created-toast::before {
+    content: "";
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--success);
+}
+.source-created-toast > button {
+    flex-shrink: 0;
+}
+/* These names are also used by the host's close lifecycle. */
+@keyframes source-dialog-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(.985);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+@keyframes source-dialog-out {
+    from {
+        opacity: 1;
+        transform: none;
+    }
+    to {
+        opacity: 0;
+        transform: translateY(5px) scale(.99);
+    }
+}
+@keyframes source-backdrop-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+@keyframes source-backdrop-out {
+    from {
+        opacity: 1;
+    }
+    to {
+        opacity: 0;
+    }
+}
+@keyframes source-flow-in {
+    from {
+        opacity: 0;
+        transform: translateX(var(--flow-enter-offset, 6px));
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+@keyframes source-toast-in {
+    from {
+        opacity: 0;
+        transform: translateY(9px) scale(.96);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+@keyframes source-toast-out {
+    from {
+        opacity: 1;
+        transform: none;
+    }
+    to {
+        opacity: 0;
+        transform: translateY(5px) scale(.98);
+    }
+}
+@media (prefers-reduced-motion: no-preference) {
+    .source-dialog[open] {
+        animation: source-dialog-in var(--motion-enter) var(--motion-ease) both;
+    }
+    .source-dialog[open]::backdrop {
+        animation: source-backdrop-in var(--motion-fast) ease both;
+    }
+    .source-dialog[open].is-closing {
+        animation: source-dialog-out var(--motion-exit) ease both;
+        pointer-events: none;
+    }
+    .source-dialog[open].is-closing::backdrop {
+        animation: source-backdrop-out var(--motion-exit) ease both;
+    }
+    .source-dialog[open] .source-flow-body {
+        animation: source-flow-in 180ms var(--motion-ease) both;
+    }
+    .source-dialog[data-direction="back"] {
+        --flow-enter-offset: -6px;
+    }
+    .source-created-toast {
+        animation: source-toast-in var(--motion-enter) var(--motion-ease) both;
+    }
+    .source-created-toast.is-closing {
+        animation: source-toast-out var(--motion-exit) ease both;
+        pointer-events: none;
+    }
+}
+@media (hover: hover) and (pointer: fine) {
+    .primary-button:hover:not(:disabled) {
+        box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 18%,
+            transparent);
+    }
+    .template-option-link:hover .template-option-arrow {
+        transform: translateX(2px);
+    }
+}
+.table-wrap,
+.table-scroll {
+    min-width: 0;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+}
+.request-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 12px;
+}
+.request-table th {
+    color: var(--subtle);
+    font-size: 11px;
+    font-weight: 500;
+    background: var(--surface-muted);
+    white-space: nowrap;
+}
+.request-table th,
+.request-table td {
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+}
+.request-table td {
+    color: var(--muted);
+    overflow-wrap: anywhere;
+}
+.request-table td:first-child {
+    white-space: nowrap;
+}
+.request-table td strong {
+    color: var(--text);
+    font-weight: 550;
+}
+.request-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+.request-table tbody tr:hover {
+    background: var(--surface-muted);
+}
+.request-table code {
+    font-size: 11px;
+}
+.catalog-list,
+.plain-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+.catalog-row,
+.plain-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 13px 0;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+}
+.catalog-row:first-child {
+    border-top: 0;
+}
+.catalog-row small {
+    display: block;
+    color: var(--subtle);
+}
+.catalog-row > div:first-child {
+    flex: 1;
+    min-width: 0;
+}
+.catalog-row strong {
+    font-weight: 550;
+    overflow-wrap: anywhere;
+}
+.usage-history {
+    margin: 0 0 18px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 14px;
+    font-size: 12px;
+}
+.usage-history > summary {
+    color: var(--muted);
+    cursor: pointer;
+}
+.usage-history[open] > summary {
+    margin-bottom: 12px;
+}
+.ssr-notice {
+    color: var(--subtle);
+    font-size: 12px;
+}
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0,0,0,0);
+    white-space: nowrap;
+    border: 0;
+}
+.skip-link {
+    position: fixed;
+    top: -80px;
+    left: 16px;
+    z-index: 20;
+    padding: 10px 16px;
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+}
+.skip-link:focus {
+    top: 10px;
+}
+@media (max-width: 600px) {
+    .panel {
+        padding: 20px;
+    }
+    .panel-heading {
+        gap: 12px;
+    }
+    .field-grid,
+    .schema-form,
+    .schema-group {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 18px;
+    }
+    .auth-form {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .source-dialog {
+        max-height: calc(100dvh - 24px);
+        padding: 22px 20px;
+    }
+    .source-create-dialog {
+        width: calc(100vw - 24px);
+        height: min(520px, calc(100dvh - 24px));
+        max-height: calc(100dvh - 24px);
+        padding: 24px 20px;
+    }
+    .source-create-dialog input,
+    .source-create-dialog select,
+    .source-create-dialog textarea {
+        font-size: 16px;
+    }
+    .source-created-toast {
+        right: 16px;
+        bottom: 16px;
+    }
+    .request-table th,
+    .request-table td {
+        padding: 12px;
+    }
+    .config-actions {
+        row-gap: 10px;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        transition: none !important;
+        animation: none !important;
+    }
+}
+
+.chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    min-height: 0;
+    padding: 24px var(--chat-gutter) 32px;
+    scroll-behavior: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+}
+.chat-thread {
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    max-width: var(--chat-content-width);
+    min-height: 100%;
+    margin: 0 auto;
+}
+.chat-message {
+    min-width: 0;
+    max-width: 100%;
+}
+.chat-message.is-latest,
+.chat-message.is-streaming {
+    animation: chat-message-in 240ms cubic-bezier(.22, 1, .36, 1) both;
+}
+@keyframes chat-message-in {
+    from {
+        opacity: 0;
+        transform: translateY(7px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+.chat-message-author {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 600;
+    margin: 0 0 8px;
+}
+.chat-message-body {
+    min-width: 0;
+    color: var(--text);
+}
+.chat-message-text {
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    color: inherit;
+    line-height: 1.75;
+    font-size: 14px;
+}
+.chat-markdown {
+    min-width: 0;
+    font-size: 14px;
+    line-height: 1.75;
+    overflow-wrap: anywhere;
+}
+.chat-markdown p {
+    margin: 0 0 14px;
+    white-space: pre-wrap;
+}
+.chat-markdown > :first-child {
+    margin-top: 0;
+}
+.chat-markdown > :last-child,
+.chat-markdown li > :last-child,
+.chat-markdown blockquote > :last-child {
+    margin-bottom: 0;
+}
+.chat-markdown h1,
+.chat-markdown h2,
+.chat-markdown h3,
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
+    margin: 22px 0 10px;
+    line-height: 1.5;
+    font-weight: 650;
+    letter-spacing: -.015em;
+}
+.chat-markdown h1 {
+    font-size: 22px;
+}
+.chat-markdown h2 {
+    font-size: 19px;
+}
+.chat-markdown h3 {
+    font-size: 16px;
+}
+.chat-markdown h4,
+.chat-markdown h5,
+.chat-markdown h6 {
+    font-size: 14px;
+}
+.chat-markdown strong {
+    font-weight: 650;
+}
+.chat-markdown a {
+    color: var(--accent);
+    text-decoration: underline;
+    text-decoration-color: color-mix(in srgb, var(--accent) 35%, transparent);
+    text-underline-offset: 3px;
+    transition: text-decoration-color 150ms ease;
+}
+.chat-markdown a:hover {
+    text-decoration-color: currentColor;
+}
+.chat-markdown ul,
+.chat-markdown ol {
+    margin: 12px 0 16px;
+    padding-left: 24px;
+}
+.chat-markdown li {
+    padding-left: 3px;
+}
+.chat-markdown li + li {
+    margin-top: 6px;
+}
+.chat-markdown li p {
+    margin-bottom: 8px;
+}
+.chat-markdown li ul,
+.chat-markdown li ol {
+    margin-block: 6px;
+}
+.chat-markdown li::marker {
+    color: var(--muted);
+}
+.chat-markdown .chat-task-item {
+    position: relative;
+    list-style: none;
+}
+.chat-task-state {
+    position: absolute;
+    left: -21px;
+    color: var(--accent);
+}
+.chat-markdown blockquote {
+    margin: 16px 0;
+    padding: 2px 0 2px 16px;
+    border-left: 3px solid var(--border-strong);
+    color: var(--muted);
+}
+.chat-markdown hr {
+    height: 1px;
+    margin: 22px 0;
+    border: 0;
+    background: var(--border);
+}
+.chat-inline-code {
+    padding: 2px 5px;
+    border-radius: 5px;
+    background: var(--surface-muted);
+    color: inherit;
+    font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
+    font-size: .9em;
+    white-space: break-spaces;
+    overflow-wrap: anywhere;
+}
+.chat-code-block {
+    margin: 18px 0;
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    overflow: hidden;
+    background: var(--surface-muted);
+}
+.chat-code-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 4px 10px 4px 16px;
+    border-bottom: 1px solid var(--border);
+}
+.chat-code-language {
+    font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 600;
+}
+.chat-code-copy {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    flex: 0 0 auto;
+}
+.chat-code-copy.is-copied {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+.chat-code-block pre {
+    max-width: 100%;
+    margin: 0;
+    padding: 14px 16px;
+    border-radius: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+}
+.chat-code-block pre code {
+    display: block;
+    padding: 0;
+    font-family: "SF Mono", "Cascadia Code", Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.7;
+    white-space: pre;
+    overflow-wrap: normal;
+    word-break: normal;
+    tab-size: 4;
+    color: var(--text);
+}
+.chat-markdown .chat-code-error {
+    margin: 0;
+    padding: 0 16px 12px;
+    color: var(--danger);
+    font-size: 12px;
+}
+.chat-table-scroll {
+    max-width: 100%;
+    margin: 16px 0;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    overscroll-behavior-x: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+}
+.chat-table-scroll table {
+    width: 100%;
+    border-spacing: 0;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+.chat-table-scroll th,
+.chat-table-scroll td {
+    min-width: 100px;
+    padding: 9px 13px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+}
+.chat-table-scroll th {
+    background: var(--surface-muted);
+    font-weight: 600;
+}
+.chat-table-scroll tbody tr:last-child td {
+    border-bottom: 0;
+}
+.chat-align-left {
+    text-align: left;
+}
+.chat-align-center {
+    text-align: center;
+}
+.chat-align-right {
+    text-align: right;
+}
+.chat-code-block pre:focus-visible,
+.chat-table-scroll:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -3px;
+}
+.chat-message.role-user {
+    align-self: flex-end;
+    max-width: min(85%, 680px);
+}
+.role-user .chat-message-author {
+    text-align: right;
+}
+.role-user .chat-message-body {
+    background: var(--accent-soft);
+    border: 0;
+    border-radius: 20px;
+    padding: 12px 16px;
+}
+.role-assistant .chat-message-body {
+    padding-right: 0;
+}
+.role-system,
+.role-tool {
+    padding: 12px 16px;
+    background: var(--surface-muted);
+    border-radius: var(--radius-sm);
+}
+.role-system .chat-message-text,
+.role-tool .chat-message-text {
+    color: var(--muted);
+    font-size: 12px;
+}
+.chat-message-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 6px;
+    opacity: .65;
+    transition: opacity 160ms ease;
+}
+.chat-message:hover .chat-message-actions,
+.chat-message:focus-within .chat-message-actions {
+    opacity: 1;
+}
+.chat-message-actions .is-copied {
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+.role-user .chat-message-actions {
+    justify-content: flex-end;
+}
+.chat-attachments,
+.chat-draft-attachments {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.chat-attachments {
+    margin-top: 12px;
+}
+.chat-attachment {
+    display: inline-block;
+    font-size: 11px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 6px 10px;
+    color: var(--muted);
+}
+.chat-message-image {
+    display: block;
+    max-width: min(100%, 360px);
+    max-height: 280px;
+    border-radius: 12px;
+    object-fit: contain;
+}
+.chat-empty {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    min-height: 100%;
+    padding: 36px 0;
+    text-align: center;
+}
+.chat-empty-mark {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 18px;
+    background: var(--button-bg);
+    color: #fff;
+    font-size: 20px;
+    font-weight: 650;
+    margin-bottom: 6px;
+    animation: chat-message-in 320ms cubic-bezier(.22, 1, .36, 1) both;
+}
+.chat-empty h2 {
+    font-size: 24px;
+    font-weight: 650;
+    letter-spacing: -.025em;
+}
+.chat-empty p {
+    color: var(--subtle);
+    font-size: 13px;
+    max-width: 420px;
+}
+.chat-error,
+.chat-notice {
+    max-width: var(--chat-content-width);
+    margin: 8px auto 14px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+.chat-error {
+    color: var(--danger);
+    background: var(--danger-soft);
+}
+.chat-notice {
+    color: var(--muted);
+    background: var(--surface-muted);
+}
+.chat-tool-calls {
+    display: grid;
+    gap: 8px;
+}
+.chat-tool-call {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-size: 12px;
+    color: var(--muted);
+}
+.chat-tool-call summary {
+    cursor: pointer;
+}
+.chat-tool-call pre {
+    max-height: 180px;
+    margin: 10px 0 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.chat-tool-call[open] pre {
+    animation: chat-message-in 180ms cubic-bezier(.22, 1, .36, 1) both;
+}
+.chat-thinking-dots {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: 8px;
+    vertical-align: middle;
+}
+.chat-thinking-dots i {
+    width: 4px;
+    height: 4px;
+    border-radius: 50%;
+    background: currentColor;
+    animation: chat-thinking 1200ms ease-in-out infinite;
+}
+.chat-thinking-dots i:nth-child(2) {
+    animation-delay: 140ms;
+}
+.chat-thinking-dots i:nth-child(3) {
+    animation-delay: 280ms;
+}
+.chat-stream-caret {
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    margin-left: 3px;
+    vertical-align: -.12em;
+    background: var(--accent);
+    animation: chat-caret 900ms ease-in-out infinite;
+}
+@keyframes chat-thinking {
+    0%,
+    70%,
+    100% {
+        opacity: .35;
+        transform: translateY(0);
+    }
+    35% {
+        opacity: 1;
+        transform: translateY(-3px);
+    }
+}
+@keyframes chat-caret {
+    0%,
+    100% {
+        opacity: .25;
+    }
+    50% {
+        opacity: 1;
+    }
+}
+.chat-login {
+    display: grid;
+    gap: 14px;
+    width: min(100%, 340px);
+    text-align: left;
+    margin-top: 14px;
+}
+.chat-login label {
+    display: grid;
+    gap: 7px;
+}
+@media (max-width: 560px) {
+    .chat-empty {
+        padding-block: 24px;
+    }
+}
+@media (max-height: 700px) {
+    .chat-empty {
+        justify-content: flex-start;
+        padding-block: 20px;
+    }
+}
+
+/* Original Heimdall composer: one floating surface changes width and height. */
+.chat-composer-region {
+    position: relative;
+    z-index: 5;
+    flex: 0 0 auto;
+    width: 100%;
+    margin: 0 auto;
+    padding: 14px 28px 18px;
+    background: var(--bg);
+}
+.chat-composer {
+    --island-duration: 420ms;
+    --island-ease: cubic-bezier(.32, .72, 0, 1);
+    position: relative;
+    width: min(480px, 100%);
+    margin: 0 auto;
+    border: 1px solid color-mix(in srgb, var(--text) 6%, transparent);
+    /* A 50px single row clamps this to a 25px semicircle; multiline stays 26px. */
+    border-radius: 26px;
+    background: color-mix(in srgb, var(--surface) 98%, var(--text) 2%);
+    box-shadow:
+        0 8px 22px rgb(1 5 12 / 12%),
+        0 1px 0 rgb(255 255 255 / 4%) inset;
+    transition:
+        width var(--island-duration) var(--island-ease),
+        border-radius var(--island-duration) var(--island-ease),
+        transform 280ms cubic-bezier(.16, 1, .3, 1),
+        border-color 200ms ease,
+        background 200ms ease,
+        box-shadow 280ms ease;
+}
+.chat-composer:focus-within {
+    width: min(720px, 100%);
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
+    box-shadow:
+        0 10px 28px rgb(1 5 12 / 16%),
+        0 1px 0 rgb(255 255 255 / 5%) inset;
+}
+.chat-composer-input {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-height: 48px;
+    /* 32px controls + 8px on each side + the outer border = a 50px capsule. */
+    padding: 8px;
+    border-radius: inherit;
+}
+.chat-composer .chat-draft {
+    display: block;
+    flex: 1 1 0;
+    width: 0;
+    min-width: 0;
+    height: 32px;
+    min-height: 32px;
+    max-height: 144px;
+    padding: 5px 9px;
+    overflow: hidden;
+    scrollbar-width: none;
+    appearance: none;
+    resize: none;
+    border: 0;
+    border-radius: 0;
+    outline: 0;
+    background: transparent;
+    color: var(--text);
+    box-shadow: none;
+    font-size: 15px;
+    line-height: 22px;
+    caret-color: var(--accent);
+    transition: height var(--island-duration) var(--island-ease);
+}
+.chat-composer .chat-draft:focus,
+.chat-composer .chat-draft:focus-visible,
+.chat-composer .chat-draft:disabled {
+    outline: 0;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+.chat-composer .chat-draft::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
+}
+.chat-composer-tool {
+    position: relative;
+    display: grid;
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    padding: 0;
+    place-items: center;
+    flex: 0 0 32px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: color-mix(in srgb, var(--subtle) 82%, transparent);
+    transition: background 180ms ease, color 180ms ease, transform 180ms ease;
+}
+.chat-composer-tool:hover:not(:disabled),
+.chat-composer-tool[aria-expanded="true"] {
+    background: color-mix(in srgb, var(--surface-raised) 74%, transparent);
+    color: var(--text);
+}
+.chat-composer-tool:active:not(:disabled) {
+    transform: scale(.93);
+}
+.chat-composer-tool .icon {
+    width: 16px;
+    height: 16px;
+}
+.chat-attach-glyph {
+    position: relative;
+    display: grid;
+    width: 16px;
+    height: 16px;
+    place-items: center;
+}
+.chat-attach-ready,
+.chat-attach-spinner {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    transition: opacity 130ms ease, transform 190ms cubic-bezier(.22, 1, .36,
+        1);
+}
+.chat-attach-spinner {
+    opacity: 0;
+    transform: scale(.72) rotate(-12deg);
+}
+.chat-attach-spinner::before {
+    content: "";
+    position: absolute;
+    inset: 2px;
+    border: 1px solid currentColor;
+    border-radius: 50%;
+    opacity: .2;
+}
+.chat-attach[aria-busy="true"] .chat-attach-ready {
+    opacity: 0;
+    transform: scale(.72) rotate(-12deg);
+}
+.chat-attach[aria-busy="true"] .chat-attach-spinner {
+    opacity: 1;
+    transform: none;
+}
+.chat-attach[aria-busy="true"] .chat-attach-spinner .icon {
+    animation: chat-composer-spin 800ms linear infinite;
+}
+.chat-composer-action-slot {
+    position: relative;
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    flex: 0 0 32px;
+}
+.chat-send {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    width: 32px;
+    min-width: 32px;
+    height: 32px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: var(--button-bg);
+    color: #fff;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 16%, transparent);
+    transition:
+        opacity 140ms ease,
+        transform 200ms cubic-bezier(.22, 1, .36, 1),
+        background 180ms ease,
+        color 180ms ease,
+        box-shadow 180ms ease,
+        visibility 0s;
+}
+.chat-send .icon {
+    width: 21px;
+    height: 21px;
+}
+.chat-stop-action .icon {
+    width: 16px;
+    height: 16px;
+}
+.chat-send:hover:not(:disabled) {
+    transform: translateY(-1px);
+    background: var(--button-hover);
+}
+.chat-send:active:not(:disabled) {
+    transform: scale(.94);
+}
+.chat-send:disabled {
+    opacity: 1;
+    background: color-mix(in srgb, var(--text) 9%, transparent);
+    color: color-mix(in srgb, var(--subtle) 66%, transparent);
+    box-shadow: none;
+}
+.chat-send-action:not(:disabled) .icon {
+    animation: chat-composer-send-ready 200ms cubic-bezier(.22, 1, .36, 1) both;
+}
+.chat-composer:not([data-sending="true"]) .chat-stop-action,
+.chat-composer[data-sending="true"] .chat-send-action {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: scale(.78) rotate(-8deg);
+    transition:
+        opacity 140ms ease,
+        transform 200ms cubic-bezier(.22, 1, .36, 1),
+        background 180ms ease,
+        color 180ms ease,
+        box-shadow 180ms ease,
+        visibility 0s 200ms;
+}
+.chat-composer:not([data-sending="true"]) .chat-stop-action {
+    transform: scale(.78) rotate(8deg);
+}
+.chat-assets-toggle {
+    animation: chat-composer-asset-in 220ms cubic-bezier(.22, 1, .36, 1) both;
+}
+.chat-assets-count {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    display: grid;
+    min-width: 15px;
+    height: 15px;
+    padding: 0 3px;
+    place-items: center;
+    border: 2px solid var(--surface);
+    border-radius: 999px;
+    background: var(--accent);
+    color: #fff;
+    font-size: 9px;
+    font-weight: 750;
+    line-height: 1;
+}
+/* Secondary surfaces float above the pill; adding images never expands it. */
+.chat-assets-popover {
+    position: absolute;
+    bottom: calc(100% + 12px);
+    left: 0;
+    z-index: 10;
+    display: grid;
+    width: min(360px, 100%);
+    max-height: min(52dvh, 420px);
+    gap: 10px;
+    padding: 12px;
+    overflow-y: auto;
+    border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+    border-radius: 16px;
+    background: var(--surface);
+    box-shadow: 0 16px 48px rgb(0 0 0 / 24%);
+    transform-origin: 28px calc(100% + 12px);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(7px) scale(.97);
+    transition:
+        opacity 140ms ease,
+        transform 220ms cubic-bezier(.22, 1, .36, 1),
+        visibility 0s 220ms;
+}
+.chat-assets-popover[data-open="true"] {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: none;
+    transition-delay: 0s;
+}
+.chat-assets-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 11px;
+    padding-left: 3px;
+}
+.chat-assets-heading small {
+    margin-left: auto;
+    color: var(--subtle);
+    font-size: 10px;
+}
+.chat-assets-popover .chat-draft-attachments {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+.chat-draft-attachment {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    padding: 7px;
+    border: 1px solid var(--border);
+    border-radius: 11px;
+    background: var(--surface-muted);
+    animation: chat-composer-asset-in 220ms cubic-bezier(.22, 1, .36, 1) both;
+}
+.chat-draft-attachment > img {
+    width: 42px;
+    height: 42px;
+    flex: 0 0 42px;
+    object-fit: cover;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+}
+.chat-draft-attachment > span {
+    flex: 1;
+    min-width: 0;
+    color: var(--text);
+    font-size: 12px;
+}
+.chat-draft-attachment > span > small {
+    display: block;
+    margin-top: 2px;
+    color: var(--subtle);
+    font-size: 10px;
+}
+.chat-remove-image:hover:not(:disabled) {
+    background: var(--danger-soft);
+    color: var(--danger);
+}
+.chat-composer-meta {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 3px 12px;
+    min-height: 23px;
+    margin-top: 8px;
+}
+.chat-composer-hint {
+    margin: 0;
+    text-align: center;
+    color: var(--subtle);
+    font-size: 10px;
+}
+.chat-composer-hint kbd {
+    padding: 1px 4px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--muted);
+    font: inherit;
+    box-shadow: none;
+}
+.chat-regenerate {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 6px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--subtle);
+    font-size: 10px;
+    transition: color 160ms ease, background 160ms ease;
+}
+.chat-regenerate:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--surface);
+}
+.chat-regenerate .icon {
+    width: 12px;
+    height: 12px;
+}
+@keyframes chat-composer-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+@keyframes chat-composer-send-ready {
+    from {
+        opacity: .35;
+        transform: translateY(3px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+@keyframes chat-composer-asset-in {
+    from {
+        opacity: 0;
+        transform: translateY(4px) scale(.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+@media (max-width: 800px) {
+    .chat-composer-region {
+        padding-inline: 18px;
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+    }
+}
+@media (max-width: 560px) {
+    .chat-composer-region {
+        padding-inline: 12px;
+    }
+    .chat-composer,
+    .chat-composer:focus-within {
+        width: 100%;
+    }
+    .chat-composer .chat-draft {
+        font-size: 16px;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .chat-composer,
+    .chat-composer *,
+    .chat-composer *::before {
+        animation: none !important;
+        transition: none !important;
+    }
+}
+
+.chat-body {
+    --chat-ease: cubic-bezier(.22, 1, .36, 1);
+    --chat-content-width: 800px;
+    --chat-gutter: clamp(20px, 3vw, 48px);
+    height: 100dvh;
+    overflow: hidden;
+}
+#heimdall-chat {
+    height: 100%;
+}
+.chat-layout {
+    display: grid;
+    grid-template-columns: 260px minmax(0, 1fr);
+    gap: 12px;
+    height: 100%;
+    padding: 12px;
+}
+.chat-sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    min-height: 0;
+    padding: 16px 12px 12px;
+    background: var(--sidebar-bg);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+.chat-sidebar-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-inline: 8px;
+}
+.chat-sidebar-heading h2 {
+    font-size: 16px;
+    letter-spacing: -.02em;
+}
+.chat-new {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 42px;
+    font-size: 13px;
+}
+.chat-history {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    overflow-y: auto;
+    flex: 1;
+    min-height: 0;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+}
+.chat-history li + li {
+    margin-top: 4px;
+}
+.chat-conversation {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 12px;
+    border: 1px solid transparent;
+    border-radius: 18px;
+    color: var(--text);
+    transition: background 160ms ease, border-color 160ms ease, transform 160ms
+        ease;
+    animation: chat-history-in 220ms var(--chat-ease) both;
+}
+.chat-conversation:hover {
+    background: var(--surface-muted);
+    text-decoration: none;
+}
+.chat-conversation.is-active {
+    background: var(--accent-soft);
+    border-color: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+.chat-conversation > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 13px;
+    font-weight: 550;
+}
+.chat-conversation small {
+    color: var(--subtle);
+    font-size: 11px;
+}
+.chat-conversation[aria-disabled="true"] {
+    opacity: .6;
+}
+.chat-conversation-row {
+    position: relative;
+}
+.chat-conversation-row .chat-conversation {
+    padding-right: 72px;
+}
+.chat-conversation-actions {
+    position: absolute;
+    right: 7px;
+    top: 50%;
+    display: flex;
+    gap: 2px;
+    opacity: 0;
+    transform: translateY(-50%);
+    transition: opacity 160ms ease;
+}
+.chat-conversation-row:hover .chat-conversation-actions,
+.chat-conversation-row:focus-within .chat-conversation-actions {
+    opacity: 1;
+}
+.chat-conversation-actions .chat-icon-button {
+    min-width: 28px;
+    width: 28px;
+    height: 28px;
+    padding: 6px;
+}
+.chat-conversation-actions .icon {
+    width: 16px;
+    height: 16px;
+}
+.chat-conversation-actions .chat-delete-button:hover:not(:disabled) {
+    background: var(--danger-soft);
+    color: var(--danger);
+}
+.chat-conversation-dialog {
+    width: min(440px, calc(100vw - 32px));
+    max-height: calc(100dvh - 48px);
+    margin: auto;
+    padding: 24px;
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow-lg);
+}
+.chat-conversation-dialog[open] {
+    animation: chat-dialog-in 220ms var(--chat-ease) both;
+}
+.chat-conversation-dialog::backdrop {
+    background: rgb(0 0 0 / 38%);
+    backdrop-filter: blur(5px);
+    animation: chat-backdrop-in 180ms ease both;
+}
+.chat-conversation-dialog-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+}
+.chat-conversation-dialog-heading h2 {
+    font-size: 18px;
+    font-weight: 600;
+}
+.chat-conversation-description {
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.7;
+    overflow-wrap: anywhere;
+}
+.chat-conversation-name-field {
+    display: grid;
+    gap: 8px;
+    margin-top: 20px;
+}
+.chat-conversation-name-field label {
+    font-size: 12px;
+    font-weight: 550;
+}
+.chat-conversation-name-field small {
+    color: var(--subtle);
+    font-size: 11px;
+}
+.chat-conversation-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 24px;
+}
+.chat-conversation-dialog-actions button {
+    min-width: 88px;
+    min-height: 38px;
+}
+.chat-conversation-dialog-actions .chat-delete-confirm {
+    color: white;
+    background: #b53b45;
+    border-color: #b53b45;
+}
+.chat-conversation-dialog-error {
+    margin-top: 14px;
+    color: var(--danger);
+    font-size: 12px;
+    line-height: 1.6;
+}
+@keyframes chat-dialog-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(.97);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+@keyframes chat-backdrop-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+@media (hover: none) {
+    .chat-conversation-actions {
+        opacity: 1;
+    }
+}
+.chat-history-empty {
+    color: var(--subtle);
+    font-size: 12px;
+    padding: 12px 10px;
+    line-height: 1.7;
+}
+.chat-sidebar-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-top: auto;
+    padding: 12px 8px 0;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+}
+.chat-sidebar-footer > a {
+    color: var(--muted);
+}
+.chat-sidebar-footer > a:hover {
+    color: var(--text);
+}
+.chat-main {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+}
+.chat-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    flex: 0 0 auto;
+    padding: 16px var(--chat-gutter);
+    width: min(calc(var(--chat-content-width) + 2 * var(--chat-gutter)), 100%);
+    min-height: 72px;
+    margin-inline: auto;
+}
+.chat-header-title {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    flex: 1;
+}
+.chat-header-title > div {
+    min-width: 0;
+}
+.chat-title {
+    margin: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 16px;
+    letter-spacing: -.01em;
+}
+.chat-subtitle {
+    margin-top: 3px;
+    color: var(--subtle);
+    font-size: 12px;
+}
+.chat-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex: 0 0 auto;
+}
+.chat-model-field {
+    min-width: 0;
+}
+.chat-model {
+    width: auto;
+    max-width: min(280px, 29vw);
+    min-height: 36px;
+    padding: 7px 28px 7px 13px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background-color: var(--surface);
+    color: var(--text);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    cursor: pointer;
+    transition: background-color 160ms ease, border-color 160ms ease;
+}
+.chat-model:hover:not(:disabled) {
+    border-color: var(--border-strong);
+    background-color: var(--surface-muted);
+}
+.icon {
+    flex: 0 0 auto;
+}
+.chat-icon-button,
+.chat-small-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    border-radius: var(--radius-control);
+    transition: background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+.chat-icon-button {
+    min-width: 36px;
+    height: 36px;
+    padding: 8px;
+}
+.chat-small-button {
+    min-height: 28px;
+    padding: 4px 7px;
+    font-size: 11px;
+}
+.chat-small-button .icon {
+    width: 13px;
+    height: 13px;
+}
+.chat-icon-button:hover:not(:disabled),
+.chat-small-button:hover:not(:disabled) {
+    background: var(--surface-raised);
+    color: var(--text);
+    text-decoration: none;
+}
+.chat-icon-button:active:not(:disabled),
+.chat-small-button:active:not(:disabled) {
+    transform: scale(.94);
+}
+@keyframes chat-history-in {
+    from {
+        opacity: 0;
+        transform: translateX(-5px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+.chat-history-toggle,
+.chat-sidebar-scrim {
+    display: none;
+}
+@media (max-width: 800px) {
+    .chat-body {
+        --chat-gutter: 20px;
+    }
+    .chat-layout {
+        display: block;
+        padding: 0;
+    }
+    .chat-main {
+        height: 100%;
+    }
+    .chat-layout:not(.chat-readonly) .chat-sidebar {
+        display: flex;
+        position: fixed;
+        inset: 12px auto 12px 12px;
+        width: min(280px, calc(100vw - 48px));
+        z-index: 40;
+        visibility: hidden;
+        transform: translateX(calc(-100% - 24px));
+        transition: transform 280ms var(--chat-ease), visibility 280ms;
+    }
+    .chat-layout.history-open .chat-sidebar {
+        visibility: visible;
+        transform: translateX(0);
+    }
+    .chat-sidebar-scrim {
+        display: block;
+        position: fixed;
+        inset: 0;
+        z-index: 30;
+        width: 100%;
+        height: 100%;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: rgb(0 0 0 / 35%);
+        opacity: 0;
+        visibility: hidden;
+        pointer-events: none;
+        transition: opacity 200ms ease, visibility 200ms;
+    }
+    .history-open .chat-sidebar-scrim {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+    }
+    .chat-history-toggle {
+        display: inline-flex;
+    }
+    .chat-header {
+        padding: 12px var(--chat-gutter);
+        min-height: 68px;
+        gap: 12px;
+    }
+    .chat-messages {
+        padding: 20px var(--chat-gutter) 28px;
+    }
+    .chat-empty h2 {
+        font-size: 24px;
+    }
+    .chat-model {
+        max-width: 45vw;
+    }
+    .chat-error {
+        margin-inline: 18px;
+    }
+    .chat-readonly {
+        display: flex;
+        flex-direction: column;
+    }
+    .chat-readonly .chat-sidebar {
+        display: flex;
+        flex: 0 0 auto;
+        max-height: 210px;
+        gap: 8px;
+        border-radius: 0;
+        padding: 12px 16px;
+    }
+    .chat-readonly .chat-history {
+        display: flex;
+        gap: 8px;
+        overflow-x: auto;
+    }
+    .chat-readonly .chat-sidebar-footer {
+        display: none;
+    }
+    .chat-readonly .chat-history li {
+        min-width: 140px;
+        max-width: 210px;
+        margin: 0;
+    }
+    .chat-readonly .chat-main {
+        flex: 1;
+        height: auto;
+        min-height: 0;
+    }
+}
+@media (max-width: 440px) {
+    .chat-body {
+        --chat-gutter: 16px;
+    }
+    .chat-header {
+        padding-inline: 12px;
+    }
+    .chat-messages {
+        padding-inline: var(--chat-gutter);
+    }
+    .chat-message.role-user {
+        max-width: 92%;
+    }
+    .chat-title {
+        font-size: 14px;
+    }
+    .chat-subtitle {
+        display: none;
+    }
+    .chat-model {
+        max-width: 36vw;
+        padding-left: 10px;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .chat-body *,
+    .chat-body *::before,
+    .chat-body *::after {
+        scroll-behavior: auto !important;
+        transition: none !important;
+        animation: none !important;
+    }
+}
+
+.chat-body { height: auto; min-height: 100dvh; overflow: auto; }
+.chat-preview-banner { flex: 0 0 auto; padding: 12px 24px; border-bottom: 1px solid var(--border); background: var(--accent-soft); }
+.chat-preview-banner h2 { font-size: 14px; }
+.chat-preview-banner p { margin-top: 3px; font-size: 12px; }
+.chat-preview-banner a { margin-left: 12px; white-space: nowrap; }
+.chat-body #heimdall-chat { height: min(880px, calc(100dvh - 112px)); min-height: 640px; }
+.chat-body .chat-layout { height: 100%; min-height: 0; }
+.chat-body .chat-composer-hint, .chat-body noscript { display: none; }
+@media (max-width: 700px) {
+    .chat-preview-banner { padding: 12px 16px; }
+    .chat-preview-banner a { display: inline-block; margin-left: 0; margin-right: 12px; }
+    .chat-body #heimdall-chat { height: 800px; min-height: 720px; }
+}
+
+.chat-preview-states { width: min(1100px, 100%); margin: 0 auto; padding: 48px 32px 72px; }
+.chat-preview-states > h2 { font-size: 24px; letter-spacing: -.03em; }
+.chat-preview-states > p { margin-top: 8px; color: var(--muted); font-size: 13px; line-height: 1.8; }
+.chat-preview-state { margin-top: 28px; padding: 22px; border: 1px solid var(--border); border-radius: 24px; background: var(--bg); }
+.chat-preview-state h3 { font-size: 14px; }
+.chat-preview-state > p { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+.chat-preview-state .chat-composer-region { position: relative; inset: auto; padding: 32px 0 14px; }
+.chat-preview-state .chat-composer-hint { display: block; }
+.chat-preview-state .chat-composer[data-preview-state="focus"],
+.chat-preview-state .chat-composer[data-preview-state="long"] {
+    width: min(720px, 100%);
+    transform: translateY(-1px);
+    border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
+    box-shadow: 0 10px 28px rgb(1 5 12 / 16%), 0 1px 0 rgb(255 255 255 / 5%) inset;
+}
+.chat-preview-state .chat-send[data-preview-ready="true"]:disabled {
+    background: var(--button-bg);
+    color: #fff;
+    opacity: 1;
+    box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+@media (max-width: 560px) {
+    .chat-preview-states { padding: 32px 16px 48px; }
+    .chat-preview-state { padding: 18px 12px; }
+}
+</style></head><body class="chat-body"><a class="skip-link" href="#chat-main">跳到对话</a><aside id="preview-top" class="chat-preview-banner" aria-labelledby="preview-title"><h2 id="preview-title">Heimdall Chat · 设计预览 · 示例数据 · 浅色主题</h2><p>可离线阅读，所有操作已禁用。历史条目仅定位当前示例。<a href="#chat-messages">查看消息、代码与表格</a><a href="#composer-states">查看输入框状态</a></p><p>复用实际服务端组件与样式；未加载浏览器交互，不代表真实浏览器验收。</p></aside><div id="heimdall-chat"><div class="chat-layout chat-readonly"><aside class="chat-sidebar" aria-label="会话"><div class="chat-sidebar-heading"><h2>会话</h2><a class="chat-icon-button" href="#preview-top" aria-label="返回管理页面" title="返回管理页面"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg></a></div><button class="chat-new primary-button" type="button" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>新对话</button><ul class="chat-history" aria-label="历史会话"><li class="chat-conversation-row"><a class="chat-conversation is-active" href="#chat-messages" aria-current="page"><span>规划一次周末短途旅行</span><small>2026-09-24</small></a><div class="chat-conversation-actions" aria-label="管理会话"><button type="button" class="chat-icon-button" disabled="" aria-label="重命名 规划一次周末短途旅行" title="重命名"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button><button type="button" class="chat-icon-button chat-delete-button" disabled="" aria-label="删除 规划一次周末短途旅行" title="删除对话"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button></div></li><li class="chat-conversation-row"><a class="chat-conversation" href="#chat-messages"><span>整理一封项目进展邮件</span><small>2026-09-23</small></a><div class="chat-conversation-actions" aria-label="管理会话"><button type="button" class="chat-icon-button" disabled="" aria-label="重命名 整理一封项目进展邮件" title="重命名"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button><button type="button" class="chat-icon-button chat-delete-button" disabled="" aria-label="删除 整理一封项目进展邮件" title="删除对话"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button></div></li><li class="chat-conversation-row"><a class="chat-conversation" href="#chat-messages"><span>读书笔记与下一步计划</span><small>2026-09-22</small></a><div class="chat-conversation-actions" aria-label="管理会话"><button type="button" class="chat-icon-button" disabled="" aria-label="重命名 读书笔记与下一步计划" title="重命名"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button><button type="button" class="chat-icon-button chat-delete-button" disabled="" aria-label="删除 读书笔记与下一步计划" title="删除对话"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 11v6"></path><path d="M14 11v6"></path><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg></button></div></li></ul><footer class="chat-sidebar-footer"><a href="#preview-top">返回管理面板</a><button class="chat-icon-button" type="button" disabled="" aria-label="切换主题" title="切换主题"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"></path></svg></button></footer></aside><section class="chat-main" id="chat-main" role="main" tabindex="-1" aria-labelledby="chat-title"><header class="chat-header"><div class="chat-header-title"><div><h1 class="chat-title" id="chat-title">规划一次周末短途旅行</h1><p class="chat-subtitle">与已配置的模型对话</p></div></div><div class="chat-header-actions"><div class="chat-model-field"><label class="sr-only" for="chat-model">选择模型</label><select id="chat-model" class="chat-model" disabled=""><option value="示例模型 A" selected="">示例模型 A</option><option value="示例模型 B">示例模型 B</option></select></div><button class="chat-icon-button" type="button" aria-label="刷新会话" title="刷新会话" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg></button></div></header><div class="chat-messages" id="chat-messages"><div class="chat-thread"><article class="chat-message role-user"><div class="chat-message-author">你</div><div class="chat-message-body"><p class="chat-message-text">想安排一个轻松的周末短途旅行，不赶行程。可以帮我整理一下计划吗？</p></div><div class="chat-message-actions"><button type="button" class="chat-small-button" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>复制</button></div></article><article class="chat-message role-assistant"><div class="chat-message-author">Heimdall</div><div class="chat-message-body"><div class="chat-markdown"><h3>把两天留给一个地方</h3><p>尽量减少路上的时间，<strong>每天只安排一件主要的事</strong>。</p><div class="chat-table-scroll" role="region" aria-label="消息表格" tabindex="0"><table><thead><tr><th scope="col" class="chat-align-left">时间</th><th scope="col" class="chat-align-left">安排</th><th scope="col" class="chat-align-center">节奏</th></tr></thead><tbody><tr><td class="chat-align-left">周六上午</td><td class="chat-align-left">出发，到住处放好行李</td><td class="chat-align-center">从容</td></tr><tr><td class="chat-align-left">周六下午</td><td class="chat-align-left">沿湖散步，找一家当地小店</td><td class="chat-align-center">放松</td></tr><tr><td class="chat-align-left">周日上午</td><td class="chat-align-left">公园或展览，午饭后返程</td><td class="chat-align-center">留白</td></tr></tbody></table></div><blockquote><p>不必把空闲填满，留一点可以临时改变主意的时间。</p></blockquote></div></div><div class="chat-message-actions"><button type="button" class="chat-small-button" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>复制</button></div></article><article class="chat-message role-user"><div class="chat-message-author">你</div><div class="chat-message-body"><p class="chat-message-text">更喜欢自然风景。这是我收集的一张参考图。也给我一份可以保存的 JSON 行程清单吧。</p><div class="chat-attachments" aria-label="消息附件"><span class="chat-attachment">附件 1 · image/png</span></div></div><div class="chat-message-actions"><button type="button" class="chat-small-button" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>复制</button></div></article><article class="chat-message role-assistant"><div class="chat-message-author">Heimdall</div><div class="chat-message-body"><div class="chat-markdown"><p>可以，把它保存为 <code class="chat-inline-code">weekend.json</code>，之后再补上具体地点。</p><div class="chat-code-block"><div class="chat-code-header"><span class="chat-code-language">json</span><button type="button" class="chat-small-button chat-code-copy" aria-label="复制代码" title="交互加载完成后可复制代码" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></button></div><pre tabindex="0" aria-label="json 代码"><code>{
+  &quot;主题&quot;: &quot;湖边的慢周末&quot;,
+  &quot;周六&quot;: [&quot;出发&quot;, &quot;沿湖散步&quot;, &quot;当地晚餐&quot;],
+  &quot;周日&quot;: [&quot;自由活动&quot;, &quot;午饭后返程&quot;]
+}</code></pre></div><p>出发前只需要确认：</p><ul><li class="chat-task-item"><span class="chat-task-state" role="img" aria-label="已完成">☑</span><p>想去的方向：自然风景</p></li><li class="chat-task-item"><span class="chat-task-state" role="img" aria-label="未完成">☐</span><p>当天天气与步道开放时间</p></li><li class="chat-task-item"><span class="chat-task-state" role="img" aria-label="未完成">☐</span><p>返程班次、饮水和舒适的鞋</p></li></ul></div></div><div class="chat-message-actions"><button type="button" class="chat-small-button" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>复制</button></div></article></div></div><div class="chat-composer-region"><form class="chat-composer" data-sending="false" aria-label="消息输入"><div class="chat-composer-input"><button class="chat-composer-tool chat-attach" type="button" aria-label="添加图片" aria-busy="false" title="添加图片" disabled=""><span class="chat-attach-glyph" aria-hidden="true"><span class="chat-attach-ready"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551"></path></svg></span><span class="chat-attach-spinner"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg></span></span></button><label for="chat-draft" class="sr-only">消息内容</label><textarea id="chat-draft" class="chat-draft" rows="1" placeholder="发送消息给 Heimdall…" aria-describedby="chat-composer-hint" disabled=""></textarea><div class="chat-composer-action-slot"><button class="chat-send chat-send-action" type="submit" aria-label="发送消息" title="发送消息" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg></button><button class="chat-send chat-stop-action" type="button" aria-label="停止生成" aria-hidden="true" tabindex="-1" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect width="18" height="18" x="3" y="3" rx="2"></rect></svg></button></div></div></form><div class="chat-composer-meta"><p class="chat-composer-hint" id="chat-composer-hint">当前为只读视图。交互加载完成后即可发送消息。</p><button class="chat-regenerate" type="button" aria-label="重新生成回复" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"></path><path d="M8 16H3v5"></path></svg>重新生成</button></div><noscript><p class="chat-notice">发送消息需要启用 JavaScript；已有会话仍可阅读。</p></noscript></div></section></div></div><section id="composer-states" class="chat-preview-states" aria-labelledby="composer-states-title"><h2 id="composer-states-title">灵动输入框</h2><p>下方为四种静态状态样例，复用聊天页样式；控件已禁用，不连接会话。 动画时序与实际键盘、触控体验需在运行中的聊天页验收。</p><article class="chat-preview-state"><h3>等待输入</h3><p>收拢为居中的轻巧胶囊，图片按钮与发送箭头留在同一行。</p><div class="chat-composer-region"><form class="chat-composer" data-preview-state="rest" data-sending="false" aria-label="等待输入静态样例"><div class="chat-composer-input"><button class="chat-composer-tool chat-attach" type="button" aria-label="添加图片" aria-busy="false" disabled=""><span class="chat-attach-glyph" aria-hidden="true"><span class="chat-attach-ready"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551"></path></svg></span><span class="chat-attach-spinner"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg></span></span></button><label class="sr-only" for="preview-draft-rest">示例消息</label><textarea id="preview-draft-rest" class="chat-draft" rows="1" placeholder="发送消息给 Heimdall…" aria-describedby="preview-draft-rest-hint" disabled=""></textarea><div class="chat-composer-action-slot"><button class="chat-send chat-send-action" type="submit" aria-label="发送消息" data-preview-ready="false" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg></button><button class="chat-send chat-stop-action" type="button" aria-label="停止生成" aria-hidden="true" data-preview-ready="false" tabindex="-1" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect width="18" height="18" x="3" y="3" rx="2"></rect></svg></button></div></div></form><div class="chat-composer-meta"><p id="preview-draft-rest-hint" class="chat-composer-hint">Enter 发送，Shift + Enter 换行</p></div></div></article><article class="chat-preview-state"><h3>开始输入</h3><p>聚焦后向两侧展开，输入区域轻轻抬起，发送箭头亮起。</p><div class="chat-composer-region"><form class="chat-composer" data-preview-state="focus" data-sending="false" aria-label="开始输入静态样例"><div class="chat-composer-input"><button class="chat-composer-tool chat-attach" type="button" aria-label="添加图片" aria-busy="false" disabled=""><span class="chat-attach-glyph" aria-hidden="true"><span class="chat-attach-ready"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551"></path></svg></span><span class="chat-attach-spinner"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg></span></span></button><label class="sr-only" for="preview-draft-focus">示例消息</label><textarea id="preview-draft-focus" class="chat-draft" rows="1" placeholder="发送消息给 Heimdall…" aria-describedby="preview-draft-focus-hint" disabled="">帮我整理一下周末的旅行安排。</textarea><div class="chat-composer-action-slot"><button class="chat-send chat-send-action" type="submit" aria-label="发送消息" data-preview-ready="true" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg></button><button class="chat-send chat-stop-action" type="button" aria-label="停止生成" aria-hidden="true" data-preview-ready="false" tabindex="-1" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect width="18" height="18" x="3" y="3" rx="2"></rect></svg></button></div></div></form><div class="chat-composer-meta"><p id="preview-draft-focus-hint" class="chat-composer-hint">Enter 发送，Shift + Enter 换行</p></div></div></article><article class="chat-preview-state"><h3>多行内容</h3><p>文字增加时向上生长，底部位置保持稳定，工具按钮仍在同一块表面。</p><div class="chat-composer-region"><form class="chat-composer" data-preview-state="long" data-sending="false" aria-label="多行内容静态样例"><div class="chat-composer-input"><button class="chat-composer-tool chat-attach" type="button" aria-label="添加图片" aria-busy="false" disabled=""><span class="chat-attach-glyph" aria-hidden="true"><span class="chat-attach-ready"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551"></path></svg></span><span class="chat-attach-spinner"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg></span></span></button><label class="sr-only" for="preview-draft-long">示例消息</label><textarea id="preview-draft-long" class="chat-draft" rows="1" placeholder="发送消息给 Heimdall…" aria-describedby="preview-draft-long-hint" style="height:116px" disabled="">想找一个能慢慢散步的地方，最好靠近湖边。
+周六下午出发，周日晚饭前回来。
+不用塞满行程，留一点休息和发呆的时间。
+可以先帮我列一个简单的安排吗？</textarea><div class="chat-composer-action-slot"><button class="chat-send chat-send-action" type="submit" aria-label="发送消息" data-preview-ready="true" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg></button><button class="chat-send chat-stop-action" type="button" aria-label="停止生成" aria-hidden="true" data-preview-ready="false" tabindex="-1" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect width="18" height="18" x="3" y="3" rx="2"></rect></svg></button></div></div></form><div class="chat-composer-meta"><p id="preview-draft-long-hint" class="chat-composer-hint">Enter 发送，Shift + Enter 换行</p></div></div></article><article class="chat-preview-state"><h3>正在生成</h3><p>发送箭头切换为停止按钮，占用同一个圆形位置，输入框不会左右跳动。</p><div class="chat-composer-region"><form class="chat-composer" data-preview-state="streaming" data-sending="true" aria-label="正在生成静态样例"><div class="chat-composer-input"><button class="chat-composer-tool chat-attach" type="button" aria-label="添加图片" aria-busy="false" disabled=""><span class="chat-attach-glyph" aria-hidden="true"><span class="chat-attach-ready"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m16 6-8.414 8.586a2 2 0 0 0 2.829 2.829l8.414-8.586a4 4 0 1 0-5.657-5.657l-8.379 8.551a6 6 0 1 0 8.485 8.485l8.379-8.551"></path></svg></span><span class="chat-attach-spinner"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg></span></span></button><label class="sr-only" for="preview-draft-streaming">示例消息</label><textarea id="preview-draft-streaming" class="chat-draft" rows="1" placeholder="发送消息给 Heimdall…" aria-describedby="preview-draft-streaming-hint" disabled=""></textarea><div class="chat-composer-action-slot"><button class="chat-send chat-send-action" type="submit" aria-label="发送消息" aria-hidden="true" data-preview-ready="false" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg></button><button class="chat-send chat-stop-action" type="button" aria-label="停止生成" data-preview-ready="true" tabindex="-1" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect width="18" height="18" x="3" y="3" rx="2"></rect></svg></button></div></div></form><div class="chat-composer-meta"><p id="preview-draft-streaming-hint" class="chat-composer-hint">正在生成回复…</p></div></div></article></section></body></html>

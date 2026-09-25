@@ -1,0 +1,1 @@
+export const MAX_TOOL_ARGUMENT_CHARS = 32_768;

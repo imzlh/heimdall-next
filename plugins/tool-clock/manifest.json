@@ -1,0 +1,15 @@
+{
+    "id": "heimdall.tool.clock",
+    "version": "0.1.0",
+    "apiVersion": "1",
+    "name": "当前时间",
+    "description": "为 Chat 提供当前时间工具，无需联网即可使用。",
+    "kind": "tool",
+    "trust": "trusted",
+    "capabilities": ["current_time"],
+    "permissions": {
+        "network": false,
+        "filesystem": "none",
+        "subprocess": false
+    }
+}

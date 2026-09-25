@@ -1,0 +1,43 @@
+{
+    "id": "heimdall.preset.newapi",
+    "version": "0.1.0",
+    "apiVersion": "1",
+    "name": "NewAPI source preset",
+    "description": "在添加渠道的模态内快速填写 NewAPI 地址和密钥。",
+    "kind": "preset",
+    "presetPage": {
+        "modulePath": "/admin/assets/plugins/newapi-setup.js"
+    },
+    "trust": "trusted",
+    "capabilities": [
+        "source.openai-compatible"
+    ],
+    "permissions": {
+        "network": false,
+        "filesystem": "none",
+        "subprocess": false
+    },
+    "configSchema": {
+        "version": 1,
+        "id": "heimdall.preset.newapi",
+        "title": "NewAPI 快速配置",
+        "fields": [
+            {
+                "type": "string",
+                "name": "baseUrl",
+                "label": "NewAPI 服务地址",
+                "format": "url",
+                "required": true,
+                "placeholder": "https://your-newapi.example/v1",
+                "help": "填写 NewAPI 的 API 地址，通常以 /v1 结尾。"
+            },
+            {
+                "type": "secret",
+                "name": "apiKey",
+                "label": "API 密钥",
+                "preserveOnBlank": true,
+                "help": "密钥只写入，不会返回页面。"
+            }
+        ]
+    }
+}

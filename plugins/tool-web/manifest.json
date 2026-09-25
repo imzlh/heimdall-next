@@ -1,0 +1,15 @@
+{
+    "id": "heimdall.tool.web",
+    "version": "0.1.0",
+    "apiVersion": "1",
+    "name": "网页搜索与抓取",
+    "description": "为 Chat 提供网页搜索和正文抓取；停用后，后续对话不再暴露这些工具。",
+    "kind": "tool",
+    "trust": "trusted",
+    "capabilities": ["fetch_url", "web_search"],
+    "permissions": {
+        "network": true,
+        "filesystem": "none",
+        "subprocess": false
+    }
+}

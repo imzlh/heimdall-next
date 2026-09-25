@@ -1,0 +1,347 @@
+/* Page frame follows the floating sidebar of the original Heimdall. */
+.admin-sidebar {
+    position: fixed;
+    inset: 12px auto 12px 12px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    width: 224px;
+    padding: 24px 14px 14px;
+    border-radius: 24px;
+    background: var(--sidebar-bg);
+    box-shadow: 4px 0 24px rgb(0 0 0 / 4%);
+}
+.admin-header {
+    padding: 0 6px;
+}
+.admin-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.25;
+}
+.admin-brand:hover {
+    text-decoration: none;
+}
+.admin-brand small {
+    display: block;
+    color: var(--subtle);
+    font-size: 11px;
+    font-weight: 400;
+    margin-top: 5px;
+}
+.brand-mark {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    border: 1px solid var(--border-strong);
+    border-radius: 14px;
+    background: var(--text);
+    color: var(--bg);
+    font-size: 15px;
+    font-weight: 800;
+}
+.admin-nav {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 5px;
+    min-height: 0;
+    overflow: auto;
+}
+.host-badge {
+    padding: 0 12px 8px;
+    color: var(--subtle);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .08em;
+}
+.admin-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    flex-shrink: 0;
+    min-height: 42px;
+    padding: 10px 13px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.5;
+    transition: background var(--motion-fast) ease,
+        color var(--motion-fast) ease, border-color var(--motion-fast) ease;
+}
+.admin-nav-link:hover {
+    color: var(--text);
+    background: var(--surface-muted);
+    text-decoration: none;
+}
+.admin-nav-link.active,
+.admin-nav-link[aria-current="page"] {
+    color: var(--accent);
+    background: var(--accent-soft);
+    font-weight: 600;
+}
+.nav-icon {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 17px;
+    transition: transform 180ms var(--motion-ease);
+}
+.nav-label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.plugin-navigation {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-top: 18px;
+}
+.plugin-navigation::before {
+    content: "插件扩展";
+    padding: 0 12px 8px;
+    color: var(--subtle);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .08em;
+}
+.sidebar-footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 6px 0;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+}
+.sidebar-monogram {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    color: var(--subtle);
+    font-size: 11px;
+}
+.sidebar-footer strong {
+    display: block;
+    font-size: 11px;
+    font-weight: 550;
+    color: var(--text);
+}
+.sidebar-footer small {
+    display: block;
+    color: var(--subtle);
+    font-size: 10px;
+}
+.sidebar-version {
+    margin-left: auto;
+    color: var(--subtle);
+    font-size: 9px;
+    letter-spacing: .08em;
+}
+.admin-main {
+    margin-left: 248px;
+    padding: 20px clamp(24px, 2.5vw, 40px) 48px;
+    min-width: 0;
+}
+.console-content {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-width: 1320px;
+    margin: 0 auto;
+    min-width: 0;
+}
+.console-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    min-height: 42px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+}
+.breadcrumb {
+    color: var(--subtle);
+    font-size: 12px;
+}
+.topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+.topbar-actions .text-button {
+    min-height: 32px;
+    padding: 5px 12px;
+    background: transparent;
+    border-color: transparent;
+    font-size: 12px;
+}
+.console-panels {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    min-width: 0;
+}
+.page-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    min-height: 64px;
+}
+.page-heading h1 {
+    margin: 0 0 6px;
+    font-size: 26px;
+}
+.page-heading p:not(.eyebrow) {
+    color: var(--subtle);
+    font-size: 13px;
+}
+.page-heading > .config-actions {
+    flex-shrink: 0;
+}
+.page-heading .eyebrow {
+    display: none;
+}
+@keyframes admin-page-in {
+    from {
+        opacity: 0;
+        transform: translateY(3px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+@keyframes admin-sidebar-in {
+    from {
+        opacity: 0;
+        transform: translateX(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+@media (prefers-reduced-motion: no-preference) {
+    .console-content {
+        animation: admin-page-in var(--motion-fast) ease-out;
+    }
+    .admin-sidebar {
+        animation: admin-sidebar-in var(--motion-enter) var(--motion-ease);
+    }
+}
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion:
+    no-preference) {
+    .admin-nav-link:hover .nav-icon,
+    .admin-nav-link:focus-visible .nav-icon {
+        transform: translateX(1px);
+    }
+}
+@media (min-width: 1800px) {
+    .admin-main {
+        padding-inline: 56px;
+    }
+}
+@media (max-width: 1100px) {
+    .admin-sidebar {
+        width: 204px;
+        padding-inline: 13px;
+    }
+    .admin-main {
+        margin-left: 226px;
+        padding-inline: 24px;
+    }
+}
+@media (max-width: 800px) {
+    .admin-sidebar {
+        position: relative;
+        inset: auto;
+        width: auto;
+        margin: 10px;
+        padding: 16px 14px 10px;
+        gap: 14px;
+        border-radius: 20px;
+    }
+    .admin-header {
+        padding: 0 4px;
+    }
+    .admin-nav {
+        flex-direction: row;
+        flex: none;
+        overflow-x: auto;
+        gap: 5px;
+        padding-bottom: 2px;
+    }
+    .admin-nav-link {
+        min-height: 38px;
+        padding: 8px 13px;
+        white-space: nowrap;
+    }
+    .nav-label {
+        overflow-wrap: normal;
+    }
+    .host-badge,
+    .sidebar-footer {
+        display: none;
+    }
+    .plugin-navigation {
+        flex-direction: row;
+        margin: 0 0 0 6px;
+        padding-left: 10px;
+        border-left: 1px solid var(--border);
+    }
+    .plugin-navigation::before {
+        display: none;
+    }
+    .admin-main {
+        margin-left: 0;
+        padding: 14px 22px 40px;
+    }
+    .console-content,
+    .console-panels {
+        gap: 18px;
+    }
+    .page-heading h1 {
+        font-size: 25px;
+    }
+}
+@media (max-width: 520px) {
+    .admin-main {
+        padding-inline: 16px;
+    }
+    .console-toolbar {
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+    .breadcrumb {
+        font-size: 11px;
+    }
+    .page-heading {
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 16px;
+    }
+    .page-heading > .config-actions {
+        width: 100%;
+    }
+    .page-heading h1 {
+        font-size: 24px;
+    }
+    .topbar-actions {
+        margin-left: auto;
+    }
+    .topbar-actions .text-button {
+        padding-inline: 10px;
+    }
+}

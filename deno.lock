@@ -1,0 +1,43 @@
+{
+  "version": "5",
+  "specifiers": {
+    "jsr:@hono/hono@*": "4.9.6",
+    "jsr:@hono/hono@4.12.16": "4.12.16",
+    "jsr:@hono/hono@4.9.6": "4.9.6",
+    "npm:entities@6.0.1": "6.0.1",
+    "npm:lucide@1.47.0": "1.47.0",
+    "npm:marked@15.0.12": "15.0.12"
+  },
+  "jsr": {
+    "@hono/hono@4.9.6": {
+      "integrity": "b85abb0013d167a290b1808d1d4d542dee269df31d4f47122023259fdd7e184b"
+    },
+    "@hono/hono@4.12.16": {
+      "integrity": "d3a3ca0d713852c91881541e74d5ffac0b4af38b8c1285e8ed5ee47b68c58f94"
+    }
+  },
+  "npm": {
+    "entities@6.0.1": {
+      "integrity": "sha512-aN97NXWF6AWBTahfVOIrB/NShkzi5H7F9r1s9mD3cDj4Ko5f2qhhVoYMibXF7GlLveb/D2ioWay8lxI97Ven3g==",
+      "tarball": "https://registry.npmmirror.com/entities/-/entities-6.0.1.tgz"
+    },
+    "lucide@1.47.0": {
+      "integrity": "sha512-gJoVJM5fvpBDGZTvhpJS9IEurz85HbD+wgOlCkXCIw35tHrqTxSdIYUN9sXvs7Aw3NCl67A+nlotNyoU4u7zOQ==",
+      "tarball": "https://registry.npmmirror.com/lucide/-/lucide-1.47.0.tgz"
+    },
+    "marked@15.0.12": {
+      "integrity": "sha512-8dD6FusOQSrpv9Z1rdNMdlSgQOIP880DHqnohobOmYLElGEqAL/JvxvuxZO16r4HtjTlfPRDC1hbvxC9dPN2nA==",
+      "bin": true,
+      "tarball": "https://registry.npmmirror.com/marked/-/marked-15.0.12.tgz"
+    }
+  },
+  "workspace": {
+    "dependencies": [
+      "jsr:@hono/hono@4.12.16",
+      "jsr:@std/assert@1.0.19",
+      "npm:entities@6.0.1",
+      "npm:lucide@1.47.0",
+      "npm:marked@15.0.12"
+    ]
+  }
+}

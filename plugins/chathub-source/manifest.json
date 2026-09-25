@@ -1,0 +1,112 @@
+{
+    "id": "heimdall.source.chathub",
+    "version": "0.1.0",
+    "apiVersion": "1",
+    "name": "Microsoft ChatHub",
+    "description": "通过 Microsoft ChatHub 连接上游对话，支持流式输出与工具调用。",
+    "kind": "source",
+    "trust": "trusted",
+    "capabilities": ["generation.create", "streaming", "tools"],
+    "permissions": {
+        "network": true,
+        "filesystem": "none",
+        "subprocess": false
+    },
+    "ui": [
+        {
+            "pluginId": "heimdall.source.chathub",
+            "id": "connection-status",
+            "slot": "source.status",
+            "sourcePluginId": "heimdall.source.chathub",
+            "title": "ChatHub 状态",
+            "schema": {
+                "blocks": [
+                    {
+                        "kind": "badge",
+                        "label": "状态未知",
+                        "labelFrom": ["source", "state"]
+                    },
+                    {
+                        "kind": "metric",
+                        "label": "已发布模型",
+                        "value": "—",
+                        "valueFrom": ["source", "modelCount"],
+                        "unit": "个"
+                    },
+                    {
+                        "kind": "text",
+                        "text": "尚无探测结果",
+                        "textFrom": ["source", "probeStatus"]
+                    }
+                ]
+            }
+        }
+    ],
+    "configSchema": {
+        "version": 1,
+        "id": "heimdall.source.chathub",
+        "title": "Microsoft ChatHub",
+        "fields": [
+            {
+                "type": "string",
+                "name": "oid",
+                "label": "Microsoft 用户 OID",
+                "required": true
+            },
+            {
+                "type": "string",
+                "name": "tid",
+                "label": "租户 ID",
+                "required": true
+            },
+            {
+                "type": "secret",
+                "name": "accessToken",
+                "label": "访问令牌",
+                "required": true,
+                "preserveOnBlank": true
+            },
+            {
+                "type": "secret",
+                "name": "refreshToken",
+                "label": "刷新令牌",
+                "preserveOnBlank": true,
+                "help": "配置后会在访问令牌即将过期时自动续期。"
+            },
+            { "type": "string", "name": "accountEmail", "label": "账号邮箱" },
+            {
+                "type": "string",
+                "name": "expiresAt",
+                "label": "令牌过期时间",
+                "help": "ISO 时间；留空时读取 JWT exp。"
+            },
+            {
+                "type": "string",
+                "name": "models",
+                "label": "模型",
+                "default": "claude-sonnet-reasoning,gpt-5.6-reasoning,gpt-5.5-reasoning",
+                "help": "多个模型用逗号分隔。"
+            },
+            {
+                "type": "string",
+                "name": "endpoint",
+                "label": "WebSocket 地址",
+                "default": "wss://substrate.office.com/m365Copilot/Chathub"
+            },
+            { "type": "string", "name": "licenseType", "label": "许可证类型" },
+            { "type": "string", "name": "scenario", "label": "场景" },
+            {
+                "type": "string",
+                "name": "locale",
+                "label": "语言",
+                "default": "en-us"
+            },
+            {
+                "type": "string",
+                "name": "timezone",
+                "label": "时区",
+                "default": "UTC"
+            }
+        ]
+    }
+}

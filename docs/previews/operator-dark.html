@@ -1,0 +1,2506 @@
+<!doctype html>
+<html lang="zh" data-theme="dark"><head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Heimdall · 深色设计预览</title><meta name="color-scheme" content="light dark"/><meta http-equiv="Content-Security-Policy" content="default-src &#39;none&#39;; style-src &#39;unsafe-inline&#39;; form-action &#39;none&#39;; base-uri &#39;none&#39;"/><style>/* Heimdall's original visual language, shared by SSR and browser islands. */
+:root {
+    color-scheme: light;
+    --bg: #f5f6f7;
+    --surface: #ffffff;
+    --surface-muted: #f1f2f3;
+    --surface-raised: #e9ebee;
+    --sidebar-bg: #ffffff;
+    --text: #15181e;
+    --muted: #4d525c;
+    --subtle: #6d737e;
+    --border: #d9dce1;
+    --border-strong: #b9bec7;
+    --accent: #2264d6;
+    --accent-hover: #174da9;
+    --accent-soft: #edf4ff;
+    --button-bg: #2264d6;
+    --button-hover: #174da9;
+    --success: #117a54;
+    --success-soft: #e8f5ef;
+    --warning: #9a5b08;
+    --warning-soft: #fcf3e3;
+    --danger: #b53b45;
+    --danger-soft: #fbebed;
+    --radius: 22px;
+    --radius-sm: 14px;
+    --radius-control: 999px;
+    --shadow: 0 1px 2px rgb(97 104 117 / 8%);
+    --shadow-lg: 0 18px 48px rgb(42 47 55 / 14%);
+    --motion-fast: 160ms;
+    --motion-enter: 220ms;
+    --motion-exit: 150ms;
+    --motion-ease: cubic-bezier(.22, 1, .36, 1);
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+    line-height: 1.6;
+    font-variant-numeric: tabular-nums;
+    color: var(--text);
+    background: var(--bg);
+}
+:root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #0d0e12;
+    --surface: #15181e;
+    --surface-muted: #1b1f26;
+    --surface-raised: #20242c;
+    --sidebar-bg: #111318;
+    --text: #f3f4f6;
+    --muted: #a3a9b4;
+    --subtle: #848c9a;
+    --border: #2b3039;
+    --border-strong: #414956;
+    --accent: #2b89ff;
+    --accent-hover: #5aa3ff;
+    --accent-soft: #17283f;
+    --success: #36c997;
+    --success-soft: #162c27;
+    --warning: #e5a84b;
+    --warning-soft: #30271b;
+    --danger: #f06b72;
+    --danger-soft: #321e25;
+    --shadow: 0 1px 2px rgb(0 0 0 / 18%);
+    --shadow-lg: 0 18px 50px rgb(0 0 0 / 32%);
+}
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme]) {
+        color-scheme: dark;
+        --bg: #0d0e12;
+        --surface: #15181e;
+        --surface-muted: #1b1f26;
+        --surface-raised: #20242c;
+        --sidebar-bg: #111318;
+        --text: #f3f4f6;
+        --muted: #a3a9b4;
+        --subtle: #848c9a;
+        --border: #2b3039;
+        --border-strong: #414956;
+        --accent: #2b89ff;
+        --accent-hover: #5aa3ff;
+        --accent-soft: #17283f;
+        --success: #36c997;
+        --success-soft: #162c27;
+        --warning: #e5a84b;
+        --warning-soft: #30271b;
+        --danger: #f06b72;
+        --danger-soft: #321e25;
+        --shadow: 0 1px 2px rgb(0 0 0 / 18%);
+        --shadow-lg: 0 18px 50px rgb(0 0 0 / 32%);
+    }
+}
+
+* {
+    box-sizing: border-box;
+}
+[hidden] {
+    display: none !important;
+}
+body {
+    margin: 0;
+    min-width: 320px;
+    -webkit-font-smoothing: antialiased;
+}
+button,
+input,
+select,
+textarea {
+    font: inherit;
+}
+button,
+a,
+input,
+select,
+textarea {
+    -webkit-tap-highlight-color: transparent;
+}
+button {
+    cursor: pointer;
+}
+button:disabled {
+    opacity: .5;
+    cursor: not-allowed;
+    box-shadow: none;
+}
+a {
+    color: var(--accent);
+    text-decoration: none;
+}
+a:hover {
+    text-decoration: underline;
+}
+:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 3px;
+}
+::selection {
+    background: var(--accent-soft);
+    color: var(--text);
+}
+h1,
+h2,
+h3,
+p {
+    margin: 0;
+}
+h1 {
+    font-size: 28px;
+    line-height: 1.25;
+    font-weight: 650;
+    letter-spacing: -.025em;
+}
+h2 {
+    font-size: 16px;
+    line-height: 1.5;
+    font-weight: 650;
+}
+h3 {
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.5;
+}
+p {
+    color: var(--muted);
+}
+small {
+    font-size: 12px;
+}
+code,
+pre {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 12px;
+}
+pre {
+    overflow: auto;
+    max-height: 360px;
+    padding: 16px;
+    background: var(--surface-muted);
+    border-radius: var(--radius-sm);
+}
+svg {
+    flex-shrink: 0;
+}
+.eyebrow {
+    color: var(--subtle);
+    font-size: 10px;
+    font-weight: 650;
+    letter-spacing: .06em;
+}
+.muted-text,
+.field-help,
+.section-hint {
+    color: var(--subtle);
+    font-size: 12px;
+}
+.field-error,
+.form-error,
+.error-message {
+    color: var(--danger);
+    font-size: 12px;
+}
+.field-required {
+    color: var(--subtle);
+    font-size: 10px;
+    font-weight: 400;
+}
+.panel {
+    min-width: 0;
+    padding: 20px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+}
+.panel-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 16px;
+}
+.panel-heading p {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--subtle);
+}
+.panel-count {
+    color: var(--subtle);
+    font-size: 12px;
+    flex-shrink: 0;
+}
+.section-link {
+    font-size: 12px;
+    font-weight: 500;
+}
+.empty-state {
+    padding: 24px 20px;
+    color: var(--subtle);
+}
+.empty-state h3 {
+    color: var(--text);
+    margin-bottom: 6px;
+}
+.empty-state .primary-button {
+    margin-top: 16px;
+}
+.notice,
+.form-error,
+.form-success {
+    padding: 12px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}
+.notice {
+    color: var(--muted);
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+}
+.form-error {
+    background: var(--danger-soft);
+}
+.form-success {
+    background: var(--success-soft);
+    color: var(--success);
+}
+form > .form-error,
+form > .form-success,
+.config-panel > .form-error,
+.config-panel > .form-success {
+    margin-top: 16px;
+}
+.status-chip,
+.slot-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 3px 9px;
+    border-radius: 999px;
+    font-size: 11px;
+    line-height: 1.6;
+    font-weight: 500;
+    max-width: 100%;
+    white-space: nowrap;
+}
+.status-chip::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+}
+.chip-green,
+.tone-success {
+    color: var(--success);
+    background: var(--success-soft);
+}
+.chip-muted,
+.tone-neutral {
+    color: var(--muted);
+    background: var(--surface-muted);
+}
+.chip-amber,
+.tone-warning {
+    color: var(--warning);
+    background: var(--warning-soft);
+}
+.chip-red,
+.tone-danger {
+    color: var(--danger);
+    background: var(--danger-soft);
+}
+.primary-button,
+.text-button,
+.secondary-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 36px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    padding: 7px 14px;
+    font-size: 13px;
+    font-weight: 550;
+    line-height: 1.5;
+    text-align: center;
+    white-space: nowrap;
+    transition: background var(--motion-fast) ease,
+        border-color var(--motion-fast) ease, color var(--motion-fast) ease,
+        box-shadow var(--motion-fast) ease, opacity var(--motion-fast) ease,
+        transform var(--motion-fast) var(--motion-ease);
+}
+.primary-button {
+    color: #fff;
+    background: var(--button-bg);
+}
+.primary-button:hover:not(:disabled) {
+    background: var(--button-hover);
+    text-decoration: none;
+}
+.text-button,
+.secondary-button {
+    color: var(--muted);
+    background: var(--surface);
+    border-color: var(--border);
+}
+.text-button:hover:not(:disabled),
+.secondary-button:hover:not(:disabled) {
+    color: var(--text);
+    border-color: var(--border-strong);
+    background: var(--surface-muted);
+    text-decoration: none;
+}
+.primary-button:active:not(:disabled),
+.text-button:active:not(:disabled),
+.secondary-button:active:not(:disabled) {
+    transform: translateY(1px);
+}
+.icon-button {
+    display: inline-flex;
+    flex: 0 0 36px;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    color: var(--muted);
+    background: transparent;
+    transition: background var(--motion-fast) ease, color var(--motion-fast)
+        ease;
+}
+.icon-button:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--surface-muted);
+}
+.icon {
+    display: block;
+    flex-shrink: 0;
+}
+label {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 500;
+}
+input,
+select,
+textarea {
+    width: 100%;
+    min-width: 0;
+    min-height: 40px;
+    padding: 9px 12px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    color: var(--text);
+    background: var(--bg);
+    font-size: 13px;
+    line-height: 1.5;
+    transition: border-color var(--motion-fast) ease,
+        background var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+input::placeholder,
+textarea::placeholder {
+    color: var(--subtle);
+    opacity: .85;
+}
+input:focus,
+select:focus,
+textarea:focus {
+    border-color: var(--accent);
+    outline: 2px solid var(--accent-soft);
+    outline-offset: 0;
+}
+input[aria-invalid="true"],
+select[aria-invalid="true"],
+textarea[aria-invalid="true"] {
+    border-color: var(--danger);
+}
+input:disabled,
+select:disabled,
+textarea:disabled {
+    background: var(--surface-muted);
+    color: var(--subtle);
+    cursor: not-allowed;
+    opacity: .8;
+}
+textarea {
+    resize: vertical;
+    min-height: 104px;
+}
+input[type="checkbox"],
+input[type="radio"] {
+    width: 17px;
+    height: 17px;
+    min-height: 0;
+    margin: 3px 0;
+    accent-color: var(--accent);
+}
+.field-grid,
+.schema-form,
+.schema-group {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 20px 24px;
+}
+.schema-group {
+    grid-column: 1 / -1;
+    border: 0;
+    border-top: 1px solid var(--border);
+    padding: 20px 0 0;
+    margin: 6px 0 0;
+    min-width: 0;
+}
+.schema-group legend {
+    padding: 0 12px 0 0;
+    font-size: 13px;
+    font-weight: 600;
+}
+.schema-group > .field-help {
+    grid-column: 1 / -1;
+}
+.schema-field {
+    min-width: 0;
+    display: grid;
+    align-content: start;
+    justify-items: stretch;
+    gap: 7px;
+}
+.schema-field > label {
+    flex-direction: row;
+    align-items: baseline;
+    gap: 6px;
+}
+.schema-field:has(input[type="checkbox"]) {
+    background: var(--surface-muted);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+}
+.wide-field,
+.schema-group > legend {
+    grid-column: 1 / -1;
+}
+.secret-control,
+.authorization-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.secret-control input {
+    flex: 1;
+}
+.authorization-control {
+    flex-wrap: wrap;
+}
+.config-mode {
+    max-width: 360px;
+    margin-bottom: 24px;
+}
+.preset-help {
+    margin: -10px 0 22px;
+}
+.preset-preview {
+    margin-top: 20px;
+}
+.config-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+form > .config-actions,
+.settings-form > .config-actions {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+}
+.config-actions > span {
+    color: var(--subtle);
+    font-size: 12px;
+}
+.config-panel {
+    border: 1px solid var(--border);
+}
+.settings-form {
+    max-width: 760px;
+}
+.settings-summary {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 0;
+    margin: 0;
+}
+.settings-summary dt,
+.settings-summary dd {
+    border-bottom: 1px solid var(--border);
+    padding: 16px 0;
+}
+.settings-summary dt {
+    color: var(--muted);
+    font-size: 13px;
+}
+.settings-summary dd {
+    margin: 0;
+    text-align: right;
+    font-size: 13px;
+}
+.auth-panel {
+    max-width: 520px;
+}
+.auth-panel > p {
+    margin: 8px 0 22px;
+    font-size: 13px;
+}
+.auth-panel form {
+    display: grid;
+    gap: 12px;
+}
+.auth-form {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+    max-width: 580px;
+}
+.auth-form label {
+    flex: 1;
+}
+.source-dialog {
+    width: min(520px, calc(100vw - 32px));
+    max-height: calc(100dvh - 40px);
+    padding: 24px;
+    border: 1px solid var(--border);
+    border-radius: 24px;
+    box-shadow: var(--shadow-lg);
+    color: var(--text);
+    background: var(--surface);
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+}
+.source-create-dialog {
+    width: min(560px, calc(100vw - 32px));
+    height: min(520px, calc(100dvh - 48px));
+    max-height: calc(100dvh - 48px);
+    padding: 28px;
+    overflow: hidden;
+}
+.source-create-dialog[open],
+.source-create-dialog.preview-dialog {
+    display: flex;
+    flex-direction: column;
+}
+.source-dialog::backdrop {
+    background: rgb(6 10 18 / 58%);
+    backdrop-filter: blur(4px);
+}
+.source-dialog .panel-heading {
+    align-items: flex-start;
+}
+.source-dialog h2 {
+    font-size: 20px;
+    margin-top: 0;
+}
+.source-dialog form > label,
+.source-dialog .config-actions {
+    margin-top: 20px;
+}
+.source-dialog .notice {
+    font-size: 12px;
+}
+.source-dialog-header {
+    flex-shrink: 0;
+    margin-bottom: 20px;
+}
+.source-dialog-header > div {
+    min-width: 0;
+}
+.source-dialog-header h2 {
+    overflow-wrap: anywhere;
+}
+.source-dialog-header .source-flow-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 6px;
+    color: var(--subtle);
+    font-size: 12px;
+}
+.source-flow-progress span:first-child {
+    color: var(--accent);
+    font-weight: 600;
+}
+.source-flow-context {
+    display: flex;
+    flex-shrink: 0;
+    align-items: baseline;
+    gap: 12px;
+    margin: -12px 0 18px;
+    font-size: 12px;
+    color: var(--subtle);
+}
+.source-flow-context span:first-child {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.source-flow-context span:last-child {
+    flex-shrink: 0;
+}
+.source-flow-content {
+    min-width: 0;
+    min-height: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+}
+.source-create-dialog .source-flow-details > form,
+.source-create-dialog .source-config-form,
+.source-create-dialog .source-preset-config,
+.source-create-dialog .preset-editor,
+.source-create-dialog .preset-editor-root:not([hidden]),
+.source-create-dialog .preset-editor-stage,
+.source-create-dialog .source-preset-form {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    gap: 0;
+    margin: 0;
+}
+.source-create-dialog .source-flow-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+    padding: 2px;
+    margin: -2px;
+}
+.source-create-dialog .source-flow-details .source-flow-body,
+.source-create-dialog .source-preset-form > .source-flow-body {
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+}
+.source-create-dialog .source-flow-details label {
+    margin: 0;
+}
+.source-create-dialog .template-options {
+    align-content: start;
+    margin: 0;
+    max-height: none;
+    min-height: 0;
+    overflow: visible;
+}
+.source-dialog.source-create-dialog .source-config-source {
+    max-width: none;
+    margin: 0 0 18px;
+}
+.source-create-dialog .source-config-form .empty-state {
+    padding: 0;
+    font-size: 12px;
+}
+.source-create-dialog .field-grid,
+.source-create-dialog .schema-form,
+.source-create-dialog .schema-group {
+    gap: 16px 20px;
+}
+.source-dialog.source-create-dialog .source-flow-footer {
+    display: flex;
+    align-items: center;
+    flex: 0 0 auto;
+    gap: 8px;
+    min-height: 53px;
+    margin: 18px 0 0;
+    padding: 16px 0 0;
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+}
+.source-flow-footer > .icon-button:first-child {
+    margin-right: auto;
+}
+.source-create-dialog .source-preset-config {
+    position: relative;
+}
+.source-preset-config .source-flow-footer:not(.source-flow-back) {
+    padding-left: 48px;
+}
+.source-dialog.source-create-dialog .source-flow-back {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    z-index: 1;
+    min-height: 36px;
+    margin: 0;
+    padding: 0;
+    border: 0;
+    background: transparent;
+}
+.source-preset-config,
+.source-config-form {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.source-preset-config {
+    margin-top: 20px;
+}
+.source-dialog .source-config-source {
+    max-width: 420px;
+    margin: 20px 0 24px;
+}
+.source-dialog .schema-group:first-child {
+    margin-top: 0;
+}
+.preset-editor {
+    min-width: 0;
+    max-width: 100%;
+}
+.preset-editor form {
+    display: grid;
+    gap: 18px;
+}
+.preset-editor form > .config-actions {
+    margin-top: 6px;
+}
+.template-options {
+    display: grid;
+    gap: 10px;
+    padding: 2px;
+    border: 0;
+    margin: 18px 0 0;
+    min-width: 0;
+    max-height: 340px;
+    overflow-y: auto;
+}
+.template-option {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--surface);
+    cursor: pointer;
+    transition: border-color var(--motion-fast) ease,
+        background var(--motion-fast) ease, box-shadow var(--motion-fast) ease,
+        transform var(--motion-fast) var(--motion-ease);
+}
+.template-option:hover {
+    border-color: var(--border-strong);
+}
+.template-option-link {
+    width: 100%;
+    color: var(--text);
+    text-align: left;
+    justify-content: space-between;
+    align-items: center;
+    line-height: 1.6;
+}
+.template-option-link:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+    text-decoration: none;
+}
+.template-option-arrow {
+    flex-shrink: 0;
+    color: var(--accent);
+    font-size: 20px;
+    transition: transform var(--motion-fast) var(--motion-ease);
+}
+.template-option.selected,
+.template-option[aria-pressed="true"],
+.template-option:has(input:checked) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+}
+.template-option:focus-within {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+}
+.template-option input[type="radio"] {
+    flex-shrink: 0;
+    margin-top: 3px;
+}
+.template-option-body {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+}
+.template-option-title {
+    font-size: 13px;
+    font-weight: 600;
+}
+.template-option-description {
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 400;
+}
+.template-option-meta {
+    color: var(--subtle);
+    font-size: 10px;
+    font-weight: 400;
+    overflow-wrap: anywhere;
+}
+.source-dialog .config-actions {
+    justify-content: flex-end;
+}
+.source-created-toast {
+    position: fixed;
+    z-index: 100;
+    right: 24px;
+    bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: fit-content;
+    max-width: min(520px, calc(100vw - 32px));
+    padding: 10px 12px 10px 18px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text);
+    background: var(--surface);
+    box-shadow: var(--shadow-lg);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+.source-created-toast::before {
+    content: "";
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--success);
+}
+.source-created-toast > button {
+    flex-shrink: 0;
+}
+/* These names are also used by the host's close lifecycle. */
+@keyframes source-dialog-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px) scale(.985);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+@keyframes source-dialog-out {
+    from {
+        opacity: 1;
+        transform: none;
+    }
+    to {
+        opacity: 0;
+        transform: translateY(5px) scale(.99);
+    }
+}
+@keyframes source-backdrop-in {
+    from {
+        opacity: 0;
+    }
+    to {
+        opacity: 1;
+    }
+}
+@keyframes source-backdrop-out {
+    from {
+        opacity: 1;
+    }
+    to {
+        opacity: 0;
+    }
+}
+@keyframes source-flow-in {
+    from {
+        opacity: 0;
+        transform: translateX(var(--flow-enter-offset, 6px));
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+@keyframes source-toast-in {
+    from {
+        opacity: 0;
+        transform: translateY(9px) scale(.96);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+@keyframes source-toast-out {
+    from {
+        opacity: 1;
+        transform: none;
+    }
+    to {
+        opacity: 0;
+        transform: translateY(5px) scale(.98);
+    }
+}
+@media (prefers-reduced-motion: no-preference) {
+    .source-dialog[open] {
+        animation: source-dialog-in var(--motion-enter) var(--motion-ease) both;
+    }
+    .source-dialog[open]::backdrop {
+        animation: source-backdrop-in var(--motion-fast) ease both;
+    }
+    .source-dialog[open].is-closing {
+        animation: source-dialog-out var(--motion-exit) ease both;
+        pointer-events: none;
+    }
+    .source-dialog[open].is-closing::backdrop {
+        animation: source-backdrop-out var(--motion-exit) ease both;
+    }
+    .source-dialog[open] .source-flow-body {
+        animation: source-flow-in 180ms var(--motion-ease) both;
+    }
+    .source-dialog[data-direction="back"] {
+        --flow-enter-offset: -6px;
+    }
+    .source-created-toast {
+        animation: source-toast-in var(--motion-enter) var(--motion-ease) both;
+    }
+    .source-created-toast.is-closing {
+        animation: source-toast-out var(--motion-exit) ease both;
+        pointer-events: none;
+    }
+}
+@media (hover: hover) and (pointer: fine) {
+    .primary-button:hover:not(:disabled) {
+        box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 18%,
+            transparent);
+    }
+    .template-option-link:hover .template-option-arrow {
+        transform: translateX(2px);
+    }
+}
+.table-wrap,
+.table-scroll {
+    min-width: 0;
+    overflow-x: auto;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+}
+.request-table {
+    width: 100%;
+    border-collapse: collapse;
+    text-align: left;
+    font-size: 12px;
+}
+.request-table th {
+    color: var(--subtle);
+    font-size: 11px;
+    font-weight: 500;
+    background: var(--surface-muted);
+    white-space: nowrap;
+}
+.request-table th,
+.request-table td {
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+}
+.request-table td {
+    color: var(--muted);
+    overflow-wrap: anywhere;
+}
+.request-table td:first-child {
+    white-space: nowrap;
+}
+.request-table td strong {
+    color: var(--text);
+    font-weight: 550;
+}
+.request-table tbody tr:last-child td {
+    border-bottom: 0;
+}
+.request-table tbody tr:hover {
+    background: var(--surface-muted);
+}
+.request-table code {
+    font-size: 11px;
+}
+.catalog-list,
+.plain-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+.catalog-row,
+.plain-list li {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 13px 0;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+}
+.catalog-row:first-child {
+    border-top: 0;
+}
+.catalog-row small {
+    display: block;
+    color: var(--subtle);
+}
+.catalog-row > div:first-child {
+    flex: 1;
+    min-width: 0;
+}
+.catalog-row strong {
+    font-weight: 550;
+    overflow-wrap: anywhere;
+}
+.usage-history {
+    margin: 0 0 18px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 14px;
+    font-size: 12px;
+}
+.usage-history > summary {
+    color: var(--muted);
+    cursor: pointer;
+}
+.usage-history[open] > summary {
+    margin-bottom: 12px;
+}
+.ssr-notice {
+    color: var(--subtle);
+    font-size: 12px;
+}
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0,0,0,0);
+    white-space: nowrap;
+    border: 0;
+}
+.skip-link {
+    position: fixed;
+    top: -80px;
+    left: 16px;
+    z-index: 20;
+    padding: 10px 16px;
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+}
+.skip-link:focus {
+    top: 10px;
+}
+@media (max-width: 600px) {
+    .panel {
+        padding: 20px;
+    }
+    .panel-heading {
+        gap: 12px;
+    }
+    .field-grid,
+    .schema-form,
+    .schema-group {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 18px;
+    }
+    .auth-form {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .source-dialog {
+        max-height: calc(100dvh - 24px);
+        padding: 22px 20px;
+    }
+    .source-create-dialog {
+        width: calc(100vw - 24px);
+        height: min(520px, calc(100dvh - 24px));
+        max-height: calc(100dvh - 24px);
+        padding: 24px 20px;
+    }
+    .source-create-dialog input,
+    .source-create-dialog select,
+    .source-create-dialog textarea {
+        font-size: 16px;
+    }
+    .source-created-toast {
+        right: 16px;
+        bottom: 16px;
+    }
+    .request-table th,
+    .request-table td {
+        padding: 12px;
+    }
+    .config-actions {
+        row-gap: 10px;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        transition: none !important;
+        animation: none !important;
+    }
+}
+
+/* Page frame follows the floating sidebar of the original Heimdall. */
+.admin-sidebar {
+    position: fixed;
+    inset: 12px auto 12px 12px;
+    z-index: 10;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    width: 224px;
+    padding: 24px 14px 14px;
+    border-radius: 24px;
+    background: var(--sidebar-bg);
+    box-shadow: 4px 0 24px rgb(0 0 0 / 4%);
+}
+.admin-header {
+    padding: 0 6px;
+}
+.admin-brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: var(--text);
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.25;
+}
+.admin-brand:hover {
+    text-decoration: none;
+}
+.admin-brand small {
+    display: block;
+    color: var(--subtle);
+    font-size: 11px;
+    font-weight: 400;
+    margin-top: 5px;
+}
+.brand-mark {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    border: 1px solid var(--border-strong);
+    border-radius: 14px;
+    background: var(--text);
+    color: var(--bg);
+    font-size: 15px;
+    font-weight: 800;
+}
+.admin-nav {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    gap: 5px;
+    min-height: 0;
+    overflow: auto;
+}
+.host-badge {
+    padding: 0 12px 8px;
+    color: var(--subtle);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .08em;
+}
+.admin-nav-link {
+    display: flex;
+    align-items: center;
+    gap: 11px;
+    flex-shrink: 0;
+    min-height: 42px;
+    padding: 10px 13px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-control);
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 500;
+    line-height: 1.5;
+    transition: background var(--motion-fast) ease,
+        color var(--motion-fast) ease, border-color var(--motion-fast) ease;
+}
+.admin-nav-link:hover {
+    color: var(--text);
+    background: var(--surface-muted);
+    text-decoration: none;
+}
+.admin-nav-link.active,
+.admin-nav-link[aria-current="page"] {
+    color: var(--accent);
+    background: var(--accent-soft);
+    font-weight: 600;
+}
+.nav-icon {
+    width: 17px;
+    height: 17px;
+    flex: 0 0 17px;
+    transition: transform 180ms var(--motion-ease);
+}
+.nav-label {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.plugin-navigation {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin-top: 18px;
+}
+.plugin-navigation::before {
+    content: "插件扩展";
+    padding: 0 12px 8px;
+    color: var(--subtle);
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: .08em;
+}
+.sidebar-footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 6px 0;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+}
+.sidebar-monogram {
+    display: grid;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    color: var(--subtle);
+    font-size: 11px;
+}
+.sidebar-footer strong {
+    display: block;
+    font-size: 11px;
+    font-weight: 550;
+    color: var(--text);
+}
+.sidebar-footer small {
+    display: block;
+    color: var(--subtle);
+    font-size: 10px;
+}
+.sidebar-version {
+    margin-left: auto;
+    color: var(--subtle);
+    font-size: 9px;
+    letter-spacing: .08em;
+}
+.admin-main {
+    margin-left: 248px;
+    padding: 20px clamp(24px, 2.5vw, 40px) 48px;
+    min-width: 0;
+}
+.console-content {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    max-width: 1320px;
+    margin: 0 auto;
+    min-width: 0;
+}
+.console-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 16px;
+    min-height: 42px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border);
+}
+.breadcrumb {
+    color: var(--subtle);
+    font-size: 12px;
+}
+.topbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+}
+.topbar-actions .text-button {
+    min-height: 32px;
+    padding: 5px 12px;
+    background: transparent;
+    border-color: transparent;
+    font-size: 12px;
+}
+.console-panels {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    min-width: 0;
+}
+.page-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    min-height: 64px;
+}
+.page-heading h1 {
+    margin: 0 0 6px;
+    font-size: 26px;
+}
+.page-heading p:not(.eyebrow) {
+    color: var(--subtle);
+    font-size: 13px;
+}
+.page-heading > .config-actions {
+    flex-shrink: 0;
+}
+.page-heading .eyebrow {
+    display: none;
+}
+@keyframes admin-page-in {
+    from {
+        opacity: 0;
+        transform: translateY(3px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+@keyframes admin-sidebar-in {
+    from {
+        opacity: 0;
+        transform: translateX(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+@media (prefers-reduced-motion: no-preference) {
+    .console-content {
+        animation: admin-page-in var(--motion-fast) ease-out;
+    }
+    .admin-sidebar {
+        animation: admin-sidebar-in var(--motion-enter) var(--motion-ease);
+    }
+}
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion:
+    no-preference) {
+    .admin-nav-link:hover .nav-icon,
+    .admin-nav-link:focus-visible .nav-icon {
+        transform: translateX(1px);
+    }
+}
+@media (min-width: 1800px) {
+    .admin-main {
+        padding-inline: 56px;
+    }
+}
+@media (max-width: 1100px) {
+    .admin-sidebar {
+        width: 204px;
+        padding-inline: 13px;
+    }
+    .admin-main {
+        margin-left: 226px;
+        padding-inline: 24px;
+    }
+}
+@media (max-width: 800px) {
+    .admin-sidebar {
+        position: relative;
+        inset: auto;
+        width: auto;
+        margin: 10px;
+        padding: 16px 14px 10px;
+        gap: 14px;
+        border-radius: 20px;
+    }
+    .admin-header {
+        padding: 0 4px;
+    }
+    .admin-nav {
+        flex-direction: row;
+        flex: none;
+        overflow-x: auto;
+        gap: 5px;
+        padding-bottom: 2px;
+    }
+    .admin-nav-link {
+        min-height: 38px;
+        padding: 8px 13px;
+        white-space: nowrap;
+    }
+    .nav-label {
+        overflow-wrap: normal;
+    }
+    .host-badge,
+    .sidebar-footer {
+        display: none;
+    }
+    .plugin-navigation {
+        flex-direction: row;
+        margin: 0 0 0 6px;
+        padding-left: 10px;
+        border-left: 1px solid var(--border);
+    }
+    .plugin-navigation::before {
+        display: none;
+    }
+    .admin-main {
+        margin-left: 0;
+        padding: 14px 22px 40px;
+    }
+    .console-content,
+    .console-panels {
+        gap: 18px;
+    }
+    .page-heading h1 {
+        font-size: 25px;
+    }
+}
+@media (max-width: 520px) {
+    .admin-main {
+        padding-inline: 16px;
+    }
+    .console-toolbar {
+        flex-wrap: wrap;
+        gap: 12px;
+    }
+    .breadcrumb {
+        font-size: 11px;
+    }
+    .page-heading {
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 16px;
+    }
+    .page-heading > .config-actions {
+        width: 100%;
+    }
+    .page-heading h1 {
+        font-size: 24px;
+    }
+    .topbar-actions {
+        margin-left: auto;
+    }
+    .topbar-actions .text-button {
+        padding-inline: 10px;
+    }
+}
+
+/* Instance controls use the same geometry in SSR and the client island. */
+.source-card-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-left: auto;
+}
+.source-card-actions {
+    flex-wrap: wrap;
+}
+.source-state-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 34px;
+    padding: 2px;
+    border: 0;
+    border-radius: 8px;
+    color: var(--muted);
+    background: transparent;
+    font-size: 11px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.source-switch-track {
+    display: inline-flex;
+    width: 28px;
+    height: 17px;
+    padding: 3px;
+    border-radius: 999px;
+    background: var(--border-strong);
+    transition: background var(--motion-fast) ease;
+}
+.source-switch-track::before {
+    content: "";
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 15%);
+    transition: transform var(--motion-fast) var(--motion-ease);
+}
+.source-state-toggle[aria-checked="true"] .source-switch-track {
+    background: var(--accent);
+}
+.source-state-toggle[aria-checked="true"] .source-switch-track::before {
+    transform: translateX(11px);
+}
+.source-state-toggle:disabled {
+    opacity: .6;
+    cursor: wait;
+}
+.source-management-id {
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--surface-muted);
+    overflow-wrap: anywhere;
+}
+.source-management-id code {
+    font-size: 11px;
+}
+.source-management-dialog .field-help {
+    margin-top: 8px;
+}
+.source-management-dialog .form-error,
+.source-management-dialog .notice {
+    margin-top: 16px;
+}
+.source-management-dialog .form-error + .field-help + button {
+    margin-top: 12px;
+}
+.source-management-actions .source-delete-link {
+    margin-right: auto;
+    padding-left: 0;
+    color: var(--danger);
+}
+.source-delete-confirmation > p {
+    margin-top: 18px;
+    overflow-wrap: anywhere;
+}
+.source-delete-confirmation strong {
+    color: var(--text);
+}
+.source-delete-button {
+    background: var(--danger);
+}
+.source-delete-button:hover:not(:disabled) {
+    background: var(--danger);
+    filter: brightness(.9);
+}
+.source-management-notice {
+    margin-bottom: 16px;
+}
+.source-refresh-button {
+    margin-bottom: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+    .source-switch-track,
+    .source-switch-track::before {
+        transition: none;
+    }
+}
+
+/* Host-owned card geometry applies to both server output and islands. */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+}
+.stat-card {
+    position: relative;
+    min-width: 0;
+    min-height: 124px;
+    padding: 18px 20px;
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+}
+.stat-card::before {
+    content: "";
+    position: absolute;
+    top: 24px;
+    right: 20px;
+    width: 18px;
+    height: 3px;
+    border-radius: 999px;
+    background: var(--border-strong);
+}
+.stat-card:first-child {
+    background: var(--accent-soft);
+}
+.stat-card:first-child::before {
+    background: var(--accent);
+}
+.stat-card h2 {
+    padding-right: 26px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 500;
+}
+.stat-card > strong {
+    display: block;
+    margin: 10px 0 5px;
+    color: var(--text);
+    font-size: 28px;
+    font-weight: 650;
+    line-height: 1.2;
+    letter-spacing: -.025em;
+}
+.stat-card > p {
+    color: var(--subtle);
+    font-size: 11px;
+}
+.catalog-section {
+    min-width: 0;
+}
+.catalog-section > .panel-heading {
+    margin-bottom: 14px;
+}
+.catalog-section > .form-error {
+    margin-bottom: 12px;
+}
+.source-cards,
+.plugin-cards,
+.preset-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(290px, 100%), 1fr));
+    gap: 12px;
+    align-items: stretch;
+}
+.source-cards {
+    grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
+    align-items: start;
+}
+.source-card,
+.plugin-card,
+.preset-card {
+    min-width: 0;
+    padding: 18px;
+    border: 0;
+    border-radius: var(--radius);
+    background: var(--surface);
+    box-shadow: var(--shadow);
+    transition: border-color var(--motion-fast) ease,
+        background var(--motion-fast) ease, box-shadow var(--motion-fast) ease;
+}
+.source-card,
+.plugin-card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.source-card {
+    max-width: 440px;
+    gap: 12px;
+}
+.source-card-head,
+.plugin-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+}
+.source-card-title,
+.plugin-card-title {
+    min-width: 0;
+}
+.source-card-title h3 {
+    margin: 0;
+    font-size: 15px;
+    overflow-wrap: anywhere;
+}
+.source-card-title > code {
+    display: block;
+    margin-top: 5px;
+    color: var(--subtle);
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+.source-card-head > .status-chip {
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+.source-card-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    margin: 0;
+}
+.source-card-meta > div {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+}
+.source-card-meta dt {
+    color: var(--subtle);
+    font-size: 11px;
+}
+.source-card-meta dd {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+.source-probe {
+    color: var(--muted);
+    font-size: 11px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+.source-card-actions,
+.plugin-card-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-top: auto;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    min-height: 34px;
+}
+.source-card-actions > span,
+.plugin-card-actions > span {
+    font-size: 11px;
+    color: var(--subtle);
+}
+.source-card-actions .secondary-button,
+.plugin-card-actions .secondary-button {
+    min-height: 30px;
+    padding: 5px 12px;
+    font-size: 11px;
+}
+.plugin-card-title h3 {
+    font-size: 15px;
+    overflow-wrap: anywhere;
+}
+.plugin-card-title code {
+    display: block;
+    color: var(--subtle);
+    font-size: 11px;
+    margin-top: 4px;
+    overflow-wrap: anywhere;
+}
+.plugin-card-head > .status-chip {
+    flex-shrink: 0;
+}
+.plugin-card-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+.plugin-chip {
+    display: inline-flex;
+    max-width: 100%;
+    align-items: center;
+    padding: 3px 9px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--muted);
+    background: var(--surface);
+    font-size: 10px;
+    overflow-wrap: anywhere;
+}
+.plugin-chip.accent {
+    border-color: transparent;
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+.plugin-card-meta {
+    display: grid;
+    gap: 6px;
+    font-size: 12px;
+}
+.plugin-card-desc {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+}
+.plugin-card-details > summary {
+    cursor: pointer;
+    color: var(--muted);
+    border-radius: 6px;
+    padding-block: 4px;
+}
+.plugin-card-details > summary > span {
+    float: right;
+    color: var(--subtle);
+}
+.plugin-card-details[open] > summary {
+    margin-bottom: 6px;
+}
+.plugin-dependencies {
+    display: grid;
+    gap: 8px;
+    padding: 0;
+    margin: 0;
+    list-style: none;
+}
+.plugin-dependencies > li {
+    display: flex;
+    gap: 8px;
+    justify-content: space-between;
+    align-items: baseline;
+}
+.plugin-dependencies code {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.plugin-dependencies .status-chip {
+    flex-shrink: 0;
+}
+.plugin-card[aria-busy="true"] {
+    border-color: var(--accent);
+}
+.catalog-section > .form-success {
+    margin-bottom: 12px;
+}
+.plugin-meta-group {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 12px;
+    color: var(--muted);
+}
+.plugin-meta-label {
+    color: var(--subtle);
+}
+.plugin-card-error {
+    padding: 10px 12px;
+    border-radius: 12px;
+    color: var(--danger);
+    background: var(--danger-soft);
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+.plugin-card.disabled {
+    border-style: dashed;
+    border-color: var(--border);
+    box-shadow: none;
+    background: transparent;
+}
+.plugin-card.disabled .plugin-card-title h3 {
+    color: var(--muted);
+}
+.preset-cards {
+    grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+}
+.preset-card {
+    border: 1px solid var(--border);
+    background: transparent;
+    box-shadow: none;
+    border-radius: 18px;
+    padding: 16px;
+}
+.preset-card h3 {
+    font-size: 13px;
+}
+.preset-card p {
+    margin: 12px 0 4px;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+.preset-card code {
+    color: var(--subtle);
+    font-size: 10px;
+    overflow-wrap: anywhere;
+}
+.source-status-slot {
+    min-width: 0;
+    width: 100%;
+}
+.source-status-slot:empty {
+    display: none;
+}
+.activity-panel .request-table {
+    table-layout: fixed;
+}
+.activity-panel .request-table th:first-child {
+    width: 24%;
+}
+.activity-panel .request-table th:nth-child(2) {
+    width: 32%;
+}
+.activity-panel .request-table th:nth-child(3) {
+    width: 14%;
+}
+.activity-panel .request-table th small {
+    margin-left: 3px;
+    font-size: 10px;
+    font-weight: 400;
+}
+.activity-panel .request-table .request-time {
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    white-space: normal;
+}
+.activity-panel .request-model strong,
+.activity-panel .request-id code {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.activity-panel .request-model small {
+    display: block;
+    margin-top: 3px;
+    color: var(--subtle);
+    font-size: 11px;
+}
+.activity-panel .request-id {
+    color: var(--subtle);
+}
+.activity-panel .usage-history {
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+}
+.model-directory {
+    padding: 0;
+    overflow: hidden;
+}
+.model-directory-summary {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 20px;
+    cursor: pointer;
+    list-style: none;
+    transition: background var(--motion-fast) ease;
+}
+.model-directory-summary::-webkit-details-marker {
+    display: none;
+}
+.model-directory-summary > span:first-child {
+    flex: 1;
+}
+.model-directory-summary strong {
+    display: block;
+    font-size: 14px;
+    font-weight: 600;
+}
+.model-directory-summary small {
+    display: block;
+    font-size: 11px;
+    color: var(--subtle);
+    margin-top: 3px;
+}
+.model-directory-summary::after {
+    content: "+";
+    color: var(--subtle);
+    font-size: 20px;
+    font-weight: 300;
+}
+.model-directory[open] > summary::after {
+    content: "−";
+}
+.model-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 0 20px 20px;
+}
+.model-tag {
+    max-width: 100%;
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    color: var(--muted);
+    background: var(--bg);
+    font-family: "SFMono-Regular", Consolas, monospace;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+}
+.model-directory > .form-error {
+    margin: 0 24px 18px;
+}
+/* Named slots retain their own boundaries even when a renderer fails. */
+.plugin-slots {
+    display: grid;
+    min-width: 0;
+    gap: 16px;
+}
+.plugin-slots-dashboard-widget {
+    grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+}
+.plugin-slot {
+    min-width: 0;
+    max-width: 100%;
+    padding: 18px;
+    border: 0;
+    border-radius: var(--radius);
+    background: var(--surface);
+    overflow: auto;
+    overflow-wrap: anywhere;
+    transition: border-color var(--motion-fast) ease,
+        background var(--motion-fast) ease;
+}
+.slot-heading {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px 12px;
+    margin-bottom: 16px;
+}
+.slot-heading h3 {
+    font-size: 14px;
+}
+.slot-attribution {
+    color: var(--subtle);
+    font-size: 10px;
+    max-width: 100%;
+}
+.slot-description,
+.slot-notice {
+    color: var(--subtle);
+    font-size: 12px;
+    margin-bottom: 12px;
+}
+.slot-notice {
+    margin-top: 12px;
+}
+.slot-content {
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 10px;
+}
+.slot-content > .slot-text {
+    flex-basis: 100%;
+}
+.slot-metrics {
+    display: flex;
+    flex: 1;
+    gap: 10px;
+    min-width: min(120px, 100%);
+    margin: 0;
+}
+.slot-metric {
+    flex: 1;
+    min-width: 0;
+    padding: 13px 14px;
+    border-radius: 13px;
+}
+.slot-metric dt {
+    font-size: 11px;
+}
+.slot-metric dd {
+    margin: 6px 0 0;
+    font-size: 25px;
+    line-height: 1.25;
+    font-weight: 600;
+}
+.slot-metric dd small {
+    margin-left: 5px;
+    font-size: 11px;
+    font-weight: 400;
+}
+.slot-text {
+    color: var(--muted);
+    font-size: 12px;
+    white-space: pre-wrap;
+}
+.slot-mount {
+    min-width: 0;
+    max-width: 100%;
+    overflow: auto;
+}
+.slot-frame {
+    display: block;
+    width: 100%;
+    border: 0;
+    min-height: 96px;
+    max-height: 480px;
+}
+.plugin-slots-source-status {
+    gap: 10px;
+}
+.plugin-slots-source-status .plugin-slot {
+    max-height: 160px;
+    padding: 12px 0 0;
+    border-radius: 0;
+    border-top: 1px solid var(--border);
+    background: transparent;
+}
+.plugin-slots-source-status .slot-heading {
+    margin-bottom: 8px;
+}
+.plugin-slots-source-status .slot-heading h3 {
+    font-size: 12px;
+}
+.plugin-slots-source-status .slot-attribution {
+    font-size: 9px;
+}
+.plugin-slots-source-status .slot-metric {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    padding: 0;
+    background: transparent;
+}
+.plugin-slots-source-status .slot-metric dd {
+    margin: 0;
+    font-size: 13px;
+}
+.plugin-slots-source-status .slot-metrics {
+    flex: 0 1 auto;
+    min-width: 0;
+}
+.plugin-slots-source-status .slot-content {
+    gap: 8px 18px;
+}
+.plugin-slots-source-status .slot-description,
+.plugin-slots-source-status .slot-text {
+    font-size: 11px;
+}
+.plugin-slots-source-status .slot-description {
+    margin-bottom: 8px;
+}
+.plugin-slots-settings-section {
+    max-width: 820px;
+}
+.plugin-slots-nav-tab {
+    width: 100%;
+}
+@keyframes catalog-card-in {
+    from {
+        opacity: 0;
+        transform: translateY(3px);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+@media (prefers-reduced-motion: no-preference) {
+    .source-card,
+    .plugin-card,
+    .preset-card {
+        animation: catalog-card-in var(--motion-fast) ease-out;
+    }
+    .model-directory[open] .model-tags {
+        animation: catalog-card-in var(--motion-fast) ease-out;
+    }
+}
+.source-card:focus-within,
+.plugin-card:focus-within,
+.preset-card:focus-within,
+.plugin-slot:focus-within {
+    border-right-color: var(--border-strong);
+    border-bottom-color: var(--border-strong);
+}
+@media (hover: hover) and (pointer: fine) {
+    .source-card:has(button, a):hover,
+    .plugin-card:has(button, a):hover,
+    .preset-card:has(button, a):hover {
+        border-right-color: var(--border-strong);
+        border-bottom-color: var(--border);
+        box-shadow: 0 3px 12px rgb(0 0 0 / 6%);
+    }
+    .model-directory-summary:hover {
+        background: var(--surface-muted);
+    }
+}
+@media (min-width: 1500px) {
+    .plugin-cards {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+}
+@media (max-width: 1100px) {
+    .stats-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .source-cards-compact {
+        grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
+    }
+}
+@media (max-width: 600px) {
+    .stats-grid {
+        gap: 12px;
+    }
+    .stat-card {
+        padding: 16px;
+        min-height: 116px;
+    }
+    .stat-card::before {
+        top: 22px;
+        right: 16px;
+    }
+    .stat-card > strong {
+        font-size: 25px;
+    }
+    .source-cards,
+    .plugin-cards,
+    .preset-cards,
+    .plugin-slots-dashboard-widget {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .source-card,
+    .plugin-card,
+    .plugin-slot {
+        padding: 16px;
+    }
+    .model-directory-summary {
+        padding: 16px;
+        gap: 10px;
+    }
+    .model-tags {
+        padding-inline: 16px;
+    }
+    .activity-panel .request-table-wrap {
+        border: 0;
+        border-radius: 0;
+        overflow: visible;
+    }
+    .activity-panel .request-table,
+    .activity-panel .request-table tbody {
+        display: block;
+    }
+    .activity-panel .request-table thead {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+    }
+    .activity-panel .request-table tr {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 10px 12px;
+        padding: 14px 0;
+        border-bottom: 1px solid var(--border);
+    }
+    .activity-panel .request-table tr:first-child {
+        padding-top: 0;
+    }
+    .activity-panel .request-table tr:last-child {
+        padding-bottom: 0;
+        border-bottom: 0;
+    }
+    .activity-panel .request-table td {
+        min-width: 0;
+        padding: 0;
+        border: 0;
+    }
+    .activity-panel .request-time {
+        align-self: center;
+    }
+    .activity-panel .request-time::after {
+        content: " UTC";
+        color: var(--subtle);
+        font-size: 10px;
+    }
+    .activity-panel .request-state {
+        grid-column: 2;
+        grid-row: 1;
+    }
+    .activity-panel .request-model,
+    .activity-panel .request-id {
+        grid-column: 1 / -1;
+    }
+    .activity-panel .request-id code,
+    .activity-panel .request-model strong {
+        overflow-wrap: anywhere;
+        white-space: normal;
+    }
+}
+
+.preset-auth {
+    display: grid;
+    gap: 16px;
+}
+.preset-auth-intro,
+.preset-auth-heading,
+.preset-auth-account {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+.preset-auth-intro h3 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 600;
+}
+.preset-auth-intro .field-help,
+.preset-auth-heading .field-help,
+.preset-auth-account .field-help {
+    margin: 4px 0 0;
+}
+.preset-auth-mark {
+    display: grid;
+    flex: 0 0 36px;
+    height: 36px;
+    place-items: center;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+.preset-auth-panel {
+    display: grid;
+    justify-items: start;
+    gap: 16px;
+    min-width: 0;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    transition: border-color 180ms ease, background-color 180ms ease;
+}
+.preset-auth-panel.is-authorized {
+    border-color: color-mix(in srgb, var(--success) 30%, var(--border));
+    background: var(--success-soft);
+}
+.preset-auth-heading,
+.preset-auth-account,
+.preset-auth-steps {
+    width: 100%;
+}
+.preset-auth-heading > div,
+.preset-auth-account > div {
+    flex: 1;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.preset-auth-account > .text-button {
+    flex-shrink: 0;
+}
+.preset-auth-check {
+    display: grid;
+    flex: 0 0 32px;
+    height: 32px;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--success);
+    color: white;
+    font-size: 17px;
+}
+.preset-auth-steps {
+    display: grid;
+    gap: 20px;
+}
+.preset-auth-step {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr);
+    align-items: start;
+    gap: 12px;
+}
+.preset-auth-step-number {
+    display: grid;
+    width: 24px;
+    height: 24px;
+    margin-top: 5px;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+}
+.preset-auth-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    text-decoration: none;
+}
+.preset-auth-inline-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 8px;
+}
+.preset-auth-progress {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0;
+    color: var(--muted);
+    font-size: 13px;
+}
+.preset-auth-spinner {
+    width: 16px;
+    height: 16px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: preset-auth-spin 800ms linear infinite;
+}
+.preset-auth-options > summary {
+    padding: 4px 0;
+    cursor: pointer;
+    font-size: 13px;
+}
+.preset-auth-options > summary .field-help {
+    margin-left: 6px;
+}
+.preset-auth-options > .schema-field {
+    margin-top: 12px;
+}
+@keyframes preset-auth-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+@media (max-width: 600px) {
+    .preset-auth-panel {
+        padding: 16px;
+    }
+    .preset-auth-account {
+        flex-wrap: wrap;
+    }
+    .preset-auth-account > .text-button {
+        margin-left: 44px;
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .preset-auth-panel {
+        transition: none;
+    }
+    .preset-auth-spinner {
+        animation: none;
+    }
+}
+
+.preview-banner, .preview-section, .preview-meta { max-width: 1320px; margin-inline: auto; }
+.preview-banner { padding: 24px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--accent-soft); margin-bottom: 30px; }
+.preview-banner h1 { font-size: 22px; margin-bottom: 8px; }
+.preview-banner p + p { margin-top: 6px; }
+.preview-banner .config-actions { margin-top: 16px; }
+.preview-page, .preview-section { scroll-margin-top: 24px; padding-top: 22px; margin-bottom: 52px; }
+.preview-page + .preview-page, .preview-section { border-top: 1px solid var(--border); }
+.preview-section { display: flex; flex-direction: column; gap: 22px; }
+.preview-readonly { min-width: 0; border: 0; margin: 0; padding: 0; }
+.preview-page .ssr-notice, .preview-page .page-heading form, .preview-page noscript { display: none; }
+.preview-modal-stage { min-width: 0; padding: 24px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-muted); scroll-margin-top: 24px; }
+.preview-stage-label { margin-bottom: 22px; color: var(--muted); font-size: 12px; text-align: center; }
+.preview-dialog { max-width: 100%; max-height: none; margin: 0 auto; }
+.preview-created-toast { position: static; margin: 0 auto; }
+.preview-meta { font-size: 12px; color: var(--muted); padding: 16px 0 26px; }
+.preview-schema-key { margin-top: 14px; font-size: 12px; }
+@media (prefers-reduced-motion: no-preference) {
+    .preview-modal-stage:target .preview-dialog { animation: source-dialog-in var(--motion-enter) var(--motion-ease); }
+    .preview-modal-stage:target .source-flow-content { animation: source-flow-in 180ms var(--motion-ease); }
+}
+@media (max-width: 600px) {
+    .preview-modal-stage { padding: 18px 10px; }
+    .preview-stage-label { margin-bottom: 16px; }
+}
+</style></head><body><a class="skip-link" href="#admin-main">跳到主要内容</a><aside class="admin-sidebar" aria-label="工作空间"><header class="admin-header"><a class="admin-brand" href="#preview-top" aria-label="Heimdall 总览"><span class="brand-mark" aria-hidden="true">H</span><span>Heimdall<small>统一模型网关</small></span></a></header><nav class="admin-nav" aria-label="主导航" data-admin-navigation=""><span class="host-badge">工作空间</span><a href="#overview" class="admin-nav-link"><svg xmlns="http://www.w3.org/2000/svg" class="icon nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect width="7" height="9" x="3" y="3" rx="1"></rect><rect width="7" height="5" x="14" y="3" rx="1"></rect><rect width="7" height="9" x="14" y="12" rx="1"></rect><rect width="7" height="5" x="3" y="16" rx="1"></rect></svg><span class="nav-label">总览</span></a><a href="#channels" class="admin-nav-link"><svg xmlns="http://www.w3.org/2000/svg" class="icon nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M17 19a1 1 0 0 1-1-1v-2a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2a1 1 0 0 1-1 1z"></path><path d="M17 21v-2"></path><path d="M19 14V6.5a1 1 0 0 0-7 0v11a1 1 0 0 1-7 0V10"></path><path d="M21 21v-2"></path><path d="M3 5V3"></path><path d="M4 10a2 2 0 0 1-2-2V6a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2a2 2 0 0 1-2 2z"></path><path d="M7 5V3"></path></svg><span class="nav-label">渠道</span></a><a href="#settings" class="admin-nav-link"><svg xmlns="http://www.w3.org/2000/svg" class="icon nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 5H3"></path><path d="M12 19H3"></path><path d="M14 3v4"></path><path d="M16 17v4"></path><path d="M21 12h-9"></path><path d="M21 19h-5"></path><path d="M21 5h-7"></path><path d="M8 10v4"></path><path d="M8 12H3"></path></svg><span class="nav-label">设置</span></a><div class="plugin-navigation" data-plugin-navigation=""><a href="#plugin" class="admin-nav-link" data-plugin-nav=""><svg xmlns="http://www.w3.org/2000/svg" class="icon nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M15.39 4.39a1 1 0 0 0 1.68-.474 2.5 2.5 0 1 1 3.014 3.015 1 1 0 0 0-.474 1.68l1.683 1.682a2.414 2.414 0 0 1 0 3.414L19.61 15.39a1 1 0 0 1-1.68-.474 2.5 2.5 0 1 0-3.014 3.015 1 1 0 0 1 .474 1.68l-1.683 1.682a2.414 2.414 0 0 1-3.414 0L8.61 19.61a1 1 0 0 0-1.68.474 2.5 2.5 0 1 1-3.014-3.015 1 1 0 0 0 .474-1.68l-1.683-1.682a2.414 2.414 0 0 1 0-3.414L4.39 8.61a1 1 0 0 1 1.68.474 2.5 2.5 0 1 0 3.014-3.015 1 1 0 0 1-.474-1.68l1.683-1.682a2.414 2.414 0 0 1 3.414 0z"></path></svg><span class="nav-label">NewAPI 工作区</span></a></div></nav><footer class="sidebar-footer"><span class="sidebar-monogram" aria-hidden="true">H</span><div><strong>Heimdall</strong><small>运维控制台</small></div><span class="sidebar-version">NEXT</span></footer></aside><main class="admin-main" id="admin-main"><aside id="preview-top" class="preview-banner" aria-labelledby="preview-title"><h1 id="preview-title">Heimdall 运维控制台 · 设计预览</h1><p>示例数据 · 深色主题 · 可离线阅读</p><p>总览、渠道、设置和插件页按顺序展开，左侧导航可跳转。所有表单与动作已禁用。</p><p>管理页面与自定义表单复用实际服务端组件；添加渠道展示同一模态的步骤快照，包含 NewAPI 配置与 ChatHub 授权的静态示意。</p><div class="config-actions"><a class="text-button" href="#flow">添加渠道流程</a><a class="text-button" href="#controls">表单控件目录</a></div></aside><section id="overview" class="preview-page" aria-label="总览页面预览"><fieldset disabled="" class="preview-readonly" aria-label="只读页面预览"><div class="console-content"><div class="console-toolbar"><span class="breadcrumb">管理端 / 总览</span><div class="topbar-actions"><form method="post" action="/admin/logout"><button class="icon-button" type="submit" aria-label="退出登录" title="退出登录"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m16 17 5-5-5-5"></path><path d="M21 12H9"></path><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path></svg></button></form></div></div><header class="page-heading"><div><p class="eyebrow">工作空间</p><h1>总览</h1><p>服务状态、渠道连接与插件能力。</p></div></header><p class="ssr-notice" role="status">正在加载交互功能，当前可浏览数据。</p><section class="stats-grid" aria-label="实例概况"><article class="stat-card"><h2>服务健康</h2><strong>正常</strong><p>服务正在接受请求</p></article><article class="stat-card"><h2>已启用渠道</h2><strong>2</strong><p>共 3 个渠道</p></article><article class="stat-card"><h2>可用模型</h2><strong>4</strong><p>当前可调用</p></article><article class="stat-card"><h2>运行中插件</h2><strong>8</strong><p>共 8 个插件</p></article></section><div class="plugin-slots plugin-slots-dashboard-widget" data-ui-slot="dashboard.widget"><article class="plugin-slot plugin-slot-dashboard-widget" data-ui-extension="heimdall.preset.newapi:usage" data-ui-mode="schema" aria-label="本月用量 · 示例数据"><header class="slot-heading"><h3>本月用量 · 示例数据</h3><span class="slot-attribution">heimdall.preset.newapi</span></header><p class="slot-description">示例插件在总览卡片中提供补充指标。</p><div class="slot-content" data-ui-fallback=""><dl class="slot-metrics"><div class="slot-metric tone-neutral"><dt>本月请求</dt><dd>1,286<small>次</small></dd></div></dl><span class="slot-badge tone-success">额度充足</span><a class="text-button" href="#channels">查看渠道</a></div><div class="slot-mount" data-ui-mount="" hidden=""></div><p class="slot-notice" data-ui-notice="" role="status" hidden=""></p></article></div><section class="catalog-section" aria-labelledby="source-overview-title"><div class="panel-heading"><div><h2 id="source-overview-title">渠道状态</h2><p>上游连接与最近探测</p></div><a class="section-link" href="#channels">管理渠道 <span aria-hidden="true">→</span></a></div><div class="source-cards source-cards-compact"><article class="source-card source-card-green"><header class="source-card-head"><div class="source-card-title"><h3 title="主力模型服务">主力模型服务</h3><code title="openai-compatible">openai-compatible</code></div><span class="status-chip chip-green">可用</span></header><dl class="source-card-meta"><div><dt>模型</dt><dd>3</dd></div><div><dt>能力</dt><dd>9</dd></div><div><dt>优先级</dt><dd>10</dd></div></dl><p class="source-probe" title="最近探测通过 · 连接正常 · 示例结果">最近探测通过 · 连接正常 · 示例结果</p><footer class="source-card-actions"><a class="section-link" href="#channels">查看渠道 <span aria-hidden="true">→</span></a></footer></article><article class="source-card source-card-amber"><header class="source-card-head"><div class="source-card-title"><h3 title="备用推理服务">备用推理服务</h3><code title="anthropic">anthropic</code></div><span class="status-chip chip-amber">冷却中</span></header><dl class="source-card-meta"><div><dt>模型</dt><dd>1</dd></div><div><dt>能力</dt><dd>5</dd></div><div><dt>优先级</dt><dd>0</dd></div></dl><p class="source-probe" title="最近探测失败 · 等待下一次探测 · 示例结果">最近探测失败 · 等待下一次探测 · 示例结果</p><footer class="source-card-actions"><a class="section-link" href="#channels">查看渠道 <span aria-hidden="true">→</span></a></footer></article><article class="source-card source-card-muted"><header class="source-card-head"><div class="source-card-title"><h3 title="团队 ChatHub">团队 ChatHub</h3><code title="chathub-preview">chathub-preview</code></div><span class="status-chip chip-muted">已停用</span></header><dl class="source-card-meta"><div><dt>模型</dt><dd>1</dd></div><div><dt>能力</dt><dd>3</dd></div><div><dt>优先级</dt><dd>5</dd></div></dl><p class="source-probe" title="此渠道已暂停接收新请求。">此渠道已暂停接收新请求。</p><footer class="source-card-actions"><a class="section-link" href="#channels">查看渠道 <span aria-hidden="true">→</span></a></footer></article></div></section><section id="plugins" class="catalog-section" aria-labelledby="plugins-title"><div class="panel-heading"><div><h2 id="plugins-title">插件能力</h2><p>已注册插件的运行状态与可用操作</p></div><span class="panel-count">8 个插件</span></div><div class="plugin-cards"><article class="plugin-card"><header class="plugin-card-head"><div class="plugin-card-title"><h3 title="OpenAI 兼容来源">OpenAI 兼容来源</h3><code title="heimdall.source.openai-compatible">heimdall.source.openai-compatible</code></div><span class="status-chip chip-green">运行中</span></header><p class="plugin-card-desc">连接 OpenAI 兼容接口，提供对话、向量、图像与工具调用能力。</p><div class="plugin-card-badges"><span class="plugin-chip">内置</span><span class="plugin-chip accent">上游源</span><span class="plugin-chip">v0.1.0</span></div><div class="plugin-card-meta"><div class="plugin-meta-group"><span class="plugin-meta-label">运行方式</span><span>同进程运行</span></div><details class="plugin-card-details"><summary>声明能力 <span>9 项</span></summary><div class="plugin-card-badges"><span class="plugin-chip" title="generation.create">对话生成</span><span class="plugin-chip" title="completion.create">文本补全</span><span class="plugin-chip" title="embedding.create">向量嵌入</span><span class="plugin-chip" title="image.generate">图像生成</span><span class="plugin-chip" title="image.edit">图像编辑</span><span class="plugin-chip" title="streaming">流式输出</span><span class="plugin-chip" title="tools">工具调用</span><span class="plugin-chip" title="structured_output">结构化输出</span><span class="plugin-chip" title="image.input">图片输入</span></div></details></div><footer class="plugin-card-actions"><span>允许在线启停</span><button class="secondary-button" type="button" disabled="" title="交互加载后可用" aria-label="停用 OpenAI 兼容来源">停用</button></footer></article><article class="plugin-card"><header class="plugin-card-head"><div class="plugin-card-title"><h3 title="Anthropic 来源">Anthropic 来源</h3><code title="heimdall.source.anthropic">heimdall.source.anthropic</code></div><span class="status-chip chip-green">运行中</span></header><p class="plugin-card-desc">连接 Anthropic Messages 接口，支持流式输出、图片输入与工具调用。</p><div class="plugin-card-badges"><span class="plugin-chip">内置</span><span class="plugin-chip accent">上游源</span><span class="plugin-chip">v0.1.0</span></div><div class="plugin-card-meta"><div class="plugin-meta-group"><span class="plugin-meta-label">运行方式</span><span>同进程运行</span></div><details class="plugin-card-details"><summary>声明能力 <span>5 项</span></summary><div class="plugin-card-badges"><span class="plugin-chip" title="generation.create">对话生成</span><span class="plugin-chip" title="streaming">流式输出</span><span class="plugin-chip" title="tools">工具调用</span><span class="plugin-chip" title="structured_output">结构化输出</span><span class="plugin-chip" title="image.input">图片输入</span></div></details></div><footer class="plugin-card-actions"><span>允许在线启停</span><button class="secondary-button" type="button" disabled="" title="交互加载后可用" aria-label="停用 Anthropic 来源">停用</button></footer></article><article class="plugin-card"><header class="plugin-card-head"><div class="plugin-card-title"><h3 title="Microsoft ChatHub">Microsoft ChatHub</h3><code title="heimdall.source.chathub">heimdall.source.chathub</code></div><span class="status-chip chip-green">运行中</span></header><p class="plugin-card-desc">通过 Microsoft ChatHub 连接上游对话，支持流式输出与工具调用。</p><div class="plugin-card-badges"><span class="plugin-chip">内置</span><span class="plugin-chip accent">上游源</span><span class="plugin-chip">v0.1.0</span></div><div class="plugin-card-meta"><div class="plugin-meta-group"><span class="plugin-meta-label">运行方式</span><span>同进程运行</span></div><details class="plugin-card-details"><summary>声明能力 <span>3 项</span></summary><div class="plugin-card-badges"><span class="plugin-chip" title="generation.create">对话生成</span><span class="plugin-chip" title="streaming">流式输出</span><span class="plugin-chip" title="tools">工具调用</span></div></details></div><footer class="plugin-card-actions"><span>允许在线启停</span><button class="secondary-button" type="button" disabled="" title="交互加载后可用" aria-label="停用 Microsoft ChatHub">停用</button></footer></article><article class="plugin-card"><header class="plugin-card-head"><div class="plugin-card-title"><h3 title="NewAPI 预设">NewAPI 预设</h3><code title="heimdall.preset.newapi">heimdall.preset.newapi</code></div><span class="status-chip chip-green">运行中</span></header><p class="plugin-card-desc">在添加渠道的模态内快速填写 NewAPI 地址和密钥。</p><div class="plugin-card-badges"><span class="plugin-chip">内置</span><span class="plugin-chip accent">配置预设</span><span class="plugin-chip">v0.1.0</span></div><div class="plugin-card-meta"><div class="plugin-meta-group"><span class="plugin-meta-label">运行方式</span><span>同进程运行</span></div><details class="plugin-card-details"><summary>声明能力 <span>1 项</span></summary><div class="plugin-card-badges"><span class="plugin-chip" title="source.openai-compatible">source.openai-compatible</span></div></details></div><footer class="plugin-card-actions"><span>此插件不支持在线启停</span></footer></article><article class="plugin-card"><header class="plugin-card-head"><div class="plugin-card-title"><h3 title="Microsoft ChatHub 预设">Microsoft ChatHub 预设</h3><code title="heimdall.preset.chathub">heimdall.preset.chathub</code></div><span class="status-chip chip-green">运行中</span></header><p class="plugin-card-desc">在添加渠道的模态内完成 Microsoft 授权并保存 ChatHub 渠道。</p><div class="plugin-card-badges"><span class="plugin-chip">内置</span><span class="plugin-chip accent">配置预设</span><span class="plugin-chip">v0.1.0</span></div><div class="plugin-card-meta"><div class="plugin-meta-group"><span class="plugin-meta-label">运行方式</span><span>同进程运行</span></div><details class="plugin-card-details"><summary>声明能力 <span>1 项</span></summary><div class="plugin-card-badges"><span class="plugin-chip" title="source.chathub">source.chathub</span></div></details><details class="plugin-card-details"><summary>声明依赖 <span>2 项</span></summary><ul class="plugin-dependencies"><li><code>heimdall.source.chathub</code><span class="status-chip chip-green">运行中</span></li><li><code>heimdall.api.chathub-auth</code><span class="status-chip chip-green">运行中</span></li></ul></details></div><footer class="plugin-card-actions"><span>此插件不支持在线启停</span></footer></article><article class="plugin-card"><header class="plugin-card-head"><div class="plugin-card-title"><h3 title="Microsoft ChatHub 授权服务">Microsoft ChatHub 授权服务</h3><code title="heimdall.api.chathub-auth">heimdall.api.chathub-auth</code></div><span class="status-chip chip-green">运行中</span></header><p class="plugin-card-desc">为 ChatHub 预设提供账号授权与回调交换接口。</p><div class="plugin-card-badges"><span class="plugin-chip">内置</span><span class="plugin-chip accent">接口扩展</span><span class="plugin-chip">v0.1.0</span></div><div class="plugin-card-meta"><div class="plugin-meta-group"><span class="plugin-meta-label">运行方式</span><span>同进程运行</span></div></div><footer class="plugin-card-actions"><span>此插件不支持在线启停</span></footer></article><article class="plugin-card"><header class="plugin-card-head"><div class="plugin-card-title"><h3 title="网页搜索与抓取">网页搜索与抓取</h3><code title="heimdall.tool.web">heimdall.tool.web</code></div><span class="status-chip chip-green">运行中</span></header><p class="plugin-card-desc">为 Chat 提供网页搜索和正文抓取；停用后，后续对话不再暴露这些工具。</p><div class="plugin-card-badges"><span class="plugin-chip">内置</span><span class="plugin-chip accent">聊天工具</span><span class="plugin-chip">v0.1.0</span></div><div class="plugin-card-meta"><div class="plugin-meta-group"><span class="plugin-meta-label">运行方式</span><span>同进程运行</span></div><details class="plugin-card-details"><summary>声明能力 <span>2 项</span></summary><div class="plugin-card-badges"><span class="plugin-chip" title="fetch_url">网页读取</span><span class="plugin-chip" title="web_search">网页搜索</span></div></details></div><footer class="plugin-card-actions"><span>允许在线启停</span><button class="secondary-button" type="button" disabled="" title="交互加载后可用" aria-label="停用 网页搜索与抓取">停用</button></footer></article><article class="plugin-card"><header class="plugin-card-head"><div class="plugin-card-title"><h3 title="当前时间">当前时间</h3><code title="heimdall.tool.clock">heimdall.tool.clock</code></div><span class="status-chip chip-green">运行中</span></header><p class="plugin-card-desc">为 Chat 提供当前时间工具，无需联网即可使用。</p><div class="plugin-card-badges"><span class="plugin-chip">内置</span><span class="plugin-chip accent">聊天工具</span><span class="plugin-chip">v0.1.0</span></div><div class="plugin-card-meta"><div class="plugin-meta-group"><span class="plugin-meta-label">运行方式</span><span>同进程运行</span></div><details class="plugin-card-details"><summary>声明能力 <span>1 项</span></summary><div class="plugin-card-badges"><span class="plugin-chip" title="current_time">当前时间</span></div></details></div><footer class="plugin-card-actions"><span>允许在线启停</span><button class="secondary-button" type="button" disabled="" title="交互加载后可用" aria-label="停用 当前时间">停用</button></footer></article></div></section><details class="panel model-directory"><summary class="model-directory-summary"><span><strong>模型目录</strong><small>查看当前可调用的模型</small></span><span class="panel-count">4 个模型</span></summary><div class="model-tags"><span class="model-tag" title="示例服务">atlas-chat</span><span class="model-tag" title="示例服务">atlas-reasoning</span><span class="model-tag" title="示例服务">atlas-embedding</span><span class="model-tag" title="示例服务">orion-chat</span></div></details><section class="panel activity-panel" aria-labelledby="activity-title"><div class="panel-heading"><div><h2 id="activity-title">用量与最近请求</h2><p>最近 20 条请求</p></div><span class="status-chip chip-muted">128,640 tokens</span></div><div class="table-wrap request-table-wrap"><table class="request-table"><caption class="sr-only">最近 20 条请求</caption><thead><tr><th scope="col">接收时间 <small>UTC</small></th><th scope="col">模型 / 操作</th><th scope="col">状态</th><th scope="col">请求 ID</th></tr></thead><tbody><tr><td class="request-time"><time dateTime="2026-09-24T10:42:18Z">2026-09-24 10:42:18</time></td><td class="request-model"><strong title="atlas-chat">atlas-chat</strong><small>未知操作</small></td><td class="request-state"><span class="status-chip chip-green" title="completed">已完成</span></td><td class="request-id"><code title="preview-1">preview-1</code></td></tr><tr><td class="request-time"><time dateTime="2026-09-24T10:40:05Z">2026-09-24 10:40:05</time></td><td class="request-model"><strong title="atlas-reasoning">atlas-reasoning</strong><small>未知操作</small></td><td class="request-state"><span class="status-chip chip-green" title="completed">已完成</span></td><td class="request-id"><code title="preview-2">preview-2</code></td></tr><tr><td class="request-time"><time dateTime="2026-09-24T10:36:42Z">2026-09-24 10:36:42</time></td><td class="request-model"><strong title="orion-chat">orion-chat</strong><small>未知操作</small></td><td class="request-state"><span class="status-chip chip-red" title="error">失败</span></td><td class="request-id"><code title="preview-3">preview-3</code></td></tr></tbody></table></div></section><noscript><p class="notice">当前页面可直接阅读。修改配置、授权及实时状态需要启用 JavaScript。</p></noscript></div></fieldset></section><section id="channels" class="preview-page" aria-label="渠道页面预览"><fieldset disabled="" class="preview-readonly" aria-label="只读页面预览"><div class="console-content"><div class="console-toolbar"><span class="breadcrumb">管理端 / 渠道</span><div class="topbar-actions"><form method="post" action="/admin/logout"><button class="icon-button" type="submit" aria-label="退出登录" title="退出登录"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m16 17 5-5-5-5"></path><path d="M21 12H9"></path><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path></svg></button></form></div></div><header class="page-heading"><div><p class="eyebrow">工作空间</p><h1>渠道</h1><p>查看上游连接与健康状态，按预设完成配置。</p></div></header><p class="ssr-notice" role="status">正在加载交互功能，当前可浏览数据。</p><section class="catalog-section" aria-labelledby="sources-title"><div class="panel-heading"><div><h2 id="sources-title">上游渠道</h2></div><span class="panel-count">3 个渠道</span></div><div class="source-cards"><article class="source-card source-card-green"><header class="source-card-head"><div class="source-card-title"><h3 title="主力模型服务">主力模型服务</h3><code title="openai-compatible">openai-compatible</code></div><span class="status-chip chip-green">可用</span></header><dl class="source-card-meta"><div><dt>模型</dt><dd>3</dd></div><div><dt>能力</dt><dd>9</dd></div><div><dt>优先级</dt><dd>10</dd></div></dl><p class="source-probe" title="最近探测通过 · 连接正常 · 示例结果">最近探测通过 · 连接正常 · 示例结果</p><div class="source-status-slot"><div class="plugin-slots plugin-slots-source-status" data-ui-slot="source.status"><article class="plugin-slot plugin-slot-source-status" data-ui-extension="heimdall.preset.newapi:connection" data-ui-mode="schema" aria-label="渠道补充状态"><header class="slot-heading"><h3>渠道补充状态</h3><span class="slot-attribution">heimdall.preset.newapi</span></header><div class="slot-content" data-ui-fallback=""><span class="slot-badge tone-success">已配置密钥 · 示例</span><p class="slot-text">此区域用于展示当前渠道的授权、额度或同步状态。</p></div><div class="slot-mount" data-ui-mount="" hidden=""></div><p class="slot-notice" data-ui-notice="" role="status" hidden=""></p></article></div></div><footer class="source-card-actions"><button class="source-state-toggle" role="switch" type="button" disabled="" aria-checked="true" aria-label="停用 主力模型服务" title="交互加载后可用"><span class="source-switch-track" aria-hidden="true"></span><span>已启用</span></button><div class="source-card-buttons"><button class="icon-button" type="button" disabled="" title="管理 主力模型服务（交互加载后可用）" aria-label="管理 主力模型服务"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button><button class="icon-button" type="button" disabled="" title="配置 主力模型服务（交互加载后可用）" aria-label="配置 openai-compatible"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 5H3"></path><path d="M12 19H3"></path><path d="M14 3v4"></path><path d="M16 17v4"></path><path d="M21 12h-9"></path><path d="M21 19h-5"></path><path d="M21 5h-7"></path><path d="M8 10v4"></path><path d="M8 12H3"></path></svg></button></div></footer></article><article class="source-card source-card-amber"><header class="source-card-head"><div class="source-card-title"><h3 title="备用推理服务">备用推理服务</h3><code title="anthropic">anthropic</code></div><span class="status-chip chip-amber">冷却中</span></header><dl class="source-card-meta"><div><dt>模型</dt><dd>1</dd></div><div><dt>能力</dt><dd>5</dd></div><div><dt>优先级</dt><dd>0</dd></div></dl><p class="source-probe" title="最近探测失败 · 等待下一次探测 · 示例结果">最近探测失败 · 等待下一次探测 · 示例结果</p><div class="source-status-slot"></div><footer class="source-card-actions"><button class="source-state-toggle" role="switch" type="button" disabled="" aria-checked="true" aria-label="停用 备用推理服务" title="交互加载后可用"><span class="source-switch-track" aria-hidden="true"></span><span>已启用</span></button><div class="source-card-buttons"><button class="icon-button" type="button" disabled="" title="管理 备用推理服务（交互加载后可用）" aria-label="管理 备用推理服务"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button><button class="icon-button" type="button" disabled="" title="配置 备用推理服务（交互加载后可用）" aria-label="配置 anthropic"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 5H3"></path><path d="M12 19H3"></path><path d="M14 3v4"></path><path d="M16 17v4"></path><path d="M21 12h-9"></path><path d="M21 19h-5"></path><path d="M21 5h-7"></path><path d="M8 10v4"></path><path d="M8 12H3"></path></svg></button></div></footer></article><article class="source-card source-card-muted"><header class="source-card-head"><div class="source-card-title"><h3 title="团队 ChatHub">团队 ChatHub</h3><code title="chathub-preview">chathub-preview</code></div><span class="status-chip chip-muted">已停用</span></header><dl class="source-card-meta"><div><dt>模型</dt><dd>1</dd></div><div><dt>能力</dt><dd>3</dd></div><div><dt>优先级</dt><dd>5</dd></div></dl><p class="source-probe" title="此渠道已暂停接收新请求。">此渠道已暂停接收新请求。</p><div class="source-status-slot"></div><footer class="source-card-actions"><button class="source-state-toggle" role="switch" type="button" disabled="" aria-checked="false" aria-label="启用 团队 ChatHub" title="交互加载后可用"><span class="source-switch-track" aria-hidden="true"></span><span>已停用</span></button><div class="source-card-buttons"><button class="icon-button" type="button" disabled="" title="管理 团队 ChatHub（交互加载后可用）" aria-label="管理 团队 ChatHub"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button><button class="icon-button" type="button" disabled="" title="配置 团队 ChatHub（交互加载后可用）" aria-label="配置 chathub-preview"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M10 5H3"></path><path d="M12 19H3"></path><path d="M14 3v4"></path><path d="M16 17v4"></path><path d="M21 12h-9"></path><path d="M21 19h-5"></path><path d="M21 5h-7"></path><path d="M8 10v4"></path><path d="M8 12H3"></path></svg></button></div></footer></article></div></section><a class="section-link" href="#overview">查看 8 个已注册插件及运行状态 <span aria-hidden="true">→</span></a><noscript><p class="notice">当前页面可直接阅读。修改配置、授权及实时状态需要启用 JavaScript。</p></noscript></div></fieldset></section><section id="settings" class="preview-page" aria-label="设置页面预览"><fieldset disabled="" class="preview-readonly" aria-label="只读页面预览"><div class="console-content"><div class="console-toolbar"><span class="breadcrumb">管理端 / 设置</span><div class="topbar-actions"><form method="post" action="/admin/logout"><button class="icon-button" type="submit" aria-label="退出登录" title="退出登录"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m16 17 5-5-5-5"></path><path d="M21 12H9"></path><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path></svg></button></form></div></div><header class="page-heading"><div><p class="eyebrow">工作空间</p><h1>设置</h1><p>按功能调整实例配置，变更保存后生效。</p></div></header><p class="ssr-notice" role="status">正在加载交互功能，当前可浏览数据。</p><section class="panel"><h2>代理与探测</h2><dl class="settings-summary"><dt>每分钟请求上限</dt><dd>120</dd><dt>探测间隔</dt><dd>300000 ms</dd><dt>代理密钥</dt><dd>已配置</dd></dl></section><div class="plugin-slots plugin-slots-settings-section" data-ui-slot="settings.section"><article class="plugin-slot plugin-slot-settings-section" data-ui-extension="heimdall.preset.newapi:settings" data-ui-mode="schema" aria-label="NewAPI 配置说明"><header class="slot-heading"><h3>NewAPI 配置说明</h3><span class="slot-attribution">heimdall.preset.newapi</span></header><div class="slot-content" data-ui-fallback=""><p class="slot-text">请求上限和探测间隔由实例设置统一管理。渠道密钥留空时保留已有配置。</p><button type="button" class="secondary-button" data-ui-action-index="1" disabled="" title="交互加载后可用">同步插件状态（示例）</button></div><div class="slot-mount" data-ui-mount="" hidden=""></div><p class="slot-notice" data-ui-notice="" role="status" hidden=""></p><noscript><p class="slot-notice">启用 JavaScript 后可执行插件操作。</p></noscript></article></div><noscript><p class="notice">当前页面可直接阅读。修改配置、授权及实时状态需要启用 JavaScript。</p></noscript></div></fieldset></section><section id="plugin" class="preview-page" aria-label="NewAPI 工作区页面预览"><fieldset disabled="" class="preview-readonly" aria-label="只读页面预览"><div class="console-content"><div class="console-toolbar"><span class="breadcrumb">管理端 / NewAPI 工作区</span><div class="topbar-actions"><form method="post" action="/admin/logout"><button class="icon-button" type="submit" aria-label="退出登录" title="退出登录"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m16 17 5-5-5-5"></path><path d="M21 12H9"></path><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path></svg></button></form></div></div><header class="page-heading"><div><p class="eyebrow">工作空间</p><h1>NewAPI 工作区</h1><p>已安装插件提供的工作区。</p></div></header><p class="ssr-notice" role="status">正在加载交互功能，当前可浏览数据。</p><div class="plugin-slots plugin-slots-nav-tab" data-ui-slot="nav.tab"><article class="plugin-slot plugin-slot-nav-tab" data-ui-extension="heimdall.preset.newapi:guide" data-ui-mode="schema" aria-label="NewAPI 工作区"><header class="slot-heading"><h3>NewAPI 工作区</h3><span class="slot-attribution">heimdall.preset.newapi</span></header><p class="slot-description">示例插件专属页，使用宿主统一排版与导航。</p><div class="slot-content" data-ui-fallback=""><span class="slot-badge tone-neutral">设计预览</span><p class="slot-text">在添加渠道模态填写名称和优先级，选择 NewAPI 后，在同一模态内填写连接信息并保存；保存后关闭模态并刷新渠道列表。</p><dl class="slot-metrics"><div class="slot-metric tone-neutral"><dt>已关联渠道</dt><dd>1<small>个</small></dd></div></dl><a class="text-button" href="#flow">查看配置流程</a></div><div class="slot-mount" data-ui-mount="" hidden=""></div><p class="slot-notice" data-ui-notice="" role="status" hidden=""></p></article></div><noscript><p class="notice">当前页面可直接阅读。修改配置、授权及实时状态需要启用 JavaScript。</p></noscript></div></fieldset></section><section id="flow" class="preview-section" aria-labelledby="flow-title"><header class="page-heading"><div><p class="eyebrow">设计流程 · 示例数据</p><h2 id="flow-title">添加渠道</h2><p>基本信息 → 预设或自定义 → 完成配置；全部在同一个模态内。</p></div></header><p class="notice">以下按顺序展示同一个模态的不同步骤。选择预设后，插件 JSX 直接渲染在窗内；选择自定义后，窗内展示宿主表单。保存会保留名称和优先级，关闭模态并刷新渠道列表。预览链接仅定位步骤，不执行保存。</p><section id="flow-details" class="preview-modal-stage" aria-label="01 · 添加渠道模态 · 基本信息"><p class="preview-stage-label">01 · 添加渠道模态 · 基本信息</p><article class="source-dialog source-create-dialog preview-dialog" aria-labelledby="flow-details-title"><div class="panel-heading source-dialog-header"><div><h2 id="flow-details-title">添加渠道</h2><p class="source-flow-progress" aria-label="添加渠道步骤"><span>1 / 3</span><span>基本信息</span></p></div><button type="button" class="icon-button" aria-label="关闭" title="关闭" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg><span class="sr-only">关闭</span></button></div><div class="source-flow-content source-flow-details"><form><div class="source-flow-body"><label>渠道名称<input value="主力模型服务" disabled=""/></label><label>优先级<input type="number" value="10" disabled=""/></label></div><div class="config-actions source-flow-footer"><button type="button" class="text-button" disabled="">取消</button><a class="primary-button" href="#flow-choice">下一步</a></div></form></div></article></section><section id="flow-choice" class="preview-modal-stage" aria-label="02 · 同一模态内选择配置方式"><p class="preview-stage-label">02 · 同一模态内选择配置方式</p><article class="source-dialog source-create-dialog preview-dialog" aria-labelledby="flow-choice-title"><div class="panel-heading source-dialog-header"><div><h2 id="flow-choice-title">选择配置方式</h2><p class="source-flow-progress" aria-label="添加渠道步骤"><span>2 / 3</span><span>配置方式</span></p></div><button type="button" class="icon-button" aria-label="关闭" title="关闭" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg><span class="sr-only">关闭</span></button></div><p class="source-flow-context"><span>主力模型服务</span><span>优先级 10</span></p><div class="source-flow-content source-flow-choice"><div class="source-flow-body"><div class="template-options" aria-label="配置方式"><a class="template-option template-option-link" href="#flow-preset"><span class="template-option-body"><strong class="template-option-title">NewAPI</strong><span class="template-option-description">OpenAI 兼容来源</span></span><span class="template-option-arrow" aria-hidden="true">→</span></a><a class="template-option template-option-link" href="#flow-chathub-awaiting"><span class="template-option-body"><strong class="template-option-title">Microsoft ChatHub</strong><span class="template-option-description">Microsoft ChatHub</span></span><span class="template-option-arrow" aria-hidden="true">→</span></a><a class="template-option template-option-link" href="#flow-custom"><span class="template-option-body"><strong class="template-option-title">自定义配置</strong><span class="template-option-description">手动填写连接参数</span></span><span class="template-option-arrow" aria-hidden="true">→</span></a></div></div><div class="config-actions source-flow-footer"><a class="icon-button" href="#flow-details" aria-label="上一步" title="上一步"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg><span class="sr-only">上一步</span></a></div></div></article></section><section id="flow-preset" class="preview-modal-stage" aria-label="03 A · 同一模态内的 NewAPI 预设 JSX · 静态布局示意"><p class="preview-stage-label">03 A · 同一模态内的 NewAPI 预设 JSX · 静态布局示意</p><article class="source-dialog source-create-dialog preview-dialog source-dialog-configure" aria-labelledby="flow-preset-title"><div class="panel-heading source-dialog-header"><div><h2 id="flow-preset-title">NewAPI</h2><p class="source-flow-progress" aria-label="添加渠道步骤"><span>3 / 3</span><span>完成配置</span></p></div><button type="button" class="icon-button" aria-label="关闭" title="关闭" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg><span class="sr-only">关闭</span></button></div><p class="source-flow-context"><span>主力模型服务</span><span>优先级 10</span></p><div class="source-flow-content source-flow-configure"><section class="source-preset-config"><div class="preset-editor"><form class="newapi-setup source-preset-form"><div class="source-flow-body"><div class="schema-form"><div class="schema-field wide-field"><label for="flow-newapi-url">服务地址 <span class="field-required">必填</span></label><input id="flow-newapi-url" type="url" value="https://gateway.example/v1" disabled=""/><p class="field-help">使用 NewAPI 提供的 API 地址，通常以 /v1 结尾。</p></div><div class="schema-field wide-field"><label for="flow-newapi-token">访问令牌</label><div class="secret-control"><input id="flow-newapi-token" type="password" placeholder="输入 NewAPI 中创建的令牌" disabled=""/><button class="text-button" type="button" disabled="">显示</button></div><p class="field-help">如服务允许免认证可留空。令牌不会写入浏览器草稿。</p></div></div></div><div class="config-actions source-flow-footer source-preset-actions"><button type="button" class="secondary-button" disabled="">校验配置</button><button type="submit" class="primary-button" disabled="">保存渠道</button></div></form></div><div class="config-actions source-flow-footer source-flow-back"><a class="icon-button" href="#flow-choice" aria-label="上一步" title="上一步"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg><span class="sr-only">上一步</span></a></div></section></div></article></section><section id="flow-custom" class="preview-modal-stage" aria-label="03 B · 同一模态内的自定义配置 · 宿主 schema 表单"><p class="preview-stage-label">03 B · 同一模态内的自定义配置 · 宿主 schema 表单</p><article class="source-dialog source-create-dialog preview-dialog source-dialog-configure" aria-labelledby="flow-custom-title"><div class="panel-heading source-dialog-header"><div><h2 id="flow-custom-title">填写连接参数</h2><p class="source-flow-progress" aria-label="添加渠道步骤"><span>3 / 3</span><span>完成配置</span></p></div><button type="button" class="icon-button" aria-label="关闭" title="关闭" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg><span class="sr-only">关闭</span></button></div><p class="source-flow-context"><span>主力模型服务</span><span>优先级 10</span></p><div class="source-flow-content source-flow-configure"><form class="source-config-form"><div class="source-flow-body"><label class="source-config-source">源类型<select disabled=""><option value="heimdall.source.openai-compatible">OpenAI 兼容来源</option></select></label><div class="schema-form"><fieldset class="schema-group"><legend>连接参数</legend><div class="schema-field"><label for="flow-custom-baseUrl">服务地址<span class="field-required">必填</span></label><input id="flow-custom-baseUrl" name="baseUrl" disabled="" aria-describedby="flow-custom-baseUrl-help" required="" placeholder="https://api.openai.com/v1" type="url" value="https://gateway.example/v1"/><p class="field-help" id="flow-custom-baseUrl-help">填写包含路径前缀的完整地址，不含密钥或查询参数。</p></div><div class="schema-field"><label for="flow-custom-apiKey">API 密钥</label><div class="secret-control"><input id="flow-custom-apiKey" name="apiKey" disabled="" aria-describedby="flow-custom-apiKey-help" type="password" value="" autoComplete="new-password"/></div><p class="field-help" id="flow-custom-apiKey-help">密钥只写入，不会返回页面。</p></div></fieldset><fieldset class="schema-group"><legend>原始参数</legend><div class="schema-field"><label for="flow-custom-endpoint">对话接口路径</label><input id="flow-custom-endpoint" name="endpoint" disabled="" aria-describedby="flow-custom-endpoint-help" type="text" value="/chat/completions"/><p class="field-help" id="flow-custom-endpoint-help">以 / 开头，接在服务地址之后。</p></div><div class="schema-field"><label for="flow-custom-compat">接口能力</label><select id="flow-custom-compat" name="compat" disabled=""><option value="">请选择</option><option value="full" selected="">全部能力</option><option value="chat">对话与补全</option><option value="embeddings">向量嵌入</option><option value="images">图像生成与编辑</option></select></div><div class="schema-field"><label for="flow-custom-modelMap">模型映射</label><textarea id="flow-custom-modelMap" name="modelMap" disabled="" aria-describedby="flow-custom-modelMap-help" rows="4">{&quot;atlas-chat&quot;:&quot;upstream-chat&quot;}</textarea><p class="field-help" id="flow-custom-modelMap-help">填写 JSON 对象，例如 {&quot;对外模型名&quot;:&quot;上游模型名&quot;}。</p></div><div class="schema-field"><label for="flow-custom-headers">附加请求头</label><textarea id="flow-custom-headers" name="headers" disabled="" aria-describedby="flow-custom-headers-help" rows="4">{}</textarea><p class="field-help" id="flow-custom-headers-help">填写 JSON 对象；仅用于非敏感请求头，认证信息请使用 API 密钥。</p></div></fieldset></div></div><div class="config-actions source-flow-footer"><a class="icon-button" href="#flow-choice" aria-label="上一步" title="上一步"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg><span class="sr-only">上一步</span></a><button type="submit" class="primary-button" disabled="">保存渠道</button></div></form></div></article></section><section id="flow-chathub-awaiting" class="preview-modal-stage" aria-label="03 C · 同一模态内的 ChatHub 预设 · 等待登录静态示意"><p class="preview-stage-label">03 C · 同一模态内的 ChatHub 预设 · 等待登录静态示意</p><article class="source-dialog source-create-dialog preview-dialog source-dialog-configure" aria-labelledby="flow-chathub-awaiting-title"><div class="panel-heading source-dialog-header"><div><h2 id="flow-chathub-awaiting-title">Microsoft ChatHub</h2><p class="source-flow-progress" aria-label="添加渠道步骤"><span>3 / 3</span><span>完成配置</span></p></div><button type="button" class="icon-button" aria-label="关闭" title="关闭" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg><span class="sr-only">关闭</span></button></div><p class="source-flow-context"><span>主力模型服务</span><span>优先级 10</span></p><div class="source-flow-content source-flow-configure"><div class="source-preset-config"><div class="preset-editor"><form class="preset-auth source-preset-form"><div class="source-flow-body"><div class="preset-auth-intro"><span class="preset-auth-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z"></path></svg></span><div><h3>连接 Microsoft ChatHub</h3><p class="field-help">授权工作或学校账号，即可使用渠道默认模型。</p></div></div><div class="preset-auth-panel"><div class="preset-auth-heading"><div><strong>Microsoft 账号授权</strong><p class="field-help">登录完成后，将回调网址粘贴回这里。</p></div><span class="status-chip chip-muted">等待登录</span></div><div class="preset-auth-steps"><div class="preset-auth-step"><span class="preset-auth-step-number" aria-hidden="true">1</span><div><button class="secondary-button preset-auth-link" type="button" disabled="">前往 Microsoft 登录 <span aria-hidden="true">↗</span></button><p class="field-help">在新窗口完成登录，本配置窗会保留。</p></div></div><div class="preset-auth-step"><span class="preset-auth-step-number" aria-hidden="true">2</span><div class="schema-field"><label for="flow-chathub-awaiting-callback">粘贴登录回调网址</label><input id="flow-chathub-awaiting-callback" type="password" placeholder="粘贴登录后的完整回调网址" disabled=""/><p class="field-help">复制地址栏中包含 nativeclient?code=… 的完整网址。</p><div class="preset-auth-inline-actions"><button class="primary-button" type="button" disabled="">完成授权</button><button class="text-button" type="button" disabled="">重新准备</button></div></div></div></div></div><details class="preset-auth-options"><summary>模型选项 <span class="field-help">可选</span></summary><div class="schema-field"><label for="flow-chathub-awaiting-models">发布的模型</label><input id="flow-chathub-awaiting-models" placeholder="留空使用渠道默认模型" disabled=""/><p class="field-help">需要覆盖默认值时填写模型名称，多个模型用逗号分隔。</p></div></details></div><div class="config-actions source-flow-footer source-preset-actions"><button class="secondary-button" type="button" disabled="">校验配置</button><button class="primary-button" type="submit" disabled="">保存渠道</button></div></form></div><div class="config-actions source-flow-footer source-flow-back"><a class="icon-button" href="#flow-choice" aria-label="上一步" title="上一步"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg><span class="sr-only">上一步</span></a></div></div></div></article></section><section id="flow-chathub-authorized" class="preview-modal-stage" aria-label="03 D · 同一模态内的 ChatHub 预设 · 已授权静态示意"><p class="preview-stage-label">03 D · 同一模态内的 ChatHub 预设 · 已授权静态示意</p><article class="source-dialog source-create-dialog preview-dialog source-dialog-configure" aria-labelledby="flow-chathub-authorized-title"><div class="panel-heading source-dialog-header"><div><h2 id="flow-chathub-authorized-title">Microsoft ChatHub</h2><p class="source-flow-progress" aria-label="添加渠道步骤"><span>3 / 3</span><span>完成配置</span></p></div><button type="button" class="icon-button" aria-label="关闭" title="关闭" disabled=""><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg><span class="sr-only">关闭</span></button></div><p class="source-flow-context"><span>主力模型服务</span><span>优先级 10</span></p><div class="source-flow-content source-flow-configure"><div class="source-preset-config"><div class="preset-editor"><form class="preset-auth source-preset-form"><div class="source-flow-body"><div class="preset-auth-intro"><span class="preset-auth-mark" aria-hidden="true"><svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor"><path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z"></path></svg></span><div><h3>连接 Microsoft ChatHub</h3><p class="field-help">授权工作或学校账号，即可使用渠道默认模型。</p></div></div><div class="preset-auth-panel is-authorized"><div class="preset-auth-account"><span class="preset-auth-check" aria-hidden="true">✓</span><div><strong>team@example.com</strong><p class="field-help">已授权，可以保存渠道。</p></div><button class="text-button" type="button" disabled="">更换账号</button></div></div><details class="preset-auth-options"><summary>模型选项 <span class="field-help">可选</span></summary><div class="schema-field"><label for="flow-chathub-authorized-models">发布的模型</label><input id="flow-chathub-authorized-models" placeholder="留空使用渠道默认模型" disabled=""/><p class="field-help">需要覆盖默认值时填写模型名称，多个模型用逗号分隔。</p></div></details></div><div class="config-actions source-flow-footer source-preset-actions"><button class="secondary-button" type="button" disabled="">校验配置</button><button class="primary-button" type="submit" disabled="">保存渠道</button></div></form></div><div class="config-actions source-flow-footer source-flow-back"><a class="icon-button" href="#flow-choice" aria-label="上一步" title="上一步"><svg xmlns="http://www.w3.org/2000/svg" class="icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg><span class="sr-only">上一步</span></a></div></div></div></article></section><section class="preview-modal-stage" aria-label="保存成功状态示例"><p class="preview-stage-label">04 · 保存成功 · 模态关闭，渠道列表已刷新</p><div class="source-created-toast preview-created-toast"><span>已添加渠道「主力模型服务」</span><button type="button" class="text-button" aria-label="关闭通知" disabled="">关闭</button></div></section></section><section id="controls" class="preview-section" aria-labelledby="controls-title"><header class="page-heading"><div><p class="eyebrow">宿主统一控件 · 示例状态</p><h2 id="controls-title">Schema 表单目录</h2><p class="preview-schema-key">string · secret · number · bool · enum · group · authorization</p></div></header><div class="panel"><div class="schema-form"><fieldset class="schema-group" aria-describedby="catalogue-group-common-help"><legend>基础字段与校验</legend><p class="field-help" id="catalogue-group-common-help">分组由 schema 描述；标签、间距和错误提示由宿主统一提供。</p><div class="schema-field"><label for="catalogue-displayName">文本 string<span class="field-required">必填</span></label><input id="catalogue-displayName" name="displayName" disabled="" aria-describedby="catalogue-displayName-error" aria-invalid="true" required="" placeholder="填写便于辨认的名称" maxLength="80" type="text" value=""/><p class="field-error" id="catalogue-displayName-error" role="alert">请填写此项（校验状态示例）</p></div><div class="schema-field"><label for="catalogue-apiKey">密钥 secret</label><div class="secret-control"><input id="catalogue-apiKey" name="apiKey" disabled="" aria-describedby="catalogue-apiKey-help" type="password" value="" autoComplete="new-password" placeholder="已配置，留空保留"/></div><p class="field-help" id="catalogue-apiKey-help">只展示配置状态，不回填明文。 已配置，留空保留原值。</p></div><div class="schema-field"><label for="catalogue-limit">数值 number</label><input id="catalogue-limit" name="limit" disabled="" aria-describedby="catalogue-limit-help" type="number" min="0" max="10000" step="1" inputMode="numeric" value="120"/><p class="field-help" id="catalogue-limit-help">支持范围和整数约束。</p></div><div class="schema-field"><label for="catalogue-mode">枚举 enum</label><select id="catalogue-mode" name="mode" disabled=""><option value="">请选择</option><option value="balanced" selected="">均衡模式</option><option value="priority">优先模式</option></select></div><div class="schema-field schema-field-bool"><label for="catalogue-enabled">开关 bool</label><input id="catalogue-enabled" name="enabled" disabled="" aria-describedby="catalogue-enabled-help" type="checkbox" value="true" checked=""/><p class="field-help" id="catalogue-enabled-help">标签与原生复选框关联。</p></div><div class="schema-field"><label for="catalogue-notes">多行文本</label><textarea id="catalogue-notes" name="notes" disabled="" rows="4">团队共享的上游服务
+仅用于展示排版</textarea></div></fieldset><fieldset class="schema-group" aria-describedby="catalogue-group-authorization-help"><legend>授权 authorization · 四种状态</legend><p class="field-help" id="catalogue-group-authorization-help">宿主授权控件的通用状态。ChatHub 预设的专属授权步骤见上方模态示例。</p><div class="schema-field"><label for="catalogue-idle">未授权</label><div class="authorization-control"><button id="catalogue-idle" name="idle" disabled="" aria-describedby="catalogue-idle-status" type="button" aria-busy="false">一键授权</button><p id="catalogue-idle-status" class="field-help" role="status" aria-live="polite">尚未授权 · 示例状态</p></div></div><div class="schema-field"><label for="catalogue-pending">授权进行中</label><div class="authorization-control"><button id="catalogue-pending" name="pending" disabled="" aria-describedby="catalogue-pending-status" type="button" aria-busy="true">正在授权…</button><p id="catalogue-pending-status" class="field-help" role="status" aria-live="polite">等待授权结果 · 示例状态</p></div></div><div class="schema-field"><label for="catalogue-success">授权成功</label><div class="authorization-control"><button id="catalogue-success" name="success" disabled="" aria-describedby="catalogue-success-status" type="button" aria-busy="false">一键授权</button><p id="catalogue-success-status" class="field-help" role="status" aria-live="polite">已完成授权 · 示例状态</p></div></div><div class="schema-field"><label for="catalogue-error">授权失败</label><div class="authorization-control"><button id="catalogue-error" name="error" disabled="" aria-describedby="catalogue-error-status" type="button" aria-busy="false">一键授权</button><p id="catalogue-error-status" class="field-help" role="status" aria-live="polite">授权失败，可重试 · 示例状态</p></div></div></fieldset></div><p class="notice preset-preview">此处仅展示控件及状态。预览不发起授权、请求、探测或配置写入。</p></div></section><footer class="preview-meta">由实际 Hono JSX 组件与手写样式生成。未加载浏览器 island；此文件不代表真实浏览器交互验收。</footer></main></body></html>
