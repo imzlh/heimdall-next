@@ -1,7 +1,4 @@
-/**
- * @jsxRuntime automatic
- * @jsxImportSource hono/jsx/dom
- */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { createElement, useEffect, useMemo, useState } from "hono/jsx/dom";
 import type { Child } from "hono/jsx";
 import { parseChatMarkdown } from "../../shared/chat-markdown.ts";

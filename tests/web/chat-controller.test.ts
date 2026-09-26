@@ -41,7 +41,23 @@ function message(
         createdAt: "2026-09-24T00:00:00Z",
     };
 }
+/** Draft and model persistence live in localStorage; isolate it per test. */
+function clearChatStorage() {
+    try {
+        const storage = globalThis.localStorage;
+        if (!storage) return;
+        storage.removeItem("heimdall.chat.models");
+        for (let index = storage.length - 1; index >= 0; index--) {
+            const key = storage.key(index);
+            if (key?.startsWith("heimdall.chat.draft.")) {
+                storage.removeItem(key);
+            }
+        }
+    } catch { /* Isolation is best-effort. */ }
+}
+
 function initial(patch: Partial<ChatInitial> = {}): ChatInitial {
+    clearChatStorage();
     return {
         conversations: [conversation()],
         conversation: conversation(),
@@ -87,6 +103,18 @@ function fakeApi() {
         },
         rename(id, title) {
             return Promise.resolve({ ...conversation(id), title });
+        },
+        updateSettings(id, patch) {
+            return Promise.resolve({
+                ...conversation(id),
+                ...(patch.systemPrompt === undefined
+                    ? {}
+                    : { systemPrompt: patch.systemPrompt }),
+                ...(patch.reasoningEffort === undefined ||
+                        patch.reasoningEffort === null
+                    ? {}
+                    : { reasoningEffort: patch.reasoningEffort }),
+            });
         },
         remove() {
             return Promise.resolve();

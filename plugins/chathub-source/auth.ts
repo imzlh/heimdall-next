@@ -25,7 +25,7 @@
 const CLIENT_ID = "c0ab8ce9-e9a0-42e7-b064-33d422df41f1";
 const AUTHORITY = "https://login.microsoftonline.com/common";
 const AUTHORIZE_URL = `${AUTHORITY}/oauth2/v2.0/authorize`;
-const TOKEN_URL = `${AUTHORITY}/oauth2/v2.0/token`;
+export const CHATHUB_TOKEN_URL = `${AUTHORITY}/oauth2/v2.0/token`;
 const REDIRECT_URI =
     "https://login.microsoftonline.com/common/oauth2/nativeclient";
 const SCOPE =
@@ -209,10 +209,14 @@ interface TokenResponse {
     expiresIn: number;
 }
 
+/** Injected SDK routing or a legacy caller-owned native client. */
+export type ChatHubAuthTransport = typeof fetch | Deno.HttpClient;
+
 async function requestTokens(
     form: Record<string, string>,
     signal?: AbortSignal,
-    httpClient?: Deno.HttpClient,
+    transport?: ChatHubAuthTransport,
+    redact: (message: string) => string = (message) => message,
 ): Promise<TokenResponse> {
     const timeout = AbortSignal.timeout(TOKEN_FETCH_TIMEOUT_MS);
     const effectiveSignal = signal
@@ -223,7 +227,8 @@ async function requestTokens(
 
     let response: Response;
     try {
-        response = await fetch(TOKEN_URL, {
+        const fetchTokens = typeof transport === "function" ? transport : fetch;
+        response = await fetchTokens(CHATHUB_TOKEN_URL, {
             method: "POST",
             // A public-client PKCE exchange must not carry an Origin header, or
             // AAD answers AADSTS9002326 — server-side fetch never adds one.
@@ -233,7 +238,8 @@ async function requestTokens(
             },
             body: new URLSearchParams(form),
             signal: effectiveSignal,
-            client: httpClient,
+            ...(typeof transport === "function" ? {} : { client: transport }),
+            redirect: "error",
         });
     } catch (error) {
         if (signal?.aborted) throw error;
@@ -256,7 +262,10 @@ async function requestTokens(
             ? body.error_description
             : "";
         throw new TokenEndpointError(
-            truncate(`${body.error} ${description}`.trim(), MAX_ERROR_DETAIL),
+            truncate(
+                redact(`${body.error} ${description}`.trim()),
+                MAX_ERROR_DETAIL,
+            ),
         );
     }
     if (
@@ -291,7 +300,8 @@ const CLOUD_SCOPE = "https://m365.cloud.microsoft/v2/.default";
 export async function requestCloudAccessToken(
     refreshToken: string,
     signal?: AbortSignal,
-    httpClient?: Deno.HttpClient,
+    transport?: ChatHubAuthTransport,
+    redact?: (message: string) => string,
 ): Promise<string> {
     const token = refreshToken.trim();
     if (!token) return "";
@@ -304,7 +314,8 @@ export async function requestCloudAccessToken(
                 scope: CLOUD_SCOPE,
             },
             signal,
-            httpClient,
+            transport,
+            redact,
         );
         return tokens.accessToken;
     } catch {
@@ -370,6 +381,8 @@ function readString(input: Record<string, unknown>, key: string): string {
 export async function completeLogin(
     input: Record<string, unknown>,
     signal?: AbortSignal,
+    transport?: ChatHubAuthTransport,
+    redact?: (message: string) => string,
 ): Promise<ChatHubAuthTokensResult | ChatHubAuthFailure> {
     const state = readString(input, "state");
     const callback = readString(input, "callback");
@@ -398,14 +411,19 @@ export async function completeLogin(
 
     let tokens: TokenResponse;
     try {
-        tokens = await requestTokens({
-            client_id: CLIENT_ID,
-            grant_type: "authorization_code",
-            code,
-            redirect_uri: REDIRECT_URI,
-            code_verifier: session.verifier,
-            scope: SCOPE,
-        }, signal);
+        tokens = await requestTokens(
+            {
+                client_id: CLIENT_ID,
+                grant_type: "authorization_code",
+                code,
+                redirect_uri: REDIRECT_URI,
+                code_verifier: session.verifier,
+                scope: SCOPE,
+            },
+            signal,
+            transport,
+            redact,
+        );
     } catch (error) {
         if (signal?.aborted) throw error;
         return fail(
@@ -425,7 +443,8 @@ export async function completeLogin(
 export async function refreshAccessToken(
     refreshToken: string,
     signal?: AbortSignal,
-    httpClient?: Deno.HttpClient,
+    transport?: ChatHubAuthTransport,
+    redact?: (message: string) => string,
 ): Promise<ChatHubAuthTokensResult | ChatHubAuthFailure> {
     // Send the trimmed value, not the raw stored one: a refresh token pasted into
     // .env or a config field often carries a trailing newline or stray spaces, and
@@ -445,7 +464,8 @@ export async function refreshAccessToken(
                 scope: SCOPE,
             },
             signal,
-            httpClient,
+            transport,
+            redact,
         );
     } catch (error) {
         if (signal?.aborted) throw error;

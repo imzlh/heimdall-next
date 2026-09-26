@@ -53,6 +53,7 @@ export async function serve(options: ServeOptions = {}): Promise<void> {
         protocols: builtins.protocols,
         adminManifestTargets: builtins.apis.map(apiPluginTarget),
         sourceRegistry: builtins.sources,
+        middleware: builtins.middleware,
         lifecycle: createRequestLifecycle(requests),
         requestJournal: requests,
         statsTimeZone: environment.timeZone,

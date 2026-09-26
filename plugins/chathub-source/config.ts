@@ -29,6 +29,8 @@ export interface ChatHubSourceConfig {
 
 export interface ChatHubSourceOptions
     extends SourceFactoryOptions<ChatHubSourceConfig>, ChatHubClientOptions {
+    /** Optional caller-owned fetch implementation for token requests. */
+    readonly fetch?: typeof fetch;
     readonly refresh?: typeof import("./auth.ts").refreshAccessToken;
 }
 

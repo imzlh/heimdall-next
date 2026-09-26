@@ -1,5 +1,4 @@
-/** @jsxRuntime automatic */
-/** @jsxImportSource hono/jsx/dom */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { useEffect, useState } from "hono/jsx/dom";
 import type { ConsoleSnapshot } from "@heimdall/admin-contracts/console.ts";
 import {
@@ -14,6 +13,74 @@ import {
     requestReceivedTime,
     requestState,
 } from "../shared/activity-presentation.ts";
+import { Icon } from "../shared/icons.tsx";
+
+export interface UsageSummaryData {
+    usage: UsageSnapshot | null;
+    days: UsageDay[];
+    error: string;
+}
+
+/** Shared usage reader so the overview cards and the activity panel agree. */
+export function useUsageData(
+    revision: number,
+    initial?: Pick<ConsoleSnapshot, "usage" | "errors">,
+): UsageSummaryData {
+    const [usage, setUsage] = useState<UsageSnapshot | null>(
+        initial?.usage.usage ?? null,
+    );
+    const [days, setDays] = useState<UsageDay[]>(initial?.usage.days ?? []);
+    const [error, setError] = useState(initial?.errors.usage ?? "");
+    useEffect(() => {
+        if (initial && revision === 0) return;
+        let active = true;
+        void loadUsage().then((result) => {
+            if (!active) return;
+            setUsage(result?.usage ?? null);
+            setDays(Array.isArray(result?.days) ? result.days : []);
+            setError("");
+        }, (cause) => {
+            if (!active) return;
+            setUsage(null);
+            setDays([]);
+            setError(`用量读取失败：${describeError(cause)}`);
+        });
+        return () => {
+            active = false;
+        };
+    }, [revision]);
+    return { usage, days, error };
+}
+
+/** Recent request list shared by the activity panel and the model ranking. */
+export function useRecentRequests(
+    revision: number,
+    initial?: Pick<ConsoleSnapshot, "requests" | "errors">,
+): { requests: JournalRequest[]; error: string } {
+    const [requests, setRequests] = useState<JournalRequest[]>(
+        initial?.requests ?? [],
+    );
+    const [error, setError] = useState(initial?.errors.requests ?? "");
+    useEffect(() => {
+        if (initial && revision === 0) return;
+        let active = true;
+        void loadRequests({ limit: 20 }).then((result) => {
+            if (!active) return;
+            setRequests(
+                Array.isArray(result?.requests) ? result.requests : [],
+            );
+            setError("");
+        }, (cause) => {
+            if (!active) return;
+            setRequests([]);
+            setError(`请求记录读取失败：${describeError(cause)}`);
+        });
+        return () => {
+            active = false;
+        };
+    }, [revision]);
+    return { requests, error };
+}
 
 export function ActivityPanel({ revision, initial }: {
     revision: number;
@@ -22,55 +89,31 @@ export function ActivityPanel({ revision, initial }: {
     const [requests, setRequests] = useState<JournalRequest[]>(
         initial?.requests ?? [],
     );
-    const [usage, setUsage] = useState<UsageSnapshot | null>(
-        initial?.usage.usage ?? null,
-    );
-    const [days, setDays] = useState<UsageDay[]>(initial?.usage.days ?? []);
     const [requestError, setRequestError] = useState(
         initial?.errors.requests ?? "",
     );
-    const [usageError, setUsageError] = useState(initial?.errors.usage ?? "");
     const [loading, setLoading] = useState(!initial);
+    const { usage, days, error: usageError } = useUsageData(revision, initial);
 
     useEffect(() => {
         if (initial && revision === 0) return;
         let active = true;
         setLoading(true);
         setRequestError("");
-        setUsageError("");
-        void Promise.allSettled([loadRequests({ limit: 20 }), loadUsage()])
-            .then(([requestResult, usageResult]) => {
-                if (!active) return;
-                if (requestResult.status === "fulfilled") {
-                    setRequests(
-                        Array.isArray(requestResult.value?.requests)
-                            ? requestResult.value.requests
-                            : [],
-                    );
-                } else {
-                    setRequests([]);
-                    setRequestError(
-                        `请求记录读取失败：${
-                            describeError(requestResult.reason)
-                        }`,
-                    );
-                }
-                if (usageResult.status === "fulfilled") {
-                    setUsage(usageResult.value?.usage ?? null);
-                    setDays(
-                        Array.isArray(usageResult.value?.days)
-                            ? usageResult.value.days
-                            : [],
-                    );
-                } else {
-                    setUsage(null);
-                    setDays([]);
-                    setUsageError(
-                        `用量读取失败：${describeError(usageResult.reason)}`,
-                    );
-                }
-                setLoading(false);
-            });
+        void loadRequests({ limit: 20 }).then((result) => {
+            if (!active) return;
+            setRequests(
+                Array.isArray(result?.requests) ? result.requests : [],
+            );
+            setLoading(false);
+        }, (cause) => {
+            if (!active) return;
+            setRequests([]);
+            setRequestError(
+                `请求记录读取失败：${describeError(cause)}`,
+            );
+            setLoading(false);
+        });
         return () => {
             active = false;
         };
@@ -84,7 +127,7 @@ export function ActivityPanel({ revision, initial }: {
         >
             <div class="panel-heading">
                 <div>
-                    <h2 id="activity-title">用量与最近请求</h2>
+                    <h2 id="activity-title">最近请求</h2>
                     <p>最近 20 条请求</p>
                 </div>
                 <span class="status-chip chip-muted">
@@ -121,68 +164,66 @@ export function ActivityPanel({ revision, initial }: {
                 <p class="form-error" role="alert">{requestError}</p>
             )}
             {requests.length > 0
-                ? (
-                    <div class="table-wrap request-table-wrap">
-                        <table class="request-table">
-                            <caption class="sr-only">最近 20 条请求</caption>
-                            <thead>
-                                <tr>
-                                    <th scope="col">
-                                        接收时间 <small>UTC</small>
-                                    </th>
-                                    <th scope="col">模型 / 操作</th>
-                                    <th scope="col">状态</th>
-                                    <th scope="col">请求 ID</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {requests.map((request) => {
-                                    const state = requestState(request.status);
-                                    return (
-                                        <tr key={request.requestId}>
-                                            <td class="request-time">
-                                                <time
-                                                    dateTime={request
-                                                        .receivedAt}
-                                                >
-                                                    {requestReceivedTime(
-                                                        request.receivedAt,
-                                                    )}
-                                                </time>
-                                            </td>
-                                            <td class="request-model">
-                                                <strong title={request.model}>
-                                                    {request.model ||
-                                                        "未指定模型"}
-                                                </strong>
-                                                <small>
-                                                    {request.operation ||
-                                                        "未知操作"}
-                                                </small>
-                                            </td>
-                                            <td class="request-state">
-                                                <span
-                                                    class={`status-chip chip-${state.tone}`}
-                                                    title={request.status}
-                                                >
-                                                    {state.label}
-                                                </span>
-                                            </td>
-                                            <td class="request-id">
-                                                <code title={request.requestId}>
-                                                    {request.requestId}
-                                                </code>
-                                            </td>
-                                        </tr>
-                                    );
-                                })}
-                            </tbody>
-                        </table>
-                    </div>
-                )
+                ? <RequestTableRows requests={requests} />
                 : !loading && !requestError && (
                     <p class="empty-state">暂无请求记录。</p>
                 )}
         </section>
+    );
+}
+
+function RequestTableRows(
+    { requests }: { requests: readonly JournalRequest[] },
+) {
+    return (
+        <div class="table-wrap request-table-wrap">
+            <table class="request-table">
+                <thead>
+                    <tr>
+                        <th scope="col">时间</th>
+                        <th scope="col">模型 / 操作</th>
+                        <th scope="col">状态</th>
+                        <th scope="col">请求 ID</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {requests.map((request) => {
+                        const state = requestState(request.status);
+                        return (
+                            <tr key={request.requestId}>
+                                <td class="request-time">
+                                    <time dateTime={request.receivedAt}>
+                                        {requestReceivedTime(
+                                            request.receivedAt,
+                                        )}
+                                    </time>
+                                </td>
+                                <td class="request-model">
+                                    <strong title={request.model}>
+                                        {request.model || "未指定模型"}
+                                    </strong>
+                                    <small>
+                                        {request.operation || "未知操作"}
+                                    </small>
+                                </td>
+                                <td class="request-state">
+                                    <span
+                                        class={`status-chip chip-${state.tone}`}
+                                        title={request.status}
+                                    >
+                                        {state.label}
+                                    </span>
+                                </td>
+                                <td class="request-id">
+                                    <code title={request.requestId}>
+                                        {request.requestId}
+                                    </code>
+                                </td>
+                            </tr>
+                        );
+                    })}
+                </tbody>
+            </table>
+        </div>
     );
 }

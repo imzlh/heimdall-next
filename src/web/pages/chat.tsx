@@ -2,18 +2,32 @@ import type {
     ChatInitial,
     ChatMessage,
 } from "@heimdall/admin-contracts/chat.ts";
-import { chatAttachmentUrl, chatRoleLabel } from "../shared/chat-view.ts";
+import {
+    chatAttachmentUrl,
+    chatMessageStatus,
+    chatRoleLabel,
+} from "../shared/chat-view.ts";
 import { Icon } from "../shared/icons.tsx";
 import { ChatMarkdown } from "../components/chat-markdown.tsx";
 
 function MessageView({ message }: { message: ChatMessage }) {
     return (
-        <article class={`chat-message role-${message.role}`}>
+        <article
+            class={`chat-message role-${message.role}`}
+            data-status={message.status}
+        >
             <div class="chat-message-author">{chatRoleLabel(message)}</div>
             <div class="chat-message-body">
-                {message.text && (message.role === "assistant"
-                    ? <ChatMarkdown text={message.text} />
-                    : <p class="chat-message-text">{message.text}</p>)}
+                {message.role === "assistant" && message.callId
+                    ? (
+                        <details class="chat-tool-call">
+                            <summary>{chatRoleLabel(message)}</summary>
+                            <pre>{message.text || "无参数"}</pre>
+                        </details>
+                    )
+                    : message.text && (message.role === "assistant"
+                        ? <ChatMarkdown text={message.text} />
+                        : <p class="chat-message-text">{message.text}</p>)}
                 {!!message.attachments?.length && (
                     <div class="chat-attachments" aria-label="消息附件">
                         {message.attachments.map((attachment, index) => {
@@ -37,7 +51,15 @@ function MessageView({ message }: { message: ChatMessage }) {
                     </div>
                 )}
             </div>
-            {message.text && (
+            {chatMessageStatus(message) && (
+                <p class="chat-notice" role="status">
+                    {chatMessageStatus(message)}
+                </p>
+            )}
+            {message.status === "failed" && message.error?.message && (
+                <p class="chat-notice">{message.error.message}</p>
+            )}
+            {message.text && !message.callId && (
                 <div class="chat-message-actions">
                     <button type="button" class="chat-small-button" disabled>
                         <Icon name="copy" />
@@ -239,22 +261,22 @@ export function ChatPageView({ initial }: { initial: ChatInitial }) {
                     </div>
                     <div class="chat-header-actions">
                         <div class="chat-model-field">
-                            <label class="sr-only" for="chat-model">
+                            <span class="sr-only" id="chat-model-label">
                                 选择模型
-                            </label>
-                            <select id="chat-model" class="chat-model" disabled>
+                            </span>
+                            <span
+                                id="chat-model"
+                                class="chat-model"
+                                aria-labelledby="chat-model-label"
+                            >
                                 {models.length
-                                    ? models.map((model) => (
-                                        <option
-                                            key={model}
-                                            value={model}
-                                            selected={model === selectedModel}
-                                        >
-                                            {model}
-                                        </option>
-                                    ))
-                                    : <option value="">暂无可用模型</option>}
-                            </select>
+                                    ? selectedModel || models[0]
+                                    : "暂无可用模型"}
+                                <Icon
+                                    name="chevron-down"
+                                    class="chat-model-chevron"
+                                />
+                            </span>
                         </div>
                         <button
                             class="chat-icon-button"

@@ -1,5 +1,4 @@
-/** @jsxRuntime automatic */
-/** @jsxImportSource hono/jsx/dom */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { render } from "hono/jsx/dom";
 import { Console, type ConsoleProps } from "./console.tsx";
 import { clearAdminToken, configureAdminTransport } from "./api/admin.ts";

@@ -32,12 +32,62 @@ const emptyDraft = (): Draft => ({ text: "", attachments: [] });
 const describe = (error: unknown) =>
     error instanceof Error ? error.message : String(error);
 
+// Unsent drafts survive reloads, like the original chat: text goes to
+// localStorage per conversation; images stay in memory only (they can exceed
+// the storage quota as base64).
+const DRAFT_KEY_PREFIX = "heimdall.chat.draft.";
+const MODEL_STORE_KEY = "heimdall.chat.models";
+
+function readStoredText(id: string): string {
+    try {
+        const raw = globalThis.localStorage?.getItem(DRAFT_KEY_PREFIX + id);
+        if (!raw) return "";
+        const parsed = JSON.parse(raw) as { text?: unknown };
+        return typeof parsed?.text === "string"
+            ? parsed.text.slice(0, 100_000)
+            : "";
+    } catch {
+        return "";
+    }
+}
+
+function writeStoredText(id: string, text: string): void {
+    try {
+        if (text) {
+            globalThis.localStorage?.setItem(
+                DRAFT_KEY_PREFIX + id,
+                JSON.stringify({ text }),
+            );
+        } else globalThis.localStorage?.removeItem(DRAFT_KEY_PREFIX + id);
+    } catch { /* Storage may be unavailable; drafts stay in memory. */ }
+}
+
+function readStoredModels(): Record<string, string> {
+    try {
+        const parsed: unknown = JSON.parse(
+            globalThis.localStorage?.getItem(MODEL_STORE_KEY) ?? "{}",
+        );
+        const map: Record<string, string> = {};
+        if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            for (const [key, value] of Object.entries(parsed)) {
+                if (typeof value === "string") map[key] = value;
+            }
+        }
+        return map;
+    } catch {
+        return {};
+    }
+}
+
 /** One controller owns one view and at most one generation. Failed sends never replay. */
 export function createChatController(
     options: ChatControllerOptions,
 ): ChatController {
     const { initial, onSelect } = options;
     const api = options.api ?? createChatApi();
+    // Remembered per-conversation models apply on selection; SSR state wins at
+    // construction so a deep link never gets overridden by local preferences.
+    const storedModels = readStoredModels();
     let state: ChatState = {
         conversations: initial.conversations,
         conversation: initial.conversation,
@@ -76,10 +126,33 @@ export function createChatController(
     const idle = () =>
         allowed() && !state.sending && !state.creating && !state.loading &&
         !state.managing;
-    const draftFor = (id = state.selectedId) => drafts.get(id) ?? emptyDraft();
+    const draftFor = (id = state.selectedId): Draft => {
+        const existing = drafts.get(id);
+        if (existing) return existing;
+        const text = readStoredText(id);
+        const draft: Draft = { text, attachments: [] };
+        if (text) drafts.set(id, draft);
+        return draft;
+    };
     const editDraft = (value: Draft) => {
         drafts.set(state.selectedId, value);
+        writeStoredText(state.selectedId, value.text);
         patch({ draft: value.text, attachments: value.attachments });
+    };
+    const rememberModel = (id: string, model: string) => {
+        storedModels[id] = model;
+        try {
+            globalThis.localStorage?.setItem(
+                MODEL_STORE_KEY,
+                JSON.stringify(storedModels),
+            );
+        } catch { /* Preference persistence is optional. */ }
+    };
+    const modelFor = (id: string) => {
+        const remembered = storedModels[id];
+        return remembered && state.models.includes(remembered)
+            ? remembered
+            : state.model;
     };
     const upsert = (conversation: ChatConversation) =>
         [
@@ -115,6 +188,7 @@ export function createChatController(
         if (transfer) {
             drafts.set(conversation.id, draftFor(""));
             drafts.delete("");
+            writeStoredText("", "");
         }
         const draft = draftFor(conversation.id);
         patch({
@@ -124,6 +198,7 @@ export function createChatController(
             messages: [],
             draft: draft.text,
             attachments: draft.attachments,
+            model: modelFor(conversation.id),
             streamText: "",
             toolCalls: [],
         });
@@ -133,6 +208,7 @@ export function createChatController(
         id: string,
         signal: AbortSignal,
         valid: () => boolean,
+        interrupted?: { readonly previousIds: ReadonlySet<string> },
     ): Promise<void> {
         const [list, history] = await Promise.allSettled([
             api.list(signal),
@@ -144,7 +220,22 @@ export function createChatController(
         else errors.push(`会话列表读取失败：${describe(list.reason)}`);
         if (history.status === "fulfilled") {
             if (history.value) {
-                patch({ ...history.value, streamText: "", toolCalls: [] });
+                const savedText = history.value.messages.filter((message) =>
+                    message.role === "assistant" && !message.callId &&
+                    !interrupted?.previousIds.has(message.id)
+                ).map((message) => message.text).join("");
+                // A successful history read does not prove the failed stream
+                // was saved. Retain visible output after storage/transport
+                // failure until the response actually contains that output.
+                const unsavedText = interrupted && state.streamText &&
+                        !savedText.endsWith(state.streamText)
+                    ? state.streamText
+                    : "";
+                patch({
+                    ...history.value,
+                    streamText: unsavedText,
+                    toolCalls: [],
+                });
             }
         } else errors.push(`消息读取失败：${describe(history.reason)}`);
         patch({ error: errors.filter(Boolean).join("；") });
@@ -167,6 +258,7 @@ export function createChatController(
                 toolCalls: [],
                 draft: draft.text,
                 attachments: draft.attachments,
+                model: modelFor(id),
             });
             onSelect?.(id);
         } catch (error) {
@@ -248,6 +340,34 @@ export function createChatController(
             patch({ managing: false });
         }
     }
+    async function updateSettings(
+        id: string,
+        patchSettings: {
+            readonly systemPrompt?: string;
+            readonly reasoningEffort?: "low" | "medium" | "high" | null;
+        },
+    ): Promise<boolean> {
+        if (!allowed() || !id) return false;
+        // Settings auto-save stays out of the composer's busy flags: it must
+        // not block typing, and a mid-run 409 only fails this one save.
+        const abort = new AbortController();
+        try {
+            const conversation = await api.updateSettings(
+                id,
+                patchSettings,
+                abort.signal,
+            );
+            if (disposed) return false;
+            patch({
+                conversations: upsert(conversation),
+                ...(state.selectedId === id ? { conversation } : {}),
+            });
+            return true;
+        } catch (error) {
+            if (!disposed) patch({ error: `设置保存失败：${describe(error)}` });
+            return false;
+        }
+    }
     async function remove(id: string): Promise<boolean> {
         if (!canManage(id)) return false;
         const abort = mutationAbort = new AbortController();
@@ -262,6 +382,7 @@ export function createChatController(
                 item.id !== id
             );
             drafts.delete(id);
+            writeStoredText(id, "");
             patch({ conversations });
             if (state.selectedId === id) {
                 beginNavigation();
@@ -319,6 +440,10 @@ export function createChatController(
             return;
         }
         const model = state.model;
+        const previousIds = new Set(
+            state.messages.map((message) => message.id),
+        );
+        let interrupted = false;
         const run: Run = {
             id: state.selectedId,
             abort: new AbortController(),
@@ -391,13 +516,19 @@ export function createChatController(
                 }
             };
             run.stream = api.open(command, receive);
-            await run.stream.finished;
+            interrupted = await run.stream.finished === "stopped";
         } catch (error) {
+            interrupted = true;
             if (currentRun(run)) patch({ error: describe(error) });
         } finally {
             if (currentRun(run)) {
                 patch({ loading: true, creating: false });
-                await reload(run.id, run.abort.signal, () => currentRun(run));
+                await reload(
+                    run.id,
+                    run.abort.signal,
+                    () => currentRun(run),
+                    interrupted ? { previousIds } : undefined,
+                );
                 if (currentRun(run)) {
                     activeRun = undefined;
                     patch({ sending: false, stopping: false, loading: false });
@@ -415,6 +546,7 @@ export function createChatController(
         },
         create,
         rename,
+        updateSettings,
         remove,
         select,
         refresh,
@@ -422,7 +554,9 @@ export function createChatController(
             if (!disposed) editDraft({ ...draftFor(), text });
         },
         setModel(model) {
-            if (!disposed) patch({ model });
+            if (disposed) return;
+            patch({ model });
+            if (state.selectedId) rememberModel(state.selectedId, model);
         },
         async addAttachments(files) {
             if (!allowed() || state.attachmentsBusy) return;

@@ -3,6 +3,7 @@ import type {
     GenerationRequest,
     InferenceSource,
     OperationRequest,
+    ResolvedSourceProxy,
     SourceCapability,
     SourceContext,
     StreamEvent,
@@ -14,6 +15,10 @@ import {
     validateChatHubSourceConfig,
 } from "./config.ts";
 import { decodeJwtClaims, refreshAccessToken } from "./auth.ts";
+import {
+    SourceProxyError,
+    SourceTransport,
+} from "../../packages/source-sdk/mod.ts";
 import {
     ChatHubClient,
     type ChatHubEvent,
@@ -30,6 +35,7 @@ import {
     modelToolRouterPrompt,
     parseModelToolDecision,
     toneForModel,
+    withMemoryOff,
 } from "./tools.ts";
 
 interface Session {
@@ -45,7 +51,6 @@ export class ChatHubSource implements InferenceSource {
     readonly capabilities: readonly SourceCapability[];
     #config: ChatHubSourceConfig;
     readonly #options: ChatHubSourceOptions;
-    readonly #client: ChatHubClient;
     #refreshing?: Promise<void>;
     readonly #sessions = new Map<string, Session>();
 
@@ -53,7 +58,6 @@ export class ChatHubSource implements InferenceSource {
         this.#config = validateChatHubSourceConfig(input);
         this.id = this.#config.id;
         this.#options = options;
-        this.#client = new ChatHubClient(options);
         this.capabilities = [{
             operation: "generation.create",
             models: this.#config.models,
@@ -62,7 +66,10 @@ export class ChatHubSource implements InferenceSource {
         }];
     }
 
-    async #credentials(signal: AbortSignal): Promise<ChatHubSourceConfig> {
+    async #credentials(
+        signal: AbortSignal,
+        selection: ResolvedSourceProxy | undefined,
+    ): Promise<ChatHubSourceConfig> {
         signal.throwIfAborted();
         const config = this.#config;
         const expiry = config.expiresAt
@@ -74,12 +81,26 @@ export class ChatHubSource implements InferenceSource {
         ) {
             this.#refreshing ??= (async () => {
                 // One caller cancelling must not abort renewal needed by other callers.
+                const refreshSignal = AbortSignal.timeout(20_000);
+                await using transport = new SourceTransport({
+                    getProxy: selection === undefined
+                        ? undefined
+                        : () => selection,
+                    signal: refreshSignal,
+                    client: this.#options.httpClient,
+                    fetch: this.#options.fetch,
+                    secrets: [config.accessToken, config.refreshToken],
+                });
                 const renewed =
                     await (this.#options.refresh ?? refreshAccessToken)(
                         config.refreshToken!,
-                        AbortSignal.timeout(20_000),
+                        refreshSignal,
+                        transport.fetch,
+                        (message) => transport.redact(message),
                     );
-                if (!renewed.ok) throw new Error(renewed.error);
+                if (!renewed.ok) {
+                    throw new Error(transport.redact(renewed.error));
+                }
                 if (renewed.oid !== config.oid || renewed.tid !== config.tid) {
                     throw new Error(
                         "ChatHub token renewal returned a different account",
@@ -122,13 +143,33 @@ export class ChatHubSource implements InferenceSource {
         const abort = new AbortController();
         const signal = AbortSignal.any([context.signal, abort.signal]);
         let selected: Session | undefined;
+        let transport: SourceTransport | undefined;
         try {
+            transport = new SourceTransport({
+                getProxy: this.#options.getProxy,
+                client: this.#options.httpClient,
+                fetch: this.#options.fetch,
+                signal,
+                secrets: [this.#config.accessToken, this.#config.refreshToken],
+            });
+            const client = new ChatHubClient({
+                ...this.#options,
+                webSocketFactory: this.#options.webSocketFactory
+                    ? (url) =>
+                        this.#options.webSocketFactory!(
+                            url,
+                            this.#options.getProxy
+                                ? undefined
+                                : this.#options.httpClient,
+                        )
+                    : (url) => transport!.webSocket(url),
+            });
             const request = generationPayload(input);
             const model = request.model ?? this.#config.models[0];
             if (!this.#config.models.includes(model!)) {
                 throw new TypeError("ChatHub model is not configured");
             }
-            const config = await this.#credentials(signal);
+            const config = await this.#credentials(signal, transport.selection);
             const messages = conversationMessages(request);
             const fullText = flattenConversation(messages);
             if (!fullText) {
@@ -145,6 +186,9 @@ export class ChatHubSource implements InferenceSource {
                 endpoint: config.endpoint,
                 licenseType: config.licenseType,
                 scenario: config.scenario,
+                // Session-level memory block: no personalization memory or
+                // custom instructions are read or written for this turn.
+                disableMemory: true,
                 ...ids,
             });
             const upstream = (text: string) => ({
@@ -171,7 +215,7 @@ export class ChatHubSource implements InferenceSource {
                         function: { name: request.toolChoice.name },
                     }
                     : request.toolChoice;
-                const result = await this.#client.chat(
+                const result = await client.chat(
                     makeConnection(),
                     upstream(modelToolRouterPrompt(fullText, tools, choice)),
                     { signal },
@@ -273,9 +317,9 @@ export class ChatHubSource implements InferenceSource {
             let settled = false;
             let failure: unknown;
             let answer = "";
-            const run = this.#client.chat(
+            const run = client.chat(
                 makeConnection(ids),
-                upstream(prompt),
+                upstream(withMemoryOff(prompt)),
                 {
                     signal,
                     onEvent(event) {
@@ -384,12 +428,15 @@ export class ChatHubSource implements InferenceSource {
                     kind: "run.cancelled",
                     reason: "request aborted",
                 });
-            } else {yield emit({
+            } else {
+                yield emit({
                     kind: "run.error",
-                    error: canonicalError(error, this.#config),
-                });}
+                    error: canonicalError(error, this.#config, transport),
+                });
+            }
         } finally {
             abort.abort();
+            await transport?.close();
             if (selected) selected.busy = false;
         }
     }
@@ -413,7 +460,16 @@ function sessionKey(request: GenerationRequest): string | undefined {
 function canonicalError(
     error: unknown,
     config: ChatHubSourceConfig,
+    transport?: SourceTransport,
 ): CanonicalError {
+    if (error instanceof SourceProxyError) {
+        return {
+            code: error.code,
+            message: error.message,
+            retryable: false,
+            status: 503,
+        };
+    }
     let message = error instanceof Error
         ? error.message
         : "ChatHub request failed";
@@ -425,6 +481,9 @@ function canonicalError(
             );
         }
     }
+    // Redact before truncation: a cut credential would no longer match the
+    // complete secret and could expose its prefix in the operator response.
+    message = transport?.redact(message) ?? message;
     const invalid = error instanceof TypeError;
     const timeout = error instanceof ChatHubTimeoutError;
     const throttled = /throttl|rate.?limit|quota|429/i.test(message);

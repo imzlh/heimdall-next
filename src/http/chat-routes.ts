@@ -33,6 +33,7 @@ import { chatSocketProtocol } from "./chat-auth.ts";
 
 const REQUEST_ID = "x-heimdall-request-id";
 const TEXT_LIMIT = 100_000;
+const SYSTEM_PROMPT_LIMIT = 8_000;
 
 export interface ChatRouteOptions {
     readonly runtime: KernelRuntime;
@@ -91,13 +92,60 @@ export function createChatRoutes(options: ChatRouteOptions): ServerApp {
         const requestId = currentRequestId(context);
         const id = requiredQuery(context, "id");
         const body = await readJsonBody(context);
-        const title = requiredString(body.title, "title");
-        if (title.length > 120) {
+        const hasTitle = body.title !== undefined;
+        const hasSystemPrompt = body.systemPrompt !== undefined;
+        const hasEffort = body.reasoningEffort !== undefined;
+        if (!hasTitle && !hasSystemPrompt && !hasEffort) {
             throw new ChatRouteError(
                 400,
                 "invalid_request",
-                "title must be at most 120 characters",
+                "nothing to update",
             );
+        }
+        let title: string | undefined;
+        if (hasTitle) {
+            title = requiredString(body.title, "title");
+            if (title.length > 120) {
+                throw new ChatRouteError(
+                    400,
+                    "invalid_request",
+                    "title must be at most 120 characters",
+                );
+            }
+        }
+        let systemPrompt: string | undefined;
+        if (hasSystemPrompt) {
+            if (typeof body.systemPrompt !== "string") {
+                throw new ChatRouteError(
+                    400,
+                    "invalid_request",
+                    "systemPrompt must be a string",
+                );
+            }
+            systemPrompt = body.systemPrompt;
+            if (systemPrompt.length > SYSTEM_PROMPT_LIMIT) {
+                throw new ChatRouteError(
+                    413,
+                    "payload_too_large",
+                    `systemPrompt must be at most ${SYSTEM_PROMPT_LIMIT} characters`,
+                );
+            }
+        }
+        let reasoningEffort: string | undefined;
+        if (hasEffort) {
+            if (body.reasoningEffort === null) reasoningEffort = "";
+            else if (
+                body.reasoningEffort === "low" ||
+                body.reasoningEffort === "medium" ||
+                body.reasoningEffort === "high"
+            ) reasoningEffort = body.reasoningEffort;
+            else {
+                throw new ChatRouteError(
+                    400,
+                    "invalid_request",
+                    "reasoningEffort must be low, medium, high or null",
+                );
+            }
         }
         return await withConversationRun(options.store, id, () => {
             const conversation = options.store.getConversation(id);
@@ -110,9 +158,14 @@ export function createChatRoutes(options: ChatRouteOptions): ServerApp {
                 );
             }
             const updatedAt = now().toISOString();
-            options.store.updateConversation(id, { title, updatedAt });
+            options.store.updateConversation(id, {
+                updatedAt,
+                ...(title === undefined ? {} : { title }),
+                ...(systemPrompt === undefined ? {} : { systemPrompt }),
+                ...(reasoningEffort === undefined ? {} : { reasoningEffort }),
+            });
             return json(requestId, {
-                conversation: { ...conversation, title, updatedAt },
+                conversation: options.store.getConversation(id),
             });
         });
     });
@@ -327,6 +380,18 @@ export function createChatRoutes(options: ChatRouteOptions): ServerApp {
 
 type ToolCallRecord = ChatToolCall;
 
+interface CompletionOutcome {
+    text: string;
+    cancelled: boolean;
+    toolCalls: ToolCallRecord[];
+    error?: ChatRouteError;
+}
+
+interface TurnSettings {
+    readonly systemPrompt?: string;
+    readonly reasoningEffort?: "low" | "medium" | "high";
+}
+
 async function complete(
     runtime: KernelRuntime,
     history: readonly ChatMessageRecord[],
@@ -335,9 +400,29 @@ async function complete(
     signal: AbortSignal,
     onDelta?: (text: string) => void,
     tools?: readonly ToolDefinition[],
-): Promise<{ text: string; cancelled: boolean; toolCalls: ToolCallRecord[] }> {
+    settings?: TurnSettings,
+): Promise<{
+    text: string;
+    cancelled: boolean;
+    toolCalls: ToolCallRecord[];
+    error?: ChatRouteError;
+}> {
+    // The conversation-level system prompt joins the window before bounding so
+    // the oldest turns, not the prompt, give way to the character budget.
+    const withSystem = settings?.systemPrompt
+        ? [
+            {
+                id: "system-prompt",
+                conversationId: "",
+                role: "system" as const,
+                text: settings.systemPrompt,
+                createdAt: "",
+            },
+            ...history,
+        ]
+        : history;
     const bounded = boundHistory(
-        history,
+        withSystem,
         MAX_HISTORY_MESSAGES,
         MAX_HISTORY_TEXT_CHARS,
     );
@@ -354,35 +439,62 @@ async function complete(
                 parts: messageParts(item),
             })),
             ...(tools !== undefined && tools.length > 0 ? { tools } : {}),
+            ...(settings?.reasoningEffort
+                ? {
+                    extensions: {
+                        raw: { reasoning_effort: settings.reasoningEffort },
+                    },
+                }
+                : {}),
         },
         traits: { model, streaming: onDelta !== undefined },
     };
     const lifecycle = runtime.createLifecycle(request, signal);
-    const execution = await runtime.run(request, lifecycle);
     const response = new ChatResponse();
-    for await (const frame of execution.frames) {
-        const event = frame.event;
-        const delta = response.append(event);
-        if (delta.length > 0) onDelta?.(delta);
-        if (event.kind === "run.cancelled") {
-            return {
-                text: response.text,
-                cancelled: true,
-                toolCalls: response.toolCalls,
-            };
+    let cancelled = false;
+    let failure: ChatRouteError | undefined;
+    try {
+        const execution = await runtime.run(request, lifecycle);
+        for await (const frame of execution.frames) {
+            const event = frame.event;
+            const delta = response.append(event);
+            if (delta.length > 0) onDelta?.(delta);
+            if (event.kind === "run.cancelled") {
+                cancelled = true;
+                break;
+            }
+            if (event.kind === "run.error") {
+                throw new ChatRouteError(
+                    502,
+                    event.error.code || "upstream_error",
+                    event.error.message || "generation failed",
+                );
+            }
         }
-        if (event.kind === "run.error") {
-            throw new ChatRouteError(
-                502,
-                event.error.code || "upstream_error",
-                event.error.message || "generation failed",
-            );
+    } catch (error) {
+        // The kernel interrupts pending reads with the caller's abort reason;
+        // providers need not produce a final run.cancelled frame. Preserve the
+        // visible partial reply and the chat protocol's stopped outcome.
+        if (signal.aborted && error === signal.reason) cancelled = true;
+        else {
+            failure = error instanceof ChatRouteError
+                ? error
+                : new ChatRouteError(
+                    502,
+                    "upstream_error",
+                    error instanceof Error
+                        ? error.message
+                        : "generation failed",
+                );
         }
     }
     return {
         text: response.text,
-        cancelled: false,
-        toolCalls: response.toolCalls,
+        cancelled,
+        // An interrupted tool call may contain incomplete arguments. Only a
+        // completed model round can commit calls to history or execute them.
+        toolCalls: failure || cancelled ? [] : response.toolCalls,
+        ...(failure ? { error: failure } : {}),
     };
 }
 
@@ -550,6 +662,9 @@ async function replaceLatestTurn(
         options.store.deleteMessages(staleIds);
         return { user, outcome };
     } catch (error) {
+        // A generation failure already saved its partial reply before surfacing
+        // the error. Keep both that reply and the previous answer available.
+        if (error instanceof ChatCompletionFailure) throw error;
         const added = options.store.listMessages(conversationId)
             .filter((item) => !before.has(item.id))
             .map((item) => item.id);
@@ -671,6 +786,14 @@ async function settleTurn(
         typeof options.tools === "function" ? options.tools() : options.tools,
     );
     const budget = newRunBudget();
+    const settings: TurnSettings = {
+        ...(conversation.systemPrompt
+            ? { systemPrompt: conversation.systemPrompt }
+            : {}),
+        ...(conversation.reasoningEffort
+            ? { reasoningEffort: conversation.reasoningEffort }
+            : {}),
+    };
     const created: ChatMessageRecord[] = [];
     const working: ChatMessageRecord[] = [...history];
     let titleText = firstUserText(history);
@@ -683,6 +806,7 @@ async function settleTurn(
             signal,
             onDelta,
             toolset.definitions,
+            settings,
         );
         const reply = storeReply(
             options.store,
@@ -694,6 +818,7 @@ async function settleTurn(
         created.push(...reply);
         working.push(...reply);
         titleText = "";
+        if (result.error) throw new ChatCompletionFailure(result.error);
         if (result.cancelled) {
             return { messages: created, toolCalls: [], cancelled: true };
         }
@@ -730,17 +855,35 @@ function storeReply(
     store: ChatStore,
     conversation: ConversationRecord,
     userText: string,
-    result: { text: string; toolCalls: readonly ToolCallRecord[] },
+    result: CompletionOutcome,
     now: () => Date,
 ): ChatMessageRecord[] {
     const created: ChatMessageRecord[] = [];
+    // Failed and stopped turns persist their visible output together with the
+    // outcome status; an outcome with no text (a bare stop or a failure before
+    // the first delta) leaves no empty row behind.
     if (result.text.length > 0) {
-        const assistant = message(
-            conversation.id,
-            "assistant",
-            result.text,
-            now().toISOString(),
-        );
+        const assistant: ChatMessageRecord = {
+            ...message(
+                conversation.id,
+                "assistant",
+                result.text,
+                now().toISOString(),
+            ),
+            status: result.error
+                ? "failed"
+                : result.cancelled
+                ? "stopped"
+                : "completed",
+            ...(result.error
+                ? {
+                    error: {
+                        code: result.error.code,
+                        message: result.error.message,
+                    },
+                }
+                : {}),
+        };
         store.addMessage(assistant);
         created.push(assistant);
     }
@@ -938,5 +1081,13 @@ class ChatRouteError extends Error {
         this.name = "ChatRouteError";
         this.status = status;
         this.code = code;
+    }
+}
+
+/** The failed generation and its visible output have reached durable storage. */
+class ChatCompletionFailure extends ChatRouteError {
+    constructor(error: ChatRouteError) {
+        super(error.status, error.code, error.message);
+        this.name = "ChatCompletionFailure";
     }
 }

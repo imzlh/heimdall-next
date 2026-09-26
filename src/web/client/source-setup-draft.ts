@@ -1,10 +1,13 @@
 import { randomUuid } from "./random-id.ts";
+import type { SourceProxySelection } from "@heimdall/admin-contracts/proxies.ts";
+import { sourceProxySelection } from "../shared/proxy-presentation.ts";
 
 export interface SourceSetupSelection {
     readonly name: string;
     readonly priority: number;
     readonly mode: "preset" | "custom";
     readonly presetId?: string;
+    readonly proxy?: SourceProxySelection;
 }
 
 /** Creation identity and choices live only for the lifetime of the dialog. */
@@ -50,6 +53,30 @@ export function createSourceSetupDraft(
         ) throw new Error("预设标识不能为空，且不能超过 128 个字符。");
         presetId = value.trim();
     }
+    let proxy: SourceProxySelection | undefined;
+    const selectedProxy = ownValue(selection, "proxy");
+    if (selectedProxy !== undefined) {
+        if (
+            !selectedProxy || typeof selectedProxy !== "object" ||
+            Array.isArray(selectedProxy)
+        ) {
+            throw new Error("代理选择无效。");
+        }
+        const mode = ownValue(selectedProxy, "mode");
+        const proxyId = ownValue(selectedProxy, "proxyId");
+        if (
+            typeof mode !== "string" ||
+            !["inherit", "direct", "proxy"].includes(mode) ||
+            (mode === "proxy" && typeof proxyId !== "string")
+        ) throw new Error("代理选择无效。");
+        proxy = sourceProxySelection(
+            mode === "proxy"
+                ? `proxy:${proxyId}`
+                : typeof mode === "string"
+                ? mode
+                : "",
+        );
+    }
     if (
         id !== undefined && (typeof id !== "string" || !UUID_PATTERN.test(id))
     ) {
@@ -61,5 +88,6 @@ export function createSourceSetupDraft(
         priority,
         mode,
         ...(presetId ? { presetId } : {}),
+        ...(proxy ? { proxy } : {}),
     };
 }

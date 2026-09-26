@@ -28,13 +28,18 @@ import { generationPayload, toWireRequest } from "./request.ts";
 import { jsonEvents } from "./response.ts";
 import { streamResponse } from "./stream.ts";
 import type { SourceContext } from "./types.ts";
+import {
+    SourceProxyError,
+    SourceTransport,
+} from "../../packages/source-sdk/mod.ts";
 
 /** Source plugin that speaks the Anthropic Messages upstream dialect. */
 export class AnthropicSource implements InferenceSource {
     readonly id: string;
     readonly capabilities: readonly SourceCapability[];
     readonly config: AnthropicSourceConfig;
-    readonly #fetch: NonNullable<AnthropicSourceOptions["fetch"]>;
+    readonly #fetch: AnthropicSourceOptions["fetch"];
+    readonly #getProxy: AnthropicSourceOptions["getProxy"];
     readonly #now: () => Date;
     readonly #streamId: (requestId: string) => string;
 
@@ -45,13 +50,21 @@ export class AnthropicSource implements InferenceSource {
         this.config = validateAnthropicSourceConfig(config);
         this.id = this.config.id ?? DEFAULT_SOURCE_ID;
         this.capabilities = advertisedCapabilities(this.config);
-        this.#fetch = options.fetch ?? fetch;
+        this.#fetch = options.fetch;
+        this.#getProxy = options.getProxy;
         this.#now = options.now ?? (() => new Date());
         this.#streamId = options.streamId ??
             ((requestId) => `anthropic:${requestId}:${crypto.randomUUID()}`);
     }
     async probe(signal: AbortSignal): Promise<SourceProbeResult> {
+        let transport: SourceTransport | undefined;
         try {
+            transport = new SourceTransport({
+                getProxy: this.#getProxy,
+                fetch: this.#fetch,
+                secrets: [this.config.apiKey],
+                signal,
+            });
             const headers = new Headers(this.config.headers);
             headers.set("accept", "application/json");
             headers.set(
@@ -61,7 +74,7 @@ export class AnthropicSource implements InferenceSource {
             if (this.config.apiKey !== undefined) {
                 headers.set("x-api-key", this.config.apiKey);
             }
-            const response = await this.#fetch(
+            const response = await transport.fetch(
                 `${this.config.baseUrl ?? DEFAULT_BASE_URL}/v1/models`,
                 {
                     method: "GET",
@@ -71,13 +84,17 @@ export class AnthropicSource implements InferenceSource {
                 },
             );
             if (response.ok) {
-                const models = await readModelIds(response, this.config.apiKey);
+                const models =
+                    (await readModelIds(response, this.config.apiKey))
+                        .filter((id) => transport!.redact(id) === id);
+                signal.throwIfAborted();
                 return {
                     ok: true,
                     message: "models endpoint reachable",
                     ...(models.length === 0 ? {} : { models }),
                 };
             }
+            await response.body?.cancel();
             return {
                 ok: false,
                 message: `models probe failed with status ${response.status}`,
@@ -87,10 +104,14 @@ export class AnthropicSource implements InferenceSource {
             const secret = this.config.apiKey;
             return {
                 ok: false,
-                message: secret === undefined
+                message: transport
+                    ? transport.redact(raw)
+                    : secret === undefined
                     ? raw
                     : raw.replaceAll(secret, "[redacted]"),
             };
+        } finally {
+            await transport?.close();
         }
     }
 
@@ -109,9 +130,16 @@ export class AnthropicSource implements InferenceSource {
         const emit = frameFactory(streamId, input.requestId, this.#now);
         yield emit({ kind: "run.started", request: input });
 
+        let transport: SourceTransport | undefined;
         try {
+            transport = new SourceTransport({
+                getProxy: this.#getProxy,
+                fetch: this.#fetch,
+                secrets: [this.config.apiKey],
+                signal: context.signal,
+            });
             const request = generationPayload(input);
-            const response = await this.#fetch(upstreamUrl(this.config), {
+            const response = await transport.fetch(upstreamUrl(this.config), {
                 method: "POST",
                 headers: upstreamHeaders(this.config, request.stream === true),
                 body: JSON.stringify(toWireRequest(request, this.config)),
@@ -163,11 +191,23 @@ export class AnthropicSource implements InferenceSource {
                 });
                 return;
             }
-            const canonical = error instanceof AnthropicUpstreamError
+            const canonical = error instanceof SourceProxyError
+                ? {
+                    code: error.code,
+                    message: error.message,
+                    retryable: error.retryable,
+                    status: error.status,
+                }
+                : error instanceof AnthropicUpstreamError
                 ? error.error
                 : transportError(error);
-            yield emit({ kind: "run.error", error: canonical });
+            yield emit({
+                kind: "run.error",
+                error: transport?.redactError(canonical) ?? canonical,
+            });
             return;
+        } finally {
+            await transport?.close();
         }
         yield emit({ kind: "run.completed" });
     }

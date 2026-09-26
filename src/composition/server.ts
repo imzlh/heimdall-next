@@ -9,6 +9,7 @@ import {
     createKernelRuntime,
     type KernelRuntime,
     type LifecyclePort,
+    type MiddlewareRegistry,
     ProtocolRegistry,
     SourceRegistry,
 } from "@heimdall/kernel";
@@ -20,6 +21,8 @@ export interface ServerOptions extends ServerAppOptions {
     readonly sources?: readonly InferenceSource[];
     /** Reuse a live registry so management writes affect execution immediately. */
     readonly sourceRegistry?: SourceRegistry;
+    /** Live global HIP middleware assembled by the host. */
+    readonly middleware?: MiddlewareRegistry;
     /** Optional pre-assembled kernel for embedding applications. */
     readonly kernel?: KernelRuntime;
     /**
@@ -41,6 +44,7 @@ export function createServer(options: ServerOptions = {}) {
         protocols = [],
         sources = [],
         sourceRegistry: injectedSourceRegistry,
+        middleware,
         kernel,
         lifecycle,
         chat,
@@ -58,6 +62,7 @@ export function createServer(options: ServerOptions = {}) {
     }
     const runtime = kernel ?? createKernelRuntime({
         sources: sourceRegistry,
+        middleware,
         lifecycle,
     });
 

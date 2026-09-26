@@ -1,5 +1,6 @@
 import { copyFormJson } from "./form-json.ts";
 import type { UiJsonObject, UiJsonValue } from "./ui.ts";
+import type { SourceProxySelection } from "./proxies.ts";
 
 export type PresetJsonValue = UiJsonValue;
 export type PresetJsonObject = UiJsonObject;
@@ -21,6 +22,8 @@ export interface PresetUiContext {
     };
     readonly sourcePluginId: string;
     readonly presetId: string;
+    /** A public host choice, never a proxy endpoint or credentials. */
+    readonly proxy?: SourceProxySelection;
 }
 
 /** Newly entered configuration travels to the host; the host owns persistence. */
@@ -40,7 +43,24 @@ const pluginId = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/;
 
 export function parsePresetUiContext(value: unknown): PresetUiContext {
     const context = jsonObject(value, PRESET_UI_LIMITS.contextBytes);
-    keys(context, ["draft", "sourcePluginId", "presetId"]);
+    keys(context, ["draft", "sourcePluginId", "presetId"], ["proxy"]);
+    if (context.proxy !== undefined) {
+        const proxy = record(context.proxy);
+        if (proxy.mode === "proxy") {
+            keys(proxy, ["mode", "proxyId"]);
+            ensure(
+                typeof proxy.proxyId === "string" &&
+                    /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(proxy.proxyId),
+                "invalid proxy id",
+            );
+        } else {
+            keys(proxy, ["mode"]);
+            ensure(
+                proxy.mode === "inherit" || proxy.mode === "direct",
+                "invalid proxy selection",
+            );
+        }
+    }
     const draft = record(context.draft);
     keys(draft, ["name", "priority", "id"]);
     ensure(text(draft.name, 120), "invalid draft name");

@@ -228,6 +228,9 @@ svg {
     flex-shrink: 0;
 }
 .section-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     font-size: 12px;
     font-weight: 500;
 }
@@ -328,8 +331,7 @@ form > .form-success,
     white-space: nowrap;
     transition: background var(--motion-fast) ease,
         border-color var(--motion-fast) ease, color var(--motion-fast) ease,
-        box-shadow var(--motion-fast) ease, opacity var(--motion-fast) ease,
-        transform var(--motion-fast) var(--motion-ease);
+        opacity var(--motion-fast) ease;
 }
 .primary-button {
     color: #fff;
@@ -351,11 +353,6 @@ form > .form-success,
     border-color: var(--border-strong);
     background: var(--surface-muted);
     text-decoration: none;
-}
-.primary-button:active:not(:disabled),
-.text-button:active:not(:disabled),
-.secondary-button:active:not(:disabled) {
-    transform: translateY(1px);
 }
 .icon-button {
     display: inline-flex;
@@ -494,6 +491,20 @@ input[type="radio"] {
 }
 .secret-control input {
     flex: 1;
+}
+.secret-control:has(> .icon-button) {
+    position: relative;
+}
+.secret-control:has(> .icon-button) input {
+    padding-right: 48px;
+}
+.secret-control > .icon-button {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 32px;
+    height: 32px;
 }
 .authorization-control {
     flex-wrap: wrap;
@@ -814,8 +825,6 @@ form > .config-actions,
 .template-option-arrow {
     flex-shrink: 0;
     color: var(--accent);
-    font-size: 20px;
-    transition: transform var(--motion-fast) var(--motion-ease);
 }
 .template-option.selected,
 .template-option[aria-pressed="true"],
@@ -977,15 +986,6 @@ form > .config-actions,
     .source-created-toast.is-closing {
         animation: source-toast-out var(--motion-exit) ease both;
         pointer-events: none;
-    }
-}
-@media (hover: hover) and (pointer: fine) {
-    .primary-button:hover:not(:disabled) {
-        box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 18%,
-            transparent);
-    }
-    .template-option-link:hover .template-option-arrow {
-        transform: translateX(2px);
     }
 }
 .table-wrap,

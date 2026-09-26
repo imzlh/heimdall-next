@@ -119,11 +119,13 @@ function PresetIllustration() {
                                     disabled
                                 />
                                 <button
-                                    class="text-button"
+                                    class="icon-button"
                                     type="button"
+                                    aria-label="显示访问令牌"
+                                    title="显示访问令牌"
                                     disabled
                                 >
-                                    显示
+                                    <Icon name="eye" />
                                 </button>
                             </div>
                             <p class="field-help">

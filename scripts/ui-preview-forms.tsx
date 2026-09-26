@@ -1,4 +1,5 @@
 import { SchemaFields } from "../src/web/components/schema-fields.tsx";
+import { Icon } from "../src/web/shared/icons.tsx";
 import { catalogueSchema } from "./ui-preview-data.ts";
 import {
     PreviewFlowBack,
@@ -65,12 +66,10 @@ export function DesignFlow() {
                                     OpenAI 兼容来源
                                 </span>
                             </span>
-                            <span
+                            <Icon
+                                name="chevron-right"
                                 class="template-option-arrow"
-                                aria-hidden="true"
-                            >
-                                →
-                            </span>
+                            />
                         </a>
                         <a
                             class="template-option template-option-link"
@@ -84,12 +83,10 @@ export function DesignFlow() {
                                     Microsoft ChatHub
                                 </span>
                             </span>
-                            <span
+                            <Icon
+                                name="chevron-right"
                                 class="template-option-arrow"
-                                aria-hidden="true"
-                            >
-                                →
-                            </span>
+                            />
                         </a>
                         <a
                             class="template-option template-option-link"
@@ -103,12 +100,10 @@ export function DesignFlow() {
                                     手动填写连接参数
                                 </span>
                             </span>
-                            <span
+                            <Icon
+                                name="chevron-right"
                                 class="template-option-arrow"
-                                aria-hidden="true"
-                            >
-                                →
-                            </span>
+                            />
                         </a>
                     </div>
                 </div>
@@ -126,11 +121,12 @@ export function DesignFlow() {
                     <span>已添加渠道「主力模型服务」</span>
                     <button
                         type="button"
-                        class="text-button"
+                        class="icon-button"
                         aria-label="关闭通知"
+                        title="关闭通知"
                         disabled
                     >
-                        关闭
+                        <Icon name="close" />
                     </button>
                 </div>
             </section>
@@ -161,27 +157,6 @@ function ChatHubAuthorizationDialogs() {
                             <div class="preset-editor">
                                 <form class="preset-auth source-preset-form">
                                     <div class="source-flow-body">
-                                        <div class="preset-auth-intro">
-                                            <span
-                                                class="preset-auth-mark"
-                                                aria-hidden="true"
-                                            >
-                                                <svg
-                                                    viewBox="0 0 24 24"
-                                                    width="24"
-                                                    height="24"
-                                                    fill="currentColor"
-                                                >
-                                                    <path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z" />
-                                                </svg>
-                                            </span>
-                                            <div>
-                                                <h3>连接 Microsoft ChatHub</h3>
-                                                <p class="field-help">
-                                                    授权工作或学校账号，即可使用渠道默认模型。
-                                                </p>
-                                            </div>
-                                        </div>
                                         <div
                                             class={`preset-auth-panel${
                                                 authorized
@@ -196,7 +171,7 @@ function ChatHubAuthorizationDialogs() {
                                                             class="preset-auth-check"
                                                             aria-hidden="true"
                                                         >
-                                                            ✓
+                                                            <Icon name="check" />
                                                         </span>
                                                         <div>
                                                             <strong>
@@ -207,11 +182,13 @@ function ChatHubAuthorizationDialogs() {
                                                             </p>
                                                         </div>
                                                         <button
-                                                            class="text-button"
+                                                            class="icon-button"
                                                             type="button"
+                                                            aria-label="更换账号"
+                                                            title="更换账号"
                                                             disabled
                                                         >
-                                                            更换账号
+                                                            <Icon name="account" />
                                                         </button>
                                                     </div>
                                                 )
@@ -249,9 +226,10 @@ function ChatHubAuthorizationDialogs() {
                                                                         Microsoft
                                                                         登录
                                                                         {" "}
-                                                                        <span aria-hidden="true">
-                                                                            ↗
-                                                                        </span>
+                                                                        <Icon
+                                                                            name="external-link"
+                                                                            size={16}
+                                                                        />
                                                                     </button>
                                                                     <p class="field-help">
                                                                         在新窗口完成登录，本配置窗会保留。
@@ -291,11 +269,13 @@ function ChatHubAuthorizationDialogs() {
                                                                             完成授权
                                                                         </button>
                                                                         <button
-                                                                            class="text-button"
+                                                                            class="icon-button"
                                                                             type="button"
+                                                                            aria-label="重新准备授权"
+                                                                            title="重新准备授权"
                                                                             disabled
                                                                         >
-                                                                            重新准备
+                                                                            <Icon name="refresh" />
                                                                         </button>
                                                                     </div>
                                                                 </div>

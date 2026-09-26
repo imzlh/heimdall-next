@@ -201,3 +201,46 @@ Deno.test("conversation deletion rolls back messages and attachments if the fina
         await Deno.remove(directory, { recursive: true });
     }
 });
+
+Deno.test("conversation settings persist, migrate on legacy tables, and clear", async () => {
+    const directory = await Deno.makeTempDir({
+        prefix: "heimdall-chat-settings-",
+    });
+    const path = `${directory}/chat.sqlite`;
+    // A legacy table without the settings columns must migrate on open.
+    const legacy = new DatabaseSync(path);
+    legacy.exec(
+        `CREATE TABLE conversations (
+            id TEXT PRIMARY KEY,
+            title TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )`,
+    );
+    legacy.close();
+    const store = openSqliteChatStore(path);
+    try {
+        const time = "2026-09-26T10:00:00.000Z";
+        const conversation = store.createConversation("Settings", time);
+        store.updateConversation(conversation.id, {
+            updatedAt: time,
+            systemPrompt: "Always answer in Chinese.",
+            reasoningEffort: "high",
+        });
+        const updated = store.getConversation(conversation.id);
+        assertEquals(updated?.systemPrompt, "Always answer in Chinese.");
+        assertEquals(updated?.reasoningEffort, "high");
+
+        // Empty strings clear; undefined keeps.
+        store.updateConversation(conversation.id, {
+            updatedAt: time,
+            systemPrompt: "",
+        });
+        const cleared = store.getConversation(conversation.id);
+        assertEquals(cleared?.systemPrompt, undefined);
+        assertEquals(cleared?.reasoningEffort, "high");
+    } finally {
+        store.close();
+        await Deno.remove(directory, { recursive: true });
+    }
+});

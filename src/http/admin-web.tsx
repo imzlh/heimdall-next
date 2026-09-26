@@ -162,6 +162,7 @@ export function createAdminWebRoutes(options: AdminWebOptions): ServerApp {
                     requests: snapshot.requests,
                     usage: snapshot.usage,
                     settings: snapshot.settings,
+                    proxies: snapshot.proxies,
                     errors: snapshot.errors,
                 },
                 page,

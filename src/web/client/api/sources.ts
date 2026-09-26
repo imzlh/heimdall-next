@@ -40,6 +40,7 @@ export function updateSource(
                 ? { priority: input.priority }
                 : {}),
             ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+            ...(input.proxy !== undefined ? { proxy: input.proxy } : {}),
         }),
     });
 }
@@ -66,6 +67,7 @@ export function createSource(input: CreateSourceInput): Promise<unknown> {
             priority: input.priority,
             sourcePluginId: input.sourcePluginId,
             ...(input.presetId ? { presetId: input.presetId } : {}),
+            ...(input.proxy !== undefined ? { proxy: input.proxy } : {}),
             config: input.config,
         }),
     });

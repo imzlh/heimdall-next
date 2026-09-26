@@ -1,6 +1,7 @@
 /** Public plugin boundary. Implementations stay in server/plugin packages. */
 
 import type { JsonValue, OperationRequest, StreamFrame } from "../hip/mod.ts";
+import type { ResolvedSourceProxy, SourceProxySelection } from "./proxy.ts";
 
 export type JsonObject = Readonly<Record<string, JsonValue>>;
 
@@ -117,6 +118,8 @@ export interface SourceProbeResult {
 
 /** Host persistence is scoped to the source instance; plugins never receive a store. */
 export interface SourceFactoryOptions<Config = unknown> {
+    /** Read at the start of network work. Adoption belongs to the plugin. */
+    readonly getProxy?: () => ResolvedSourceProxy;
     readonly onConfigUpdate?: (
         updated: Config,
         previous: Config,
@@ -161,6 +164,10 @@ export interface ApiRequestContext {
     readonly request: Request;
     readonly signal: AbortSignal;
     readonly route: PluginRoute;
+    /** Optional host preference lookup, for plugin-owned setup/authorization I/O. */
+    readonly resolveProxy?: (
+        selection?: SourceProxySelection,
+    ) => ResolvedSourceProxy;
 }
 
 export interface ApiPlugin {

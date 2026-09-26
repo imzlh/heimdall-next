@@ -2,6 +2,7 @@ import type {
     InferenceSource,
     PluginManifest,
     SourceCapability,
+    SourceFactoryOptions,
 } from "@heimdall/contracts";
 import manifest from "./manifest.json" with { type: "json" };
 import type { FetchLike } from "./types.ts";
@@ -25,7 +26,8 @@ export interface OpenAICompatibleSourceConfig {
     readonly compat?: "full" | "chat" | "embeddings" | "images";
 }
 
-export interface OpenAICompatibleSourceOptions {
+export interface OpenAICompatibleSourceOptions
+    extends SourceFactoryOptions<OpenAICompatibleSourceConfig> {
     readonly fetch?: FetchLike;
     readonly now?: () => Date;
     readonly streamId?: (requestId: string) => string;

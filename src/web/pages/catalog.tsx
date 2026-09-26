@@ -1,4 +1,8 @@
-import type { DashboardData } from "@heimdall/admin-contracts/console.ts";
+import type {
+    ConsoleSnapshot,
+    DashboardData,
+} from "@heimdall/admin-contracts/console.ts";
+import type { ProxyPoolView } from "@heimdall/admin-contracts/proxies.ts";
 import type { Child } from "hono/jsx";
 import type {
     UiContext,
@@ -14,42 +18,44 @@ import { PluginSlots } from "../components/slots.tsx";
 import { sourcePluginIdFor } from "../shared/source-schemas.ts";
 import { sourceUiContext } from "../shared/ui-context.ts";
 import { Icon } from "../shared/icons.tsx";
+import { StatsPanels } from "../shared/stats-panels.tsx";
 
 export function OverviewSnapshot(
-    { dashboard, widgets }: { dashboard: DashboardData; widgets?: Child },
+    { dashboard, widgets, proxyPool, stats }: {
+        dashboard: DashboardData;
+        widgets?: Child;
+        proxyPool?: ProxyPoolView | null;
+        stats?: ConsoleSnapshot["stats"];
+    },
 ) {
     const { sources, plugins } = dashboard.status;
     const healthy = dashboard.health.status === "ok";
     return (
         <>
-            <section class="stats-grid" aria-label="实例概况">
-                <article class="stat-card">
-                    <h2>服务健康</h2>
-                    <strong>{healthy ? "正常" : "需要检查"}</strong>
-                    <p>{healthy ? "服务正在接受请求" : "请检查服务状态"}</p>
-                </article>
-                <article class="stat-card">
-                    <h2>已启用渠道</h2>
-                    <strong>
-                        {sources.filter((source) => source.enabled).length}
-                    </strong>
-                    <p>共 {sources.length} 个渠道</p>
-                </article>
-                <article class="stat-card">
-                    <h2>可用模型</h2>
-                    <strong>{dashboard.models.length}</strong>
-                    <p>当前可调用</p>
-                </article>
-                <article class="stat-card">
-                    <h2>运行中插件</h2>
-                    <strong>
-                        {plugins.filter((plugin) =>
-                            plugin.enabled && !plugin.lastError
-                        ).length}
-                    </strong>
-                    <p>共 {plugins.length} 个插件</p>
-                </article>
-            </section>
+            <div class="overview-chips" aria-label="实例概况">
+                <span
+                    class={`overview-chip ${
+                        healthy ? "chip-ok" : "chip-alert"
+                    }`}
+                >
+                    {healthy ? "服务正常" : "服务异常"}
+                </span>
+                <span class="overview-chip">
+                    渠道{" "}
+                    {sources.filter((source) => source.enabled).length}/{sources
+                        .length}
+                </span>
+                <span class="overview-chip">
+                    模型 {dashboard.models.length}
+                </span>
+                <span class="overview-chip">
+                    插件{" "}
+                    {plugins.filter((plugin) =>
+                        plugin.enabled && !plugin.lastError
+                    ).length}/{plugins.length}
+                </span>
+            </div>
+            <StatsPanels stats={stats} />
             {widgets}
             <section
                 class="catalog-section"
@@ -61,7 +67,7 @@ export function OverviewSnapshot(
                         <p>上游连接与最近探测</p>
                     </div>
                     <a class="section-link" href="/admin?view=channels">
-                        管理渠道 <span aria-hidden="true">→</span>
+                        管理渠道 <Icon name="arrow-right" size={16} />
                     </a>
                 </div>
                 {sources.length
@@ -71,6 +77,7 @@ export function OverviewSnapshot(
                                 <SourceCard
                                     key={source.id ?? index}
                                     source={source}
+                                    proxyPool={proxyPool}
                                 />
                             ))}
                         </div>
@@ -81,7 +88,8 @@ export function OverviewSnapshot(
                                 尚未配置渠道，从预设或自定义参数开始连接上游。
                             </p>
                             <a class="section-link" href="/admin?view=channels">
-                                配置第一个渠道 →
+                                配置第一个渠道{" "}
+                                <Icon name="arrow-right" size={16} />
                             </a>
                         </div>
                     )}
@@ -103,12 +111,13 @@ export function OverviewSnapshot(
 }
 
 export function ChannelsSnapshot(
-    { dashboard, contributions, context, policy, sourcePluginIds }: {
+    { dashboard, contributions, context, policy, sourcePluginIds, proxyPool }: {
         dashboard: DashboardData;
         contributions: readonly UiContribution[];
         context: UiContext;
         policy?: UiPolicy;
         sourcePluginIds?: Readonly<Record<string, string>>;
+        proxyPool?: ProxyPoolView | null;
     },
 ) {
     const { sources, plugins } = dashboard.status;
@@ -128,6 +137,7 @@ export function ChannelsSnapshot(
                                 <SourceCard
                                     key={source.id ?? index}
                                     source={source}
+                                    proxyPool={proxyPool}
                                     editing
                                     status={
                                         <PluginSlots
@@ -170,7 +180,7 @@ export function ChannelsSnapshot(
             </section>
             <a class="section-link" href="/admin?view=overview#plugins">
                 查看 {plugins.length} 个已注册插件及运行状态{" "}
-                <span aria-hidden="true">→</span>
+                <Icon name="arrow-right" size={16} />
             </a>
         </>
     );

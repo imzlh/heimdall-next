@@ -1,4 +1,8 @@
-export type ConsolePage = "overview" | "channels" | "settings" | "plugin";
+export type ConsolePage =
+    | "overview"
+    | "channels"
+    | "settings"
+    | "plugin";
 
 const pages = {
     overview: { label: "总览", description: "服务状态、渠道连接与插件能力。" },

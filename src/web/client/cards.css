@@ -1,4 +1,116 @@
 /* Instance controls use the same geometry in SSR and the client island. */
+.source-proxy-summary {
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+    margin: 8px 0 0;
+}
+.source-proxy-field {
+    margin-top: 14px;
+}
+.source-proxy-field select {
+    width: 100%;
+}
+.proxy-pool-fields {
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    margin: 0;
+}
+.proxy-default-field {
+    display: grid;
+    gap: 6px;
+    max-width: 420px;
+    margin-bottom: 18px;
+}
+.proxy-entry-list {
+    display: grid;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+.proxy-entry {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    transition: border-color var(--motion-fast) ease;
+}
+.proxy-entry.is-expanded {
+    border-color: var(--border-strong);
+}
+.proxy-entry-heading,
+.proxy-entry-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.proxy-entry-heading {
+    padding: 14px 16px;
+    justify-content: space-between;
+}
+.proxy-entry-identity {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.proxy-entry-identity small {
+    color: var(--muted);
+    font-size: 12px;
+}
+.proxy-entry-actions {
+    flex-shrink: 0;
+    gap: 6px;
+}
+.proxy-entry-actions .text-button {
+    font-size: 12px;
+}
+.proxy-entry-editor {
+    padding: 16px;
+    border-top: 1px solid var(--border);
+    background: var(--surface-muted);
+    animation: proxy-editor-in var(--motion-enter) var(--motion-ease);
+}
+.proxy-entry-remove {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    margin-top: 14px;
+    font-size: 12px;
+}
+.danger-action {
+    color: var(--danger);
+}
+@keyframes proxy-editor-in {
+    from {
+        opacity: 0;
+        transform: translateY(-4px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+@media (prefers-reduced-motion: reduce) {
+    .proxy-entry-editor {
+        animation: none;
+    }
+}
+@media (max-width: 600px) {
+    .proxy-entry-heading {
+        flex-wrap: wrap;
+    }
+    .proxy-entry-actions {
+        margin-left: auto;
+    }
+    .proxy-entry-editor .field-grid {
+        grid-template-columns: 1fr;
+    }
+}
 .source-card-buttons {
     display: flex;
     flex-wrap: wrap;
@@ -413,8 +525,32 @@
     min-width: 0;
     width: 100%;
 }
-.source-status-slot:empty {
+.source-status-slot:has(> .source-status-content:empty) {
     display: none;
+}
+.source-status-slot > summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 2px 0;
+    border-radius: 6px;
+    list-style: none;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 11px;
+}
+.source-status-slot > summary::-webkit-details-marker {
+    display: none;
+}
+.source-status-slot > summary:hover {
+    color: var(--text);
+}
+.source-status-slot[open] > summary {
+    margin-bottom: 10px;
+}
+.source-status-slot[open] > summary > .icon {
+    transform: rotate(180deg);
 }
 .activity-panel .request-table {
     table-layout: fixed;
@@ -790,11 +926,6 @@
     .activity-panel .request-time {
         align-self: center;
     }
-    .activity-panel .request-time::after {
-        content: " UTC";
-        color: var(--subtle);
-        font-size: 10px;
-    }
     .activity-panel .request-state {
         grid-column: 2;
         grid-row: 1;
@@ -808,4 +939,512 @@
         overflow-wrap: anywhere;
         white-space: normal;
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* Console chrome: overview chips, channel toolbar & table, toasts.    */
+/* ------------------------------------------------------------------ */
+.overview-chips {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.overview-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 12px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: nowrap;
+}
+.overview-chip::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+    flex-shrink: 0;
+}
+.overview-chip.chip-ok {
+    color: var(--success);
+    background: var(--success-soft);
+    border-color: transparent;
+}
+.overview-chip.chip-alert {
+    color: var(--warning);
+    background: var(--warning-soft);
+    border-color: transparent;
+}
+.desktop-only,
+.mobile-only {
+    min-width: 0;
+}
+@media (max-width: 900px) {
+    .desktop-only {
+        display: none;
+    }
+}
+@media (min-width: 900.1px) {
+    .mobile-only {
+        display: none;
+    }
+}
+.channels-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+}
+.channels-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex: 1 1 260px;
+    min-width: 220px;
+}
+.channels-search .icon {
+    position: absolute;
+    left: 13px;
+    color: var(--subtle);
+    pointer-events: none;
+}
+.channels-search input {
+    padding-left: 36px;
+    border-radius: 999px;
+    background: var(--surface);
+}
+.channels-toolbar select {
+    width: auto;
+    min-width: 128px;
+    border-radius: 999px;
+    background: var(--surface);
+}
+.channels-table-wrap {
+    border-radius: 16px;
+}
+.channels-table {
+    width: 100%;
+}
+.channels-table th,
+.channels-table td {
+    padding: 12px 14px;
+}
+.channels-table .channel-sort {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+.channels-table .channel-sort-arrow {
+    font-size: 11px;
+    opacity: .5;
+}
+.channels-table .channel-sort.is-active {
+    color: var(--accent);
+    font-weight: 600;
+}
+.channels-table .channel-sort.is-active .channel-sort-arrow {
+    opacity: 1;
+}
+/* Row tone bar rides the collapsed left border so it never leaks a seam. */
+.channels-table th:first-child,
+.channels-table td:first-child {
+    border-left: 3px solid transparent;
+}
+.channels-row.row-tone-green td:first-child {
+    border-left-color: var(--success);
+}
+.channels-row.row-tone-amber td:first-child {
+    border-left-color: var(--warning);
+}
+.channels-row.row-tone-muted td:first-child {
+    border-left-color: var(--border-strong);
+}
+.channels-name strong {
+    display: block;
+    font-weight: 550;
+    color: var(--text);
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.channels-name code {
+    display: block;
+    margin-top: 2px;
+    color: var(--subtle);
+    font-size: 11px;
+    max-width: 280px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.channels-priority {
+    white-space: nowrap;
+    font-weight: 550;
+}
+.channels-state small {
+    display: block;
+    margin-top: 3px;
+    color: var(--subtle);
+    font-size: 11px;
+    max-width: 300px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.channel-actions-col {
+    width: 132px;
+    text-align: right;
+    white-space: nowrap;
+}
+.channel-row-actions {
+    display: inline-flex;
+    gap: 2px;
+}
+.channel-row-actions .icon-button {
+    width: 32px;
+    height: 32px;
+    flex: 0 0 32px;
+}
+.channel-row-actions .icon-button .icon {
+    width: 15px;
+    height: 15px;
+}
+.channel-row-actions .icon-button:hover:not(:disabled) {
+    color: var(--accent);
+}
+@media (max-width: 600px) {
+    .channels-toolbar select {
+        flex: 1 1 128px;
+    }
+    .channel-actions-col {
+        width: 112px;
+    }
+}
+
+/* Bottom-right toast stack, shared by every console action. */
+.console-toast-stack {
+    position: fixed;
+    z-index: 100;
+    right: 24px;
+    bottom: 24px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 10px;
+    pointer-events: none;
+}
+.console-toast {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: fit-content;
+    max-width: min(520px, calc(100vw - 32px));
+    padding: 10px 12px 10px 18px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    color: var(--text);
+    background: var(--surface);
+    box-shadow: var(--shadow-lg);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+    pointer-events: auto;
+}
+.console-toast::before {
+    content: "";
+    flex-shrink: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+.console-toast.toast-ok::before {
+    background: var(--success);
+}
+.console-toast.toast-warn::before {
+    background: var(--warning);
+}
+.console-toast > button {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    flex-basis: 28px;
+}
+.console-toast > button .icon {
+    width: 14px;
+    height: 14px;
+}
+@keyframes console-toast-in {
+    from {
+        opacity: 0;
+        transform: translateY(9px) scale(.96);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+@keyframes console-toast-out {
+    from {
+        opacity: 1;
+        transform: none;
+    }
+    to {
+        opacity: 0;
+        transform: translateY(5px) scale(.98);
+    }
+}
+@media (prefers-reduced-motion: no-preference) {
+    .console-toast {
+        animation: console-toast-in var(--motion-enter) var(--motion-ease) both;
+    }
+    .console-toast.is-closing {
+        animation: console-toast-out var(--motion-exit) ease both;
+        pointer-events: none;
+    }
+}
+@media (max-width: 600px) {
+    .console-toast-stack {
+        right: 16px;
+        bottom: 16px;
+        left: 16px;
+        align-items: stretch;
+    }
+    .console-toast {
+        max-width: none;
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Usage trend chart + model ranking, from the original dashboard.     */
+/* ------------------------------------------------------------------ */
+.token-overview {
+    display: grid;
+    grid-template-columns: minmax(0, 1.55fr) minmax(300px, 0.85fr);
+    gap: 16px;
+    min-width: 0;
+}
+.token-panel {
+    min-width: 0;
+    padding: 22px;
+    background: var(--surface);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+}
+.token-panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+.token-panel-head.compact {
+    margin-bottom: 16px;
+}
+.token-panel .eyebrow {
+    margin-bottom: 6px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    font-weight: 700;
+    color: var(--subtle);
+}
+.token-panel-head h3 {
+    margin: 3px 0 0;
+    color: var(--text);
+    font-size: 15px;
+}
+.token-total {
+    color: var(--text);
+    font-size: 24px;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+}
+.trend-chart-wrap {
+    position: relative;
+    flex: 1;
+    min-height: 240px;
+}
+.trend-canvas {
+    display: block;
+    width: 100%;
+    height: 240px;
+}
+.trend-grid {
+    stroke: var(--border);
+    stroke-width: 1;
+    stroke-dasharray: 4 5;
+}
+.trend-line {
+    fill: none;
+    stroke: var(--accent);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+.trend-dot {
+    fill: var(--surface);
+    stroke: var(--accent);
+    stroke-width: 2;
+    transition: r 120ms ease;
+}
+.trend-dot:hover {
+    r: 5;
+}
+.trend-day-label {
+    fill: var(--subtle);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+.trend-max-label {
+    fill: var(--subtle);
+    font-size: 10px;
+    font-variant-numeric: tabular-nums;
+}
+.trend-empty {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+    padding: 20px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--subtle);
+    font-size: 12px;
+    text-align: center;
+}
+.trend-empty code {
+    color: var(--muted);
+}
+.token-meter-meta {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 14px;
+    padding-top: 12px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+.channel-ranking {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+.rank-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+.rank-row + .rank-row {
+    padding-top: 2px;
+}
+.rank-head {
+    display: grid;
+    grid-template-columns: 24px 1fr auto;
+    align-items: center;
+    gap: 10px;
+}
+.rank-index {
+    color: var(--subtle);
+    font-size: 12px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+}
+.rank-name {
+    color: var(--text);
+    font-weight: 600;
+    font-size: 13px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.rank-value {
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+}
+.rank-bar {
+    height: 6px;
+    background: var(--surface-raised);
+    border-radius: 999px;
+    overflow: hidden;
+}
+.rank-bar-fill {
+    height: 100%;
+    min-width: 6px;
+    border-radius: 999px;
+    background: linear-gradient(
+        90deg,
+        color-mix(in srgb, var(--accent) 72%, transparent),
+        var(--accent)
+    );
+    transition: width var(--motion-enter) var(--motion-ease);
+}
+.ranking-note {
+    margin-top: 14px;
+    color: var(--subtle);
+    font-size: 11px;
+}
+@media (max-width: 1100px) {
+    .token-overview {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* Input/output split for the trend chart legend and series. */
+.trend-legend {
+    display: flex;
+    justify-content: flex-end;
+    gap: 14px;
+    margin-bottom: 4px;
+    color: var(--muted);
+    font-size: 11px;
+}
+.trend-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+.trend-legend span::before {
+    content: "";
+    width: 14px;
+    height: 3px;
+    border-radius: 999px;
+    background: currentColor;
+}
+.trend-input {
+    color: var(--accent);
+}
+.trend-output {
+    color: var(--success);
+}
+.trend-line-input {
+    stroke: var(--accent);
+}
+.trend-line-output {
+    stroke: var(--success);
+}
+.trend-dot-input {
+    stroke: var(--accent);
+}
+.trend-dot-output {
+    stroke: var(--success);
 }

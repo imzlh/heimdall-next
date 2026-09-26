@@ -19,6 +19,22 @@ export function toneForModel(model: string | undefined): string {
 // Conversation flattening (OpenAI messages → one ChatHub text)
 // ---------------------------------------------------------------------------
 
+/**
+ * ChatHub injects the account's saved personalization memory and custom
+ * instructions into the turn's system context server-side (see SPEC appendix
+ * A.2). `disableMemory=1` on the connection blocks that at the session level;
+ * this directive is the belt-and-suspenders text so the model also refuses to
+ * lean on any remembered profile or on context inferred from the conversation.
+ */
+export const MEMORY_OFF_DIRECTIVE =
+    "[system]\n本次对话禁用记忆：不要读取、引用或依据任何已保存的个性化记忆、用户画像或自定义指令作答；也不要根据历史对话或当前对话内容去检索、套用或建立长期记忆。只根据本次请求中明确给出的内容回答。";
+
+/** Prepend the memory-off directive to an outgoing ChatHub turn. */
+export function withMemoryOff(prompt: string): string {
+    const body = prompt.trim();
+    return body ? `${MEMORY_OFF_DIRECTIVE}\n\n${body}` : MEMORY_OFF_DIRECTIVE;
+}
+
 function contentToText(content: unknown): string {
     if (typeof content === "string") return content;
     if (Array.isArray(content)) {

@@ -4,7 +4,9 @@ import type {
     CreateSourceInput,
     PluginDto,
     PresetDto,
+    ProxyPoolInput,
     SourceDto,
+    SourceProxySelection,
     UpdateSourceInput,
 } from "@heimdall/admin-contracts";
 import { StorageConflictError } from "@heimdall/storage";
@@ -56,6 +58,14 @@ export interface AdminWriteResult {
 
 /** State-changing capabilities supplied by the composition root. */
 export interface AdminManagementOptions {
+    readonly getProxies?: (
+        context: AdminRouteContext,
+    ) => MaybePromise<AdminWriteResult>;
+    readonly saveProxies?: (
+        context: AdminRouteContext,
+        input: ProxyPoolInput,
+        expectedVersionstamp?: string,
+    ) => MaybePromise<AdminWriteResult>;
     readonly createSource?: (
         context: AdminRouteContext,
         input: CreateSourceInput,
@@ -409,6 +419,38 @@ export function createAdminRoutes(
                 adminContext,
                 presetId,
                 body.config,
+                expectedVersion(context),
+            )
+        );
+        return writeJson(
+            result.data,
+            adminContext.requestId,
+            result.versionstamp,
+        );
+    });
+
+    app.get("/proxies", async (context) => {
+        const adminContext = toAdminContext(context);
+        const handler = options.management?.getProxies;
+        if (handler === undefined) return unavailable(adminContext.requestId);
+        const result = await invokeManagement(() => handler(adminContext));
+        return writeJson(
+            result.data,
+            adminContext.requestId,
+            result.versionstamp,
+        );
+    });
+
+    app.put("/proxies", async (context) => {
+        const adminContext = toAdminContext(context);
+        const body = await readJsonBody(context);
+        const handler = options.management?.saveProxies;
+        if (handler === undefined) return unavailable(adminContext.requestId);
+        // The injected capability validates and normalizes the complete pool.
+        const result = await invokeManagement(() =>
+            handler(
+                adminContext,
+                body as unknown as ProxyPoolInput,
                 expectedVersion(context),
             )
         );
@@ -850,6 +892,9 @@ function parseCreateSource(body: Record<string, unknown>): CreateSourceInput {
         id: body.id,
         name,
         priority: body.priority,
+        ...(body.proxy === undefined
+            ? {}
+            : { proxy: parseSourceProxy(body.proxy) }),
         sourcePluginId,
         ...(presetId === undefined ? {} : { presetId }),
         config: body.config,
@@ -859,13 +904,13 @@ function parseCreateSource(body: Record<string, unknown>): CreateSourceInput {
 function parseUpdateSource(body: Record<string, unknown>): UpdateSourceInput {
     if (
         Object.keys(body).some((key) =>
-            !["name", "priority", "enabled"].includes(key)
+            !["name", "priority", "enabled", "proxy"].includes(key)
         )
     ) {
         throw new AdminRouteError(
             400,
             "invalid_request",
-            "only name, priority and enabled can be updated",
+            "only name, priority, enabled and proxy can be updated",
         );
     }
     if (Object.keys(body).length === 0) {
@@ -875,7 +920,15 @@ function parseUpdateSource(body: Record<string, unknown>): UpdateSourceInput {
             "at least one channel setting is required",
         );
     }
-    const input: { name?: string; priority?: number; enabled?: boolean } = {};
+    const input: {
+        name?: string;
+        priority?: number;
+        enabled?: boolean;
+        proxy?: SourceProxySelection;
+    } = {};
+    if (Object.hasOwn(body, "proxy")) {
+        input.proxy = parseSourceProxy(body.proxy);
+    }
     if (Object.hasOwn(body, "name")) {
         input.name = boundedString(body.name, "name", 120);
     }
@@ -903,6 +956,30 @@ function parseUpdateSource(body: Record<string, unknown>): UpdateSourceInput {
         input.enabled = body.enabled;
     }
     return input;
+}
+
+function parseSourceProxy(input: unknown): SourceProxySelection {
+    if (isRecord(input)) {
+        const keys = Object.keys(input);
+        if (
+            (input.mode === "inherit" || input.mode === "direct") &&
+            keys.length === 1
+        ) {
+            return { mode: input.mode };
+        }
+        if (
+            input.mode === "proxy" && keys.length === 2 &&
+            typeof input.proxyId === "string" &&
+            /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(input.proxyId)
+        ) {
+            return { mode: "proxy", proxyId: input.proxyId };
+        }
+    }
+    throw new AdminRouteError(
+        400,
+        "invalid_request",
+        "invalid source proxy selection",
+    );
 }
 
 function expectedVersion(context: Context<ServerEnv>): string | undefined {

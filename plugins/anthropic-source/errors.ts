@@ -61,16 +61,16 @@ export async function responseError(
 ): Promise<CanonicalError> {
     let body: unknown;
     try {
-        body = await response.clone().json();
-    } catch {
+        const text = await response.text();
         try {
-            const text = await response.clone().text();
+            body = JSON.parse(text);
+        } catch {
             body = text.trim().length > 0
                 ? { message: text.trim() }
                 : undefined;
-        } catch {
-            body = undefined;
         }
+    } catch {
+        body = undefined;
     }
     const error = isRecord(body) && isRecord(body.error)
         ? body.error

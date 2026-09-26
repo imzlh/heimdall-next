@@ -59,6 +59,15 @@ export async function loadChatSnapshot(
             title: string(input.title) || "新对话",
             createdAt: string(input.createdAt),
             updatedAt: string(input.updatedAt),
+            ...(typeof input.systemPrompt === "string" &&
+                    input.systemPrompt.length > 0
+                ? { systemPrompt: input.systemPrompt }
+                : {}),
+            ...(input.reasoningEffort === "low" ||
+                    input.reasoningEffort === "medium" ||
+                    input.reasoningEffort === "high"
+                ? { reasoningEffort: input.reasoningEffort }
+                : {}),
         };
     };
     const message = (value: unknown): ChatMessage | undefined => {
@@ -94,6 +103,18 @@ export async function loadChatSnapshot(
             role: input.role as ChatMessage["role"],
             text: string(input.text, MAX_TEXT),
             createdAt: string(input.createdAt),
+            ...(input.status === "completed" || input.status === "failed" ||
+                    input.status === "stopped"
+                ? { status: input.status }
+                : {}),
+            ...(record(input.error)
+                ? {
+                    error: {
+                        code: string(record(input.error)?.code),
+                        message: string(record(input.error)?.message, 2048),
+                    },
+                }
+                : {}),
             ...(typeof input.callId === "string"
                 ? { callId: string(input.callId) }
                 : {}),

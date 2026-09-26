@@ -1,5 +1,4 @@
-/** @jsxRuntime automatic */
-/** @jsxImportSource hono/jsx/dom */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { useEffect, useLayoutEffect, useRef, useState } from "hono/jsx/dom";
 import { chatAttachmentUrl } from "../../shared/chat-view.ts";
 import { CHAT_ATTACHMENT_ACCEPT } from "./attachments.ts";
@@ -29,10 +28,6 @@ export function ChatComposer(
         state.attachmentsBusy;
     const hasModel = !!state.model && state.models.includes(state.model);
     const canSend = !disabled && hasModel && !!state.draft.trim();
-    const hasUserMessage = state.messages.some((message) =>
-        message.role === "user"
-    );
-    const canRegenerate = !disabled && hasModel && hasUserMessage;
 
     // Drafts also change after server acknowledgement, failed sends and history
     // selection. Resize those updates too, not just physical keystrokes.
@@ -329,18 +324,6 @@ export function ChatComposer(
                             </>
                         )}
                 </p>
-                {hasUserMessage && !state.sending && (
-                    <button
-                        type="button"
-                        class="chat-regenerate"
-                        disabled={!canRegenerate}
-                        onClick={() => void controller.regenerate()}
-                        aria-label="重新生成回复"
-                        title="重新生成回复"
-                    >
-                        <Icon name="refresh" />重新生成
-                    </button>
-                )}
             </div>
         </div>
     );

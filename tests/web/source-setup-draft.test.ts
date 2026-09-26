@@ -101,6 +101,49 @@ Deno.test("source creation works with blocked browser storage and never reads lo
     }
 });
 
+Deno.test("source creation copies only a valid proxy identity and never coerces plugin values", () => {
+    const input = {
+        ...PRESET,
+        proxy: {
+            mode: "proxy" as const,
+            proxyId: "office",
+            url: "http://private.test",
+            basicAuth: { username: "secret-user", password: "secret-password" },
+        },
+    };
+    const draft = createSourceSetupDraft(input);
+    assertEquals(draft.proxy, { mode: "proxy", proxyId: "office" });
+    assertEquals(JSON.stringify(draft).includes("secret"), false);
+    let calls = 0;
+    const coercible = {
+        toString: () => {
+            calls++;
+            return "office";
+        },
+    };
+    for (
+        const proxy of [
+            { mode: "proxy" },
+            { mode: "proxy", proxyId: 123 },
+            { mode: "proxy", proxyId: coercible },
+            { mode: "proxy:office" },
+            { mode: coercible },
+            {
+                mode: "proxy",
+                get proxyId() {
+                    calls++;
+                    return "office";
+                },
+            },
+        ]
+    ) {
+        assertThrows(() =>
+            createSourceSetupDraft({ ...PRESET, proxy } as SourceSetupSelection)
+        );
+    }
+    assertEquals(calls, 0);
+});
+
 Deno.test("source creation uses UUID v4 on HTTP LAN origins without randomUUID", () => {
     const original = Object.getOwnPropertyDescriptor(globalThis, "crypto");
     let randomReads = 0;

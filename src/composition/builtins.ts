@@ -1,6 +1,7 @@
 import type {
     ApiPlugin,
     InferenceSource,
+    MiddlewarePlugin,
     PluginManifest,
     PresetPlugin,
     ProtocolPlugin,
@@ -29,7 +30,7 @@ import type {
     AdminWriteResult,
     SourceConfigSnapshot,
 } from "../http/admin-routes.ts";
-import { SourceRegistry } from "@heimdall/kernel";
+import { type MiddlewareRegistry, SourceRegistry } from "@heimdall/kernel";
 import {
     createPluginHost,
     type PluginHost,
@@ -39,6 +40,9 @@ import {
 import { ConfigPluginRecordStore } from "../storage/plugin-records.ts";
 import { createChatToolset } from "../chat/tools/toolset.ts";
 import { probeSource } from "./probe-loop.ts";
+import { createProxyPool } from "./proxy-pool.ts";
+import { SourceProxyBindings } from "./source-proxy.ts";
+import { BuiltinMiddlewarePlugins } from "./middleware-plugins.ts";
 import {
     applySourcePriority,
     type StoredSourceConfig,
@@ -96,6 +100,8 @@ export interface BuiltinComposition {
     /** Resolve enabled tool capabilities at the beginning of each chat turn. */
     readonly toolPlugins: () => readonly ToolPlugin[];
     readonly sources: SourceRegistry;
+    /** Live global HIP middleware; source bindings are not inferred. */
+    readonly middleware: MiddlewareRegistry;
     /** Live source-to-plugin ownership for UI slots, without source credentials. */
     readonly sourcePluginIds: () => Promise<Readonly<Record<string, string>>>;
     readonly catalog: AdminCatalogOptions;
@@ -110,6 +116,8 @@ export async function loadBuiltinComposition(
 ): Promise<BuiltinComposition> {
     const env = options.env ?? ((name) => Deno.env.get(name));
     const store = options.configStore ?? new MemoryConfigStore();
+    const proxyBindings = new SourceProxyBindings(await createProxyPool(store));
+    await proxyBindings.restore(store);
     const root = options.pluginRoot ??
         new URL("../../plugins/", import.meta.url);
     const protocols: ProtocolPlugin[] = [];
@@ -118,6 +126,7 @@ export async function loadBuiltinComposition(
     const sourceFactories = new Map<string, SourceFactory>();
     const presets: PresetPlugin[] = [];
     const toolPlugins = new Map<string, ToolPlugin>();
+    const middlewarePlugins = new BuiltinMiddlewarePlugins();
     const manifests = new Map<string, PluginManifest>();
     const pluginErrors = new Map<string, string>();
     const pluginStates = new Map<string, boolean>();
@@ -158,13 +167,37 @@ export async function loadBuiltinComposition(
                     manifests.set(manifest.id, manifest);
                 }
                 const protocol = asProtocol(module.default);
+                if (manifest?.kind === "middleware") {
+                    const plugin = module.default as
+                        | MiddlewarePlugin
+                        | undefined;
+                    if (!isRecord(plugin) || !isRecord(plugin.manifest)) {
+                        throw new TypeError(
+                            "middleware plugin must expose a default descriptor",
+                        );
+                    }
+                    assertManifestMatches(plugin.manifest, manifest);
+                    middlewarePlugins.add(plugin);
+                }
                 if (
                     manifest?.kind === "api" && isRecord(module.default) &&
                     typeof module.default.handle === "function"
                 ) {
                     const api = module.default as unknown as ApiPlugin;
                     assertManifestMatches(api.manifest, manifest);
-                    apis.push(api);
+                    apis.push({
+                        ...api,
+                        handle: (context) =>
+                            api.handle({
+                                ...context,
+                                resolveProxy: (selection) =>
+                                    proxyBindings.pool.resolve(
+                                        proxyBindings.pool.validateSelection(
+                                            selection,
+                                        ),
+                                    ),
+                            }),
+                    });
                 }
                 if (protocol !== undefined) {
                     assertManifestMatches(protocol.manifest, manifest);
@@ -183,7 +216,9 @@ export async function loadBuiltinComposition(
                     assertManifestMatches(source.manifest, manifest);
                     sourceFactories.set(
                         source.manifest.id,
-                        withSourcePersistence(source, store),
+                        proxyBindings.wrap(
+                            withSourcePersistence(source, store),
+                        ),
                     );
                 }
                 if (manifest?.kind === "tool") {
@@ -211,6 +246,7 @@ export async function loadBuiltinComposition(
     }
 
     await restorePluginStates(store, pluginStates);
+    middlewarePlugins.restore(pluginStates);
     await restoreSources(store, sourceFactories, sources, env, pluginStates);
     if (options.runtimeSettings !== undefined) {
         await hydrateRuntimeSettings(store, options.runtimeSettings);
@@ -226,6 +262,8 @@ export async function loadBuiltinComposition(
         pluginHost,
         store,
         toolPlugins,
+        middlewarePlugins,
+        proxyBindings,
     );
     const management = createManagement(
         store,
@@ -236,6 +274,8 @@ export async function loadBuiltinComposition(
         pluginStates,
         pluginHost,
         toolPlugins,
+        middlewarePlugins,
+        proxyBindings,
         options.runtimeSettings,
     );
     return {
@@ -246,6 +286,7 @@ export async function loadBuiltinComposition(
                 pluginStates.get(plugin.manifest.id) !== false
             ),
         sources,
+        middleware: middlewarePlugins.registry,
         sourcePluginIds: () => readSourcePluginIds(store, sourceFactories),
         catalog,
         management,
@@ -286,6 +327,8 @@ function createCatalog(
     pluginHost: PluginHost,
     store: ConfigStore,
     toolPlugins: ReadonlyMap<string, ToolPlugin>,
+    middlewarePlugins: BuiltinMiddlewarePlugins,
+    proxyBindings: SourceProxyBindings,
 ): AdminCatalogOptions {
     const sourceStore = store.namespace("heimdall", "source-config");
     return {
@@ -304,7 +347,8 @@ function createCatalog(
                 dependencies: manifest.dependencies,
                 capabilities: manifest.capabilities,
                 canToggle: sourceFactories.has(manifest.id) ||
-                    toolPlugins.has(manifest.id),
+                    toolPlugins.has(manifest.id) ||
+                    middlewarePlugins.has(manifest.id),
                 managed: false,
                 enabled: manifest.kind === "protocol"
                     ? enabledProtocols.has(manifest.id)
@@ -314,6 +358,8 @@ function createCatalog(
                     : manifest.kind === "tool"
                     ? toolPlugins.has(manifest.id) &&
                         pluginStates.get(manifest.id) !== false
+                    : manifest.kind === "middleware"
+                    ? middlewarePlugins.registry.get(manifest.id) !== undefined
                     : true,
                 trust: manifest.trust,
                 ...(pluginErrors.has(manifest.id)
@@ -372,6 +418,8 @@ function createCatalog(
                     .sort();
                 return {
                     id: source.id,
+                    proxy: record?.proxy ?? { mode: "inherit" },
+                    proxySummary: proxyBindings.summary(record?.proxy),
                     ...(record === undefined ? {} : {
                         sourcePluginId: record.sourcePluginId,
                         instanceEnabled: record.enabled !== false,
@@ -448,6 +496,8 @@ function createManagement(
     pluginStates: Map<string, boolean>,
     pluginHost: PluginHost,
     toolPlugins: ReadonlyMap<string, ToolPlugin>,
+    middlewarePlugins: BuiltinMiddlewarePlugins,
+    proxyBindings: SourceProxyBindings,
     runtimeSettings?: RuntimeSettingsHandle,
 ): AdminManagementOptions {
     const sourceStore = store.namespace("heimdall", "source-config");
@@ -513,6 +563,9 @@ function createManagement(
             ...(current?.value.priority === undefined
                 ? {}
                 : { priority: current.value.priority }),
+            ...(current?.value.proxy === undefined
+                ? {}
+                : { proxy: current.value.proxy }),
             sourcePluginId: factory.manifest.id,
             config,
             enabled: current?.value.enabled !== false,
@@ -530,6 +583,7 @@ function createManagement(
                     current?.versionstamp ?? null,
             },
         );
+        proxyBindings.set(sourceId, value.proxy);
         if (
             value.enabled !== false &&
             pluginStates.get(factory.manifest.id) !== false
@@ -570,6 +624,24 @@ function createManagement(
     };
 
     return {
+        getProxies: () => {
+            const snapshot = proxyBindings.pool.view();
+            return {
+                data: { pool: snapshot.pool },
+                versionstamp: snapshot.versionstamp,
+            };
+        },
+        saveProxies: (_context, input, expectedVersionstamp) =>
+            sourceWrite(async () => {
+                const saved = await proxyBindings.pool.save(
+                    input,
+                    expectedVersionstamp,
+                );
+                return {
+                    data: { pool: saved.pool },
+                    versionstamp: saved.versionstamp,
+                };
+            }),
         createSource: (context, input: CreateSourceInput) =>
             sourceWrite(async () => {
                 if (
@@ -637,6 +709,7 @@ function createManagement(
                     sourcePluginId: factory.manifest.id,
                     name: input.name.trim(),
                     priority: input.priority,
+                    proxy: proxyBindings.pool.validateSelection(input.proxy),
                     config,
                     enabled: true,
                     instanceStateVersion: 1,
@@ -667,6 +740,7 @@ function createManagement(
                     }
                     throw error;
                 }
+                proxyBindings.set(input.id, value.proxy);
                 if (pluginStates.get(factory.manifest.id) !== false) {
                     sources.register(source);
                 }
@@ -687,7 +761,7 @@ function createManagement(
             if (
                 !input || Object.keys(input).length === 0 ||
                 Object.keys(input).some((key) =>
-                    !["name", "priority", "enabled"].includes(key)
+                    !["name", "priority", "enabled", "proxy"].includes(key)
                 ) ||
                 (Object.hasOwn(input, "name") &&
                     (typeof input.name !== "string" || !input.name.trim() ||
@@ -716,6 +790,9 @@ function createManagement(
                 ...(input.enabled === undefined
                     ? {}
                     : { enabled: input.enabled }),
+                ...(input.proxy === undefined ? {} : {
+                    proxy: proxyBindings.pool.validateSelection(input.proxy),
+                }),
             };
             const factory = sourceFactories.get(value.sourcePluginId);
             if (factory === undefined) {
@@ -744,6 +821,7 @@ function createManagement(
                 expectedVersionstamp: expectedVersionstamp ??
                     current.versionstamp,
             });
+            proxyBindings.set(sourceId, value.proxy);
             if (source === undefined) sources.unregister(sourceId);
             else if (source !== active) {
                 sources.upsert(source, { preserveDiscovery: true });
@@ -772,6 +850,7 @@ function createManagement(
                         current.versionstamp,
                 });
                 sources.unregister(sourceId);
+                proxyBindings.delete(sourceId);
                 return { data: { sourceId, deleted: true }, versionstamp };
             }),
         getSourceConfig: async (
@@ -888,6 +967,12 @@ function createManagement(
                 if (toolPlugins.has(pluginId)) {
                     await pluginStateStore.set([pluginId], { enabled });
                     pluginStates.set(pluginId, enabled);
+                    return await resolveProvider(catalog.plugins, context);
+                }
+                if (middlewarePlugins.has(pluginId)) {
+                    await pluginStateStore.set([pluginId], { enabled });
+                    pluginStates.set(pluginId, enabled);
+                    middlewarePlugins.setEnabled(pluginId, enabled);
                     return await resolveProvider(catalog.plugins, context);
                 }
                 const source = [...sourceFactories.values()].find((item) =>

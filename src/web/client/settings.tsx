@@ -1,5 +1,4 @@
-/** @jsxRuntime automatic */
-/** @jsxImportSource hono/jsx/dom */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { useEffect, useState } from "hono/jsx/dom";
 import { controlValue } from "./dom.ts";
 import { Icon } from "../shared/icons.tsx";
@@ -12,7 +11,7 @@ import {
 } from "./api/admin.ts";
 
 export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
-    onClose: () => void;
+    onClose?: () => void;
     initial?: RuntimeSettingsEnvelope | null;
     initialError?: string;
 }) {
@@ -105,7 +104,9 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
             if (clearProxyKey) patch.proxyKey = "";
             else if (proxyKey.trim()) patch.proxyKey = proxyKey;
             applySettings(await saveRuntimeSettings(patch, etag));
-            setMessage(clearProxyKey ? "已清除代理密钥" : "已保存，立即生效");
+            setMessage(
+                clearProxyKey ? "已清除网关访问密钥" : "已保存，立即生效",
+            );
         } catch (cause) {
             if (
                 cause instanceof AdminApiError &&
@@ -132,19 +133,21 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
                 <div>
                     <h2 id="runtime-settings-title">运行设置</h2>
                     <p>
-                        限额、探测间隔和代理密钥立即生效。密钥只写入，不会回显。
+                        限额、探测间隔和网关访问密钥立即生效。密钥只写入，不会回显。
                     </p>
                 </div>
-                <button
-                    class="icon-button"
-                    type="button"
-                    aria-label="关闭"
-                    title="返回总览"
-                    onClick={onClose}
-                    disabled={saving}
-                >
-                    <Icon name="close" />
-                </button>
+                {onClose && (
+                    <button
+                        class="icon-button"
+                        type="button"
+                        aria-label="关闭"
+                        title="返回总览"
+                        onClick={onClose}
+                        disabled={saving}
+                    >
+                        <Icon name="close" />
+                    </button>
+                )}
             </div>
             {loading && <p role="status">正在加载运行设置…</p>}
             <form
@@ -183,7 +186,7 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
                         />
                     </label>
                     <label class="wide-field">
-                        代理密钥
+                        网关访问密钥
                         <input
                             type="password"
                             autoComplete="new-password"
@@ -211,7 +214,7 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
                         disabled={busy || !loaded || conflict || !keyConfigured}
                         onClick={() => void save(true)}
                     >
-                        清除代理密钥
+                        清除网关访问密钥
                     </button>
                     <button
                         class={dirty ? "text-button" : "icon-button"}

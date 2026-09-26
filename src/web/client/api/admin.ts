@@ -23,6 +23,11 @@ export {
 } from "./sources.ts";
 export { loadRuntimeSettings, saveRuntimeSettings } from "./settings.ts";
 export {
+    loadProxyPool,
+    type ProxyPoolEnvelope,
+    saveProxyPool,
+} from "./proxies.ts";
+export {
     createChatConversation,
     loadRequests,
     loadUsage,

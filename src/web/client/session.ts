@@ -34,11 +34,16 @@ export const sessionFetch: typeof fetch = async (input, init) => {
         const text = await request.text();
         bodyText = text.length > 0 ? text : undefined;
     }
+    // The host assigns one trace to the outer request and its nested API call.
+    // Lift an explicitly supplied trace to that HTTP boundary as well.
+    const bridgeHeaders = new Headers({ "content-type": "application/json" });
+    const requestId = headers.get("x-request-id");
+    if (requestId !== null) bridgeHeaders.set("x-request-id", requestId);
     return await fetch("/admin/ui/request", {
         method: "POST",
         credentials: "same-origin",
         signal,
-        headers: { "content-type": "application/json" },
+        headers: bridgeHeaders,
         body: JSON.stringify({
             path: url.pathname + url.search,
             method,

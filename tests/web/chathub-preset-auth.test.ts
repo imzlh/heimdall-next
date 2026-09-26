@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertRejects, assertThrows } from "@std/assert";
+import type { SourceProxySelection } from "@heimdall/admin-contracts/proxies.ts";
 import {
     AuthorizationError,
     exchangeAuthorization,
@@ -55,11 +56,77 @@ Deno.test("ChatHub authorization uses only the cookie management bridge and exac
             false,
         );
     }
+    assertEquals(JSON.parse(String(requests[0]!.init.body)), {
+        path: "/api/admin/plugins/chathub/auth",
+        method: "POST",
+        body: { action: "start" },
+    });
     assertEquals(JSON.parse(String(requests[1]!.init.body)), {
         path: "/api/admin/plugins/chathub/auth",
         method: "POST",
         body: { action: "exchange", state, callback },
     });
+});
+
+Deno.test("ChatHub authorization forwards the selected proxy for both PKCE requests without credentials", async (test) => {
+    for (
+        const selection of [
+            { mode: "inherit" },
+            { mode: "direct" },
+            { mode: "proxy", proxyId: "office-proxy" },
+        ] satisfies SourceProxySelection[]
+    ) {
+        await test.step(selection.mode, async () => {
+            const requests: unknown[] = [];
+            const transport: typeof fetch = (_input, init) => {
+                requests.push(JSON.parse(String(init!.body)));
+                return Promise.resolve(
+                    Response.json(
+                        requests.length === 1
+                            ? { ok: true, authUrl, state }
+                            : tokens,
+                    ),
+                );
+            };
+            const signal = new AbortController().signal;
+            // Only the host selection is projected, even if an internal caller
+            // accidentally carries transport configuration alongside it.
+            const input = {
+                ...selection,
+                url: "https://private-proxy.example",
+                basicAuth: {
+                    username: "private-user",
+                    password: "private-pass",
+                },
+            };
+            const session = await startAuthorization(signal, transport, input);
+            await exchangeAuthorization(
+                session,
+                callback,
+                signal,
+                transport,
+                input,
+            );
+            assertEquals(requests, [
+                {
+                    path: "/api/admin/plugins/chathub/auth",
+                    method: "POST",
+                    body: { action: "start", proxy: selection },
+                },
+                {
+                    path: "/api/admin/plugins/chathub/auth",
+                    method: "POST",
+                    body: {
+                        action: "exchange",
+                        state,
+                        callback,
+                        proxy: selection,
+                    },
+                },
+            ]);
+            assertEquals(input.basicAuth.password, "private-pass");
+        });
+    }
 });
 
 Deno.test("ChatHub validates callback origin, path and state without consuming an exchange", async () => {

@@ -19,6 +19,14 @@ export interface ChatApi {
         title: string,
         signal?: AbortSignal,
     ): Promise<ChatConversation>;
+    updateSettings(
+        id: string,
+        patch: {
+            readonly systemPrompt?: string;
+            readonly reasoningEffort?: "low" | "medium" | "high" | null;
+        },
+        signal?: AbortSignal,
+    ): Promise<ChatConversation>;
     remove(id: string, signal?: AbortSignal): Promise<void>;
     load(id: string, signal?: AbortSignal): Promise<{
         conversation: ChatConversation;
@@ -54,6 +62,14 @@ export interface ChatController {
     subscribe(listener: (state: ChatState) => void): () => void;
     create(): Promise<void>;
     rename(id: string, title: string): Promise<boolean>;
+    /** Persist per-conversation settings; returns true on success. */
+    updateSettings(
+        id: string,
+        patch: {
+            readonly systemPrompt?: string;
+            readonly reasoningEffort?: "low" | "medium" | "high" | null;
+        },
+    ): Promise<boolean>;
     remove(id: string): Promise<boolean>;
     select(id: string): Promise<void>;
     refresh(): Promise<void>;

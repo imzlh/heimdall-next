@@ -1,10 +1,12 @@
 import {
+    type ChatSettingsPatch,
     createConversation,
     deleteChatConversation,
     listChatConversations,
     loadChatConversation,
     openChatStream,
     renameChatConversation,
+    updateChatConversationSettings,
 } from "../api/chat.ts";
 import type { ChatApi } from "./types.ts";
 
@@ -18,6 +20,12 @@ export function createChatApi(): ChatApi {
         load: (id, signal) => loadChatConversation(id, { ...options, signal }),
         rename: (id, title, signal) =>
             renameChatConversation(id, title, { ...options, signal }),
+        updateSettings: (id, patch, signal) =>
+            updateChatConversationSettings(
+                id,
+                patch as ChatSettingsPatch,
+                { ...options, signal },
+            ),
         remove: (id, signal) =>
             deleteChatConversation(id, { ...options, signal }),
         open: (command, onEvent) =>

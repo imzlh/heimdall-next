@@ -1,7 +1,4 @@
-/**
- * @jsxRuntime automatic
- * @jsxImportSource hono/jsx/dom
- */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { useState } from "hono/jsx/dom";
 import { Icon } from "../../shared/icons.tsx";
 import type { Child } from "hono/jsx";

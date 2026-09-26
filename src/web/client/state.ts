@@ -87,9 +87,10 @@ export function useConsoleState(
     const [adding, setAdding] = useState(false);
     const [theme, setTheme] = useState(savedTheme);
     const generation = useRef(0);
-    async function refresh() {
+    async function refresh(options?: { silent?: boolean }) {
         const current = generation.current = (generation.current ?? 0) + 1;
-        setLoading(true);
+        // Background polling must not flash the busy state or disable buttons.
+        if (!options?.silent) setLoading(true);
         setRefreshError("");
         try {
             const [next, refreshedCatalog] = await Promise.all([
@@ -134,6 +135,17 @@ export function useConsoleState(
             globalThis.localStorage?.setItem("heimdall.theme", theme);
         } catch { /* Optional preference. */ }
     }, [theme]);
+    // The original console syncs theme switches across tabs instantly.
+    useEffect(() => {
+        const onStorage = (event: StorageEvent) => {
+            if (
+                event.key === "heimdall.theme" &&
+                (event.newValue === "light" || event.newValue === "dark")
+            ) setTheme(event.newValue);
+        };
+        globalThis.addEventListener("storage", onStorage);
+        return () => globalThis.removeEventListener("storage", onStorage);
+    }, []);
 
     async function connect(token: string) {
         if (authBusy) return;

@@ -98,7 +98,7 @@ Deno.test("SSR reads independent resources with server bearer and preserves part
             }
         },
     });
-    assertEquals(paths.length, 6);
+    assertEquals(paths.length, 9);
     assertEquals(snapshot.dashboard.models[0]?.id, "claude");
     assertEquals(
         snapshot.dashboard.status.sources[0]?.name,

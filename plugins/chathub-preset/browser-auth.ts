@@ -1,3 +1,5 @@
+import type { SourceProxySelection } from "@heimdall/contracts/proxy.ts";
+
 /** Fixed, cookie-authenticated transport for this trusted preset's login action. */
 export interface AuthorizationSession {
     readonly authUrl: string;
@@ -21,8 +23,9 @@ const CALLBACK_PATH = "/common/oauth2/nativeclient";
 export async function startAuthorization(
     signal: AbortSignal,
     transport: typeof fetch = fetch,
+    proxy?: SourceProxySelection,
 ): Promise<AuthorizationSession> {
-    const result = await request({ action: "start" }, signal, transport);
+    const result = await request({ action: "start" }, signal, transport, proxy);
     const state = field(result, "state", 256);
     const authUrl = field(result, "authUrl", 8192);
     let url: URL;
@@ -81,6 +84,7 @@ export async function exchangeAuthorization(
     callback: string,
     signal: AbortSignal,
     transport: typeof fetch = fetch,
+    proxy?: SourceProxySelection,
 ): Promise<AuthorizedAccount> {
     const result = await request(
         {
@@ -90,6 +94,7 @@ export async function exchangeAuthorization(
         },
         signal,
         transport,
+        proxy,
     );
     const expiresAt = field(result, "expiresAt", 128);
     if (!Number.isFinite(Date.parse(expiresAt))) throw invalidResponse();
@@ -107,6 +112,7 @@ async function request(
     body: Record<string, string>,
     signal: AbortSignal,
     transport: typeof fetch,
+    proxy?: SourceProxySelection,
 ): Promise<Record<string, unknown>> {
     let response: Response;
     try {
@@ -120,7 +126,18 @@ async function request(
             body: JSON.stringify({
                 path: "/api/admin/plugins/chathub/auth",
                 method: "POST",
-                body,
+                body: {
+                    ...body,
+                    // The host resolves this identity. Proxy credentials stay
+                    // on the server and never travel through preset UI.
+                    ...(proxy
+                        ? {
+                            proxy: proxy.mode === "proxy"
+                                ? { mode: proxy.mode, proxyId: proxy.proxyId }
+                                : { mode: proxy.mode },
+                        }
+                        : {}),
+                },
             }),
         });
     } catch (error) {

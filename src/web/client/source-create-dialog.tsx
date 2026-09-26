@@ -1,7 +1,7 @@
-/** @jsxRuntime automatic */
-/** @jsxImportSource hono/jsx/dom */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import type { SourceConfigSchema } from "@heimdall/admin-contracts/forms.ts";
 import type { DashboardData } from "@heimdall/admin-contracts/console.ts";
+import type { ProxyPoolView } from "@heimdall/admin-contracts/proxies.ts";
 import type { UiPolicy } from "@heimdall/admin-contracts/ui.ts";
 import { safeUiAssetPath } from "@heimdall/admin-contracts/ui.ts";
 import { AddSourceFlow } from "./add-source.tsx";
@@ -19,6 +19,7 @@ interface SourceCreateDialogProps {
     readonly schemas: Readonly<Record<string, SourceConfigSchema>>;
     readonly presetPages: Readonly<Record<string, string>>;
     readonly policy?: UiPolicy;
+    readonly proxyPool?: ProxyPoolView | null;
     readonly onClose: () => void;
     readonly onSaved: (draft: SourceSetupDraft) => void;
 }
@@ -46,6 +47,7 @@ export function SourceCreateDialog(props: SourceCreateDialogProps) {
         <AddSourceFlow
             sources={sources}
             presets={presets}
+            proxyPool={props.proxyPool}
             onClose={props.onClose}
             onSaved={props.onSaved}
             onSave={async ({ draft, sourcePluginId, config }) => {
@@ -53,6 +55,7 @@ export function SourceCreateDialog(props: SourceCreateDialogProps) {
                     id: draft.id,
                     name: draft.name,
                     priority: draft.priority,
+                    proxy: draft.proxy,
                     sourcePluginId,
                     ...(draft.mode === "preset"
                         ? { presetId: draft.presetId }
@@ -87,6 +90,7 @@ export function SourceCreateDialog(props: SourceCreateDialogProps) {
                                 },
                                 sourcePluginId: preset.sourcePluginId,
                                 presetId: preset.id,
+                                ...(draft.proxy ? { proxy: draft.proxy } : {}),
                             }}
                             onSubmit={controls.onSave}
                             onPreview={async (config) => {

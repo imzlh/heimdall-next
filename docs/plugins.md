@@ -58,6 +58,47 @@ The OpenAI-compatible source is an adapter, not the HTTP host. Its transport
 module owns fetch and cancellation; request and response modules own wire
 conversion; config owns validation and secret access.
 
+### Outbound proxy preference
+
+Source factories receive an optional `SourceFactoryOptions.getProxy()` callback.
+Read it when starting network work to obtain the current, JSON-serializable
+preference. It resolves a channel's `inherit`, `direct`, or explicit `proxyId`
+choice against the global proxy pool. A selected entry that was removed or
+disabled resolves to `unavailable`; credentials are included only in this
+server-side plugin snapshot. Neither the raw provider config nor browser UI
+contexts contain proxy credentials.
+
+The host supplies configuration only. It does not replace `fetch`, set process
+proxy environment variables, or enforce how trusted plugins connect. A plugin
+can use its own transport, ignore the preference, or opt into the Deno helper:
+
+```ts
+import { SourceTransport } from "@heimdall/source-sdk";
+
+// Inside an asynchronous provider operation; keep this scope open until its
+// response body or stream has been fully consumed.
+await using transport = new SourceTransport({
+    getProxy: options.getProxy,
+    signal,
+});
+const response = await transport.fetch(providerUrl, requestInit);
+const data = await response.json();
+```
+
+The helper uses a pinned, locally cached Undici dependency for HTTP/TLS and
+WebSocket transport. It owns and closes its clients, cancels active requests on
+disposal, and rejects an unavailable selection. Explicit direct connections
+bypass Deno's environment proxy discovery. Automatic redirects are disabled;
+providers that need them must validate and request each new destination
+explicitly. Use `transport.redactError()` before returning upstream diagnostics.
+OpenAI, Anthropic and ChatHub adapters opt into this helper. Pool and channel
+edits affect subsequent operations without destroying active plugin sessions.
+
+API plugins that perform setup or authorization I/O receive an optional
+`ApiRequestContext.resolveProxy(selection)` hook. Preset JSX sends only the
+serializable selection to its authenticated API route; it never receives the
+resolved credentials. The ChatHub authorization plugin uses this path.
+
 ## Middleware and API
 
 Middleware plugins are ordered request and HIP stream transforms. The host

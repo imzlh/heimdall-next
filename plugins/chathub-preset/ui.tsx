@@ -1,7 +1,5 @@
-/**
- * @jsxRuntime automatic
- * @jsxImportSource hono/jsx/dom
- */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
+import { Icon } from "@heimdall/ui/icons";
 import {
     flushSync,
     render,
@@ -151,10 +149,14 @@ function ChatHubSetup({ element, context }: {
         setAccountLabel("");
         setCallback("");
         setSession(null);
-        void authorize("starting", startAuthorization, (value) => {
-            setSession(value);
-            setPhase("awaiting");
-        });
+        void authorize(
+            "starting",
+            (signal) => startAuthorization(signal, fetch, context.proxy),
+            (value) => {
+                setSession(value);
+                setPhase("awaiting");
+            },
+        );
     }
 
     function exchange() {
@@ -175,7 +177,13 @@ function ChatHubSetup({ element, context }: {
         void authorize(
             "exchanging",
             (signal) =>
-                exchangeAuthorization(currentSession, normalized, signal),
+                exchangeAuthorization(
+                    currentSession,
+                    normalized,
+                    signal,
+                    fetch,
+                    context.proxy,
+                ),
             (value) => {
                 account.current = value;
                 setAccountLabel(value.email || "Microsoft 工作或学校账号");
@@ -246,24 +254,6 @@ function ChatHubSetup({ element, context }: {
             }}
         >
             <div class="source-flow-body">
-                <div class="preset-auth-intro">
-                    <span class="preset-auth-mark" aria-hidden="true">
-                        <svg
-                            viewBox="0 0 24 24"
-                            width="24"
-                            height="24"
-                            fill="currentColor"
-                        >
-                            <path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z" />
-                        </svg>
-                    </span>
-                    <div>
-                        <h3>连接 Microsoft ChatHub</h3>
-                        <p class="field-help">
-                            授权工作或学校账号，即可使用渠道默认模型。
-                        </p>
-                    </div>
-                </div>
                 <div
                     class={`preset-auth-panel${
                         phase === "authorized" ? " is-authorized" : ""
@@ -276,7 +266,7 @@ function ChatHubSetup({ element, context }: {
                                     class="preset-auth-check"
                                     aria-hidden="true"
                                 >
-                                    ✓
+                                    <Icon name="check" />
                                 </span>
                                 <div>
                                     <strong>{accountLabel}</strong>
@@ -286,11 +276,14 @@ function ChatHubSetup({ element, context }: {
                                 </div>
                                 <button
                                     type="button"
-                                    class="text-button"
+                                    class="icon-button"
+                                    aria-label="更换账号"
+                                    title="更换账号"
                                     disabled={busy || saved}
                                     onClick={start}
                                 >
-                                    更换账号
+                                    <Icon name="account" />
+                                    <span class="sr-only">更换账号</span>
                                 </button>
                             </div>
                         )
@@ -348,9 +341,10 @@ function ChatHubSetup({ element, context }: {
                                                     referrerPolicy="no-referrer"
                                                 >
                                                     前往 Microsoft 登录{" "}
-                                                    <span aria-hidden="true">
-                                                        ↗
-                                                    </span>
+                                                    <Icon
+                                                        name="external-link"
+                                                        size={16}
+                                                    />
                                                 </a>
                                                 <p class="field-help">
                                                     在新窗口完成登录，本配置窗会保留。
@@ -426,10 +420,12 @@ function ChatHubSetup({ element, context }: {
                                                     </button>
                                                     <button
                                                         type="button"
-                                                        class="text-button"
+                                                        class="icon-button"
+                                                        aria-label="重新准备授权"
+                                                        title="重新准备授权"
                                                         onClick={start}
                                                     >
-                                                        重新准备
+                                                        <Icon name="refresh" />
                                                     </button>
                                                 </div>
                                             </div>
@@ -441,9 +437,10 @@ function ChatHubSetup({ element, context }: {
                                         class="preset-auth-progress"
                                         role="status"
                                     >
-                                        <span
+                                        <Icon
+                                            name="spinner"
                                             class="preset-auth-spinner"
-                                            aria-hidden="true"
+                                            size={16}
                                         />正在换取账号授权，请稍候…
                                     </p>
                                 )}

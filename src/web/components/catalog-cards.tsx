@@ -1,4 +1,5 @@
 import type { Child } from "hono/jsx";
+import type { ProxyPoolView } from "@heimdall/admin-contracts/proxies.ts";
 import { Icon } from "../shared/icons.tsx";
 import type {
     ListedModel,
@@ -18,13 +19,22 @@ import {
     sourceInstanceEnabled,
     sourceState,
 } from "../shared/catalog-presentation.ts";
+import {
+    PROXY_IMPLEMENTATION_NOTE,
+    sourceProxyLabel,
+    sourceProxySummaryLabel,
+} from "../shared/proxy-presentation.ts";
 
-export function SourceCard({ source, status, editing = false }: {
+export function SourceCard({ source, status, editing = false, proxyPool }: {
     source: ListedSource;
     status?: Child;
     editing?: boolean;
+    proxyPool?: ProxyPoolView | null;
 }) {
     const state = sourceState(source);
+    const proxyLabel = !proxyPool && source.proxySummary
+        ? sourceProxySummaryLabel(source.proxySummary)
+        : sourceProxyLabel(source.proxy, proxyPool);
     return (
         <article class={`source-card source-card-${state.tone}`}>
             <header class="source-card-head">
@@ -57,7 +67,17 @@ export function SourceCard({ source, status, editing = false }: {
             <p class="source-probe" title={sourceAvailabilityText(source)}>
                 {sourceAvailabilityText(source)}
             </p>
-            {status && <div class="source-status-slot">{status}</div>}
+            <p class="source-proxy-summary" title={PROXY_IMPLEMENTATION_NOTE}>
+                代理：{proxyLabel}
+            </p>
+            {status && (
+                <details class="source-status-slot">
+                    <summary>
+                        渠道详情 <Icon name="chevron-down" size={14} />
+                    </summary>
+                    <div class="source-status-content">{status}</div>
+                </details>
+            )}
             <footer class="source-card-actions">
                 {editing
                     ? (
@@ -117,7 +137,7 @@ export function SourceCard({ source, status, editing = false }: {
                     )
                     : (
                         <a class="section-link" href="/admin?view=channels">
-                            查看渠道 <span aria-hidden="true">→</span>
+                            查看渠道 <Icon name="arrow-right" size={16} />
                         </a>
                     )}
             </footer>

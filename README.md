@@ -180,6 +180,15 @@ environment. `/health` and console requests are not counted toward the proxy
 rate limit. When periodic probing is enabled, sources that are enabled and
 implement probing are checked on startup.
 
+Outbound proxies are configured separately under **设置 → 出站代理池**. Add
+HTTP, HTTPS or SOCKS5 endpoints, choose a global default, then select inherit,
+direct or a specific proxy in each channel's dialog. `/api/admin/proxies`
+exposes the versioned pool; credentials are write-only. The host gives plugins
+the current selection through an optional `getProxy()` hook and does not enforce
+network routing. Built-in sources adopt the optional transport SDK. See
+[plugin contracts](docs/plugins.md#outbound-proxy-preference) for its boundary.
+The outbound pool is unrelated to the gateway access `proxyKey` above.
+
 Changing the probe interval reschedules background checks immediately; setting
 it to zero cancels current checks. Manual and periodic probes share the same
 timeout and request cancellation path. Late results from a replaced channel or
@@ -200,12 +209,12 @@ Adding a channel stays inside one dialog: name and priority, then preset or
 custom selection, then the preset's JSX or the host's schema form. Successful
 creation closes the dialog and refreshes the channel list.
 `POST /api/admin/sources` creates a UUID-identified source from
-`{ id, name, priority, sourcePluginId, presetId?, config }`, returning `201` and
-an ETag; duplicate identity returns `409`. Name, priority, and plugin ownership
-are persisted independently of provider configuration and survive restarts and
-later edits. Lower priority values are selected first. Drafts and provider
-credentials stay in dialog memory and are discarded when it closes; they are
-never written to the URL or browser storage.
+`{ id, name, priority, proxy?, sourcePluginId, presetId?, config }`, returning
+`201` and an ETag; duplicate identity returns `409`. Name, priority, and plugin
+ownership are persisted independently of provider configuration and survive
+restarts and later edits. Lower priority values are selected first. Drafts and
+provider credentials stay in dialog memory and are discarded when it closes;
+they are never written to the URL or browser storage.
 
 Channels can be renamed, reprioritized, enabled, disabled, or deleted through
 ETag-protected operations. Instance enablement is independent of source plugin

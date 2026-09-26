@@ -270,13 +270,20 @@ export interface WebSocketLike extends EventTarget {
     close(code?: number, reason?: string): void;
 }
 
-export type WebSocketFactory = (url: string) => WebSocketLike;
+export type WebSocketFactory = (
+    url: string,
+    httpClient?: Deno.HttpClient,
+) => WebSocketLike;
 
 export interface ChatHubClientOptions {
     webSocketFactory?: WebSocketFactory;
+    /** Optional caller-owned transport; the source releases it after the run. */
+    httpClient?: Deno.HttpClient;
     connectTimeoutMs?: number;
     handshakeTimeoutMs?: number;
     idleTimeoutMs?: number;
+    /** Client keepalive cadence; the upstream drops silent clients (~30s). */
+    pingIntervalMs?: number;
     maxReconnectAttempts?: number;
     reconnectDelayMs?: number;
     clock?: () => Date;

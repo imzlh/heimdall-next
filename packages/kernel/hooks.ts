@@ -40,6 +40,15 @@ export class MiddlewareRegistry {
                 `middleware order must be a safe integer: ${manifest.id}`,
             );
         }
+        for (const hook of ["transformRequest", "transformFrames"] as const) {
+            if (
+                plugin[hook] !== undefined && typeof plugin[hook] !== "function"
+            ) {
+                throw new TypeError(
+                    `middleware ${hook} must be a function: ${manifest.id}`,
+                );
+            }
+        }
         if (
             plugin.transformRequest === undefined &&
             plugin.transformFrames === undefined
@@ -59,6 +68,13 @@ export class MiddlewareRegistry {
 
     list(): readonly MiddlewarePlugin[] {
         return this.ordered();
+    }
+
+    /** One execution keeps the same request/response chain across live switches. */
+    snapshot(): MiddlewareRegistry {
+        const snapshot = new MiddlewareRegistry();
+        for (const plugin of this.ordered()) snapshot.register(plugin);
+        return snapshot;
     }
 
     async transformRequest(

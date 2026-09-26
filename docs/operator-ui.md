@@ -119,7 +119,7 @@ URL、上游请求、聊天或任意插件路由。 登录、登出和转发端�
 | 概况                 | `GET /health`、`GET /api/admin/models`、`GET /api/admin/status`              | 独立处理部分读取失败                                                   |
 | 渠道、插件、预设列表 | `GET /api/admin/sources`、`GET /api/admin/plugins`、`GET /api/admin/presets` | 使用脱敏列表 DTO                                                       |
 | 创建独立渠道         | `POST /api/admin/sources`                                                    | UUID v4、名称、优先级、源插件及配置；成功 `201` + ETag，重复身份 `409` |
-| 修改渠道信息与启停   | `PATCH /api/admin/sources?id=...`                                            | 名称、优先级、实例启停；使用 `If-Match` 防止覆盖他人修改               |
+| 修改渠道信息与启停   | `PATCH /api/admin/sources?id=...`                                            | 名称、优先级、代理选择、实例启停；使用 `If-Match` 防止覆盖他人修改     |
 | 删除渠道             | `DELETE /api/admin/sources?id=...`                                           | 确认后发送 `If-Match`；只移除当前实例与保存配置                        |
 | 读取渠道配置         | `GET /api/admin/source-config?id=...`                                        | 保留响应 ETag，密钥仅返回配置状态                                      |
 | 校验渠道配置         | `POST /api/admin/source-config/validate?id=...`                              | `{ config }`；服务端验证为最终依据                                     |
@@ -128,8 +128,16 @@ URL、上游请求、聊天或任意插件路由。 登录、登出和转发端�
 | 渠道探测             | `POST /api/admin/source-probe`                                               | `{ sourceId }`，显示真实结果                                           |
 | 插件启停             | `POST /api/admin/plugin-state`                                               | `{ pluginId, enabled }`；受已有宿主能力约束                            |
 | 运行设置             | `GET/PUT /api/admin/settings`                                                | 代理密钥、每分钟限制、探测间隔，写入保留 ETag                          |
+| 出站代理池           | `GET/PUT /api/admin/proxies`                                                 | 全局默认、代理增删启停；凭据只写，使用 `If-Match` 防止覆盖他人修改     |
 | 最近请求与用量       | `GET /api/admin/requests`、`GET /api/admin/usage`                            | 只读记录，加载与错误状态互相独立                                       |
 | 用量统计（自然日）   | `GET /api/admin/stats`、`/stats/series?days=N`、`/stats/models?date=`        | 按 `HEIMDALL_TIMEZONE` 的自然日统计，只读                              |
+
+代理池在设置中独立显示；渠道添加和编辑复用同一选择控件，支持继承全局、直连或指定代理。
+选择预设后仍在当前模态内，预设 JSX 仅获得可序列化的代理选择，授权 API
+在服务端解析凭据。
+编辑已有代理时，认证信息默认保留；明确选择替换或清除才更新凭据。版本冲突后读取最新池并保留
+本地修改供核对。停用或移除默认代理时，草稿的全局默认改为直连；显式引用该项的渠道显示不可用。
+内核只提供配置，插件自行决定是否使用代理。这与运行设置中的网关访问密钥相互独立。
 
 保存探测间隔后立即重新安排后台探测，设为 `0` 会取消当前探测。手动与自动探测共用
 10

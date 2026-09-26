@@ -474,6 +474,138 @@ Deno.test("closing a chat socket cancels generation and releases its conversatio
     }
 });
 
+Deno.test("chat stop handles aborted reads before output and during regeneration", async () => {
+    const store = openSqliteChatStore(":memory:");
+    const firstRead = Promise.withResolvers<void>();
+    const serverAbort = new AbortController();
+    let calls = 0;
+    const app = createServer({
+        sources: [{
+            id: "abort-without-terminal-frame",
+            capabilities: [{ operation: "generation.create", streaming: true }],
+            async *execute(input, context) {
+                const call = ++calls;
+                yield frame(input, 1, { kind: "run.started", request: input });
+                if (call > 1) {
+                    yield frame(input, 2, {
+                        kind: "part.delta",
+                        messageId: "m",
+                        partId: "p",
+                        delta: call === 2 ? "partial replacement" : "finished",
+                    });
+                }
+                if (call <= 2) {
+                    if (call === 1) firstRead.resolve();
+                    await new Promise<never>((_resolve, reject) => {
+                        const onAbort = () => reject(context.signal.reason);
+                        if (context.signal.aborted) onAbort();
+                        else {
+                            context.signal.addEventListener("abort", onAbort, {
+                                once: true,
+                            });
+                        }
+                    });
+                }
+                yield frame(input, 3, { kind: "run.completed" });
+            },
+        }],
+        chat: { store },
+    });
+    const server = Deno.serve(
+        {
+            hostname: "127.0.0.1",
+            port: 0,
+            signal: serverAbort.signal,
+            onListen() {},
+        },
+        app.fetch,
+    );
+    let socket: ChatSocket | undefined;
+    try {
+        const conversation = store.createConversation(
+            "test",
+            new Date().toISOString(),
+        );
+        socket = await openSocket(
+            `ws://127.0.0.1:${
+                (server.addr as Deno.NetAddr).port
+            }/api/chat/socket`,
+        );
+        socket.socket.send(JSON.stringify({
+            type: "send",
+            conversationId: conversation.id,
+            model: "m",
+            text: "ask",
+        }));
+        assertEquals((await socket.next()).type, "user");
+        await within(firstRead.promise, "first source read");
+        socket.socket.send(JSON.stringify({ type: "stop" }));
+        assertEquals(await socket.next(), { type: "stopped" });
+        assertEquals(
+            store.listMessages(conversation.id).map((item) => item.text),
+            ["ask"],
+        );
+
+        store.addMessage({
+            id: crypto.randomUUID(),
+            conversationId: conversation.id,
+            role: "assistant",
+            text: "previous reply",
+            createdAt: new Date().toISOString(),
+        });
+        socket.socket.send(JSON.stringify({
+            type: "regenerate",
+            conversationId: conversation.id,
+            model: "m",
+        }));
+        assertEquals(await socket.next(), {
+            type: "delta",
+            text: "partial replacement",
+        });
+        socket.socket.send(JSON.stringify({ type: "stop" }));
+        assertEquals(await socket.next(), { type: "stopped" });
+        assertEquals(
+            store.listMessages(conversation.id).map((item) => item.text),
+            [
+                "ask",
+                "partial replacement",
+            ],
+        );
+
+        // Both the socket and the conversation lock are reusable after stop.
+        socket.socket.send(JSON.stringify({
+            type: "send",
+            conversationId: conversation.id,
+            model: "m",
+            text: "continue",
+        }));
+        assertEquals((await socket.next()).type, "user");
+        assertEquals(await socket.next(), { type: "delta", text: "finished" });
+        assertEquals((await socket.next()).type, "done");
+        assertEquals(calls, 3);
+        assertEquals(
+            store.listMessages(conversation.id).map((item) => item.text),
+            [
+                "ask",
+                "partial replacement",
+                "continue",
+                "finished",
+            ],
+        );
+    } finally {
+        try {
+            await socket?.close();
+        } finally {
+            serverAbort.abort();
+            try {
+                await within(server.finished, "chat server shutdown");
+            } finally {
+                store.close();
+            }
+        }
+    }
+});
+
 const WAIT_TIMEOUT_MS = 5_000;
 
 async function assertConversationMutationBusy(

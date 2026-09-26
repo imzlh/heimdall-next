@@ -55,6 +55,8 @@ Deno.test("source partial updates send only supplied fields and omit the default
         { name: "新名称" },
         { priority: 0 },
         { enabled: false },
+        { proxy: { mode: "direct" as const } },
+        { proxy: { mode: "proxy" as const, proxyId: "office" } },
     ];
     await withTransport(
         () => Response.json({ updated: true }),

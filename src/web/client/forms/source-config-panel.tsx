@@ -1,5 +1,4 @@
-/** @jsxRuntime automatic */
-/** @jsxImportSource hono/jsx/dom */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { SchemaForm } from "./schema-form.tsx";
 import { formControls } from "@heimdall/admin-contracts/forms.ts";
 import { controlValue } from "../dom.ts";

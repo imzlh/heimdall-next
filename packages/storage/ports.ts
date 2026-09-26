@@ -185,6 +185,10 @@ export interface ConversationRecord {
     readonly title: string;
     readonly createdAt: string;
     readonly updatedAt: string;
+    /** Injected before every completion of this conversation. */
+    readonly systemPrompt?: string;
+    /** Upstream reasoning effort preference: "low" | "medium" | "high". */
+    readonly reasoningEffort?: "low" | "medium" | "high";
 }
 
 export interface ChatAttachment {
@@ -198,6 +202,9 @@ export interface ChatMessageRecord {
     readonly role: "system" | "user" | "assistant" | "tool";
     readonly text: string;
     readonly createdAt: string;
+    /** Absent on legacy messages, which are treated as completed. */
+    readonly status?: "completed" | "failed" | "stopped";
+    readonly error?: { readonly code: string; readonly message: string };
     /** Set when this row is a tool call or a tool result. */
     readonly callId?: string;
     readonly name?: string;
@@ -211,7 +218,14 @@ export interface ChatStore {
     getConversation(id: string): ConversationRecord | null;
     updateConversation(
         id: string,
-        patch: { readonly title?: string; readonly updatedAt: string },
+        patch: {
+            readonly title?: string;
+            readonly updatedAt: string;
+            /** Empty string clears the stored prompt; undefined keeps it. */
+            readonly systemPrompt?: string;
+            /** Empty string clears; undefined keeps; otherwise low/medium/high. */
+            readonly reasoningEffort?: string;
+        },
     ): void;
     /** Atomically delete the conversation, its messages and attachments. */
     deleteConversation(id: string): void;

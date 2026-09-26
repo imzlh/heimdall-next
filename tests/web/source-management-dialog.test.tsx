@@ -5,6 +5,10 @@
 import { assert, assertEquals, assertStrictEquals } from "@std/assert";
 import { render, useState } from "hono/jsx/dom";
 import "hono/jsx/dom/jsx-runtime";
+import type {
+    ProxyPoolView,
+    SourceProxySelection,
+} from "@heimdall/admin-contracts/proxies.ts";
 import {
     configureAdminTransport,
     type ListedSource,
@@ -21,6 +25,23 @@ const source: ListedSource = {
     instanceEnabled: true,
     pluginEnabled: true,
     versionstamp: '"revision-1"',
+};
+
+const proxyPool: ProxyPoolView = {
+    defaultProxyId: "office",
+    entries: [{
+        id: "office",
+        name: "办公室出口",
+        url: "http://127.0.0.1:7890/",
+        enabled: true,
+        authConfigured: true,
+    }, {
+        id: "backup",
+        name: "备用出口",
+        url: "socks5://127.0.0.1:1080",
+        enabled: false,
+        authConfigured: false,
+    }],
 };
 
 interface RecordedRequest {
@@ -58,6 +79,7 @@ async function setup(
         request: RecordedRequest,
         index: number,
     ) => Response | Promise<Response> = () => Response.json({ updated: true }),
+    options: { source?: ListedSource; proxyPool?: ProxyPoolView | null } = {},
 ) {
     const dom = installTestDom();
     const requests: RecordedRequest[] = [];
@@ -82,7 +104,8 @@ async function setup(
                 </button>
                 {open && (
                     <SourceManagementDialog
-                        source={source}
+                        source={options.source ?? source}
+                        proxyPool={options.proxyPool}
                         onChanged={(kind, source) => {
                             changes.push({ kind, source });
                             lifecycle.push(kind);
@@ -115,6 +138,12 @@ async function setup(
         async edit(field: "name" | "priority", value: string) {
             await dom.act(() =>
                 input(find(dialog, `input[name="source-${field}"]`), value)
+            );
+        },
+        async selectProxy(value: string) {
+            // hono/jsx/dom maps select onChange to the native input event.
+            await dom.act(() =>
+                input(find(dialog, 'select[name="source-proxy"]'), value)
             );
         },
         async dispose() {
@@ -165,6 +194,193 @@ Deno.test("source management saves only dirty fields then closes and restores fo
             assertStrictEquals(test.document.activeElement, test.trigger);
             assertEquals(test.navigation, []);
             assertEquals(test.storageWrites, []);
+        } finally {
+            await test.dispose();
+        }
+    }
+});
+
+Deno.test("source management offers inheritance, direct access and named proxies and saves the chosen mode", async () => {
+    const choices: {
+        initial: SourceProxySelection;
+        selected: SourceProxySelection;
+        value: string;
+    }[] = [{
+        initial: { mode: "direct" },
+        selected: { mode: "inherit" },
+        value: "inherit",
+    }, {
+        initial: { mode: "inherit" },
+        selected: { mode: "direct" },
+        value: "direct",
+    }, {
+        initial: { mode: "inherit" },
+        selected: { mode: "proxy", proxyId: "office" },
+        value: "proxy:office",
+    }];
+    for (const choice of choices) {
+        const original = { ...source, proxy: choice.initial };
+        const test = await setup(undefined, { source: original, proxyPool });
+        try {
+            const select = find(test.dialog, 'select[name="source-proxy"]');
+            assertEquals(select.value, choice.initial.mode);
+            assertEquals(
+                find(select, 'option[value="inherit"]').textContent,
+                "继承全局 · 办公室出口",
+            );
+            assertEquals(
+                find(select, 'option[value="direct"]').textContent,
+                "直连",
+            );
+            assertEquals(
+                find(select, 'option[value="proxy:office"]').textContent,
+                "办公室出口",
+            );
+            assert(!find(select, 'option[value="proxy:office"]').disabled);
+            assert(find(select, 'option[value="proxy:backup"]').disabled);
+            assert(
+                test.dialog.textContent.includes(
+                    "代理选择由插件读取，是否使用取决于插件实现。",
+                ),
+            );
+            await test.selectProxy(choice.value);
+            assertEquals(select.value, choice.value);
+            await test.act(() => button(test.dialog, "保存修改").click());
+            assertEquals(test.requests.length, 1);
+            const request = test.requests[0]!;
+            assertEquals(request.init?.method, "PATCH");
+            assertEquals(JSON.parse(String(request.init?.body)), {
+                proxy: choice.selected,
+            });
+            assertEquals(
+                new Headers(request.init?.headers).get("if-match"),
+                source.versionstamp,
+            );
+            assertEquals(test.changes, [{
+                kind: "saved",
+                source: { ...original, proxy: choice.selected },
+            }]);
+            assertEquals(test.lifecycle, ["saved", "closed"]);
+            assertEquals(test.navigation, []);
+            assertEquals(test.storageWrites, []);
+        } finally {
+            await test.dispose();
+        }
+    }
+});
+
+Deno.test("source name edits preserve an existing disabled or removed proxy without resubmitting it", async () => {
+    for (
+        const unavailable of [
+            { id: "backup", label: "备用出口（已停用）" },
+            { id: "removed", label: "removed（已移除）" },
+        ]
+    ) {
+        const original: ListedSource = {
+            ...source,
+            proxy: { mode: "proxy", proxyId: unavailable.id },
+        };
+        const test = await setup(undefined, { source: original, proxyPool });
+        try {
+            const select = find(test.dialog, 'select[name="source-proxy"]');
+            assertEquals(select.value, `proxy:${unavailable.id}`);
+            const option = find(
+                select,
+                `option[value="proxy:${unavailable.id}"]`,
+            );
+            assert(option.disabled);
+            assertEquals(option.textContent, unavailable.label);
+            await test.edit("name", "仅更新渠道名称");
+            await test.act(() => button(test.dialog, "保存修改").click());
+            assertEquals(test.requests.length, 1);
+            assertEquals(JSON.parse(String(test.requests[0]!.init?.body)), {
+                name: "仅更新渠道名称",
+            });
+            assertEquals(test.changes, [{
+                kind: "saved",
+                source: { ...original, name: "仅更新渠道名称" },
+            }]);
+            assertEquals(test.closes, 1);
+        } finally {
+            await test.dispose();
+        }
+    }
+});
+
+Deno.test("source proxy conflict reload keeps a changed local choice and adopts an untouched remote choice", async () => {
+    for (const localProxyChanged of [true, false]) {
+        const original: ListedSource = {
+            ...source,
+            proxy: { mode: "inherit" },
+        };
+        const latest: ListedSource = {
+            ...original,
+            name: "服务器新名称",
+            priority: 29,
+            proxy: { mode: "direct" },
+            versionstamp: '"revision-proxy-2"',
+        };
+        const localProxy: SourceProxySelection = {
+            mode: "proxy",
+            proxyId: "office",
+        };
+        const test = await setup((_request, index) => {
+            if (index === 0) {
+                return Response.json({
+                    error: {
+                        code: "version_conflict",
+                        message: "渠道已被修改",
+                    },
+                }, { status: 409 });
+            }
+            if (index === 1) return Response.json({ sources: [latest] });
+            return Response.json({ updated: true });
+        }, { source: original, proxyPool });
+        try {
+            await test.edit("name", "本地新名称");
+            if (localProxyChanged) await test.selectProxy("proxy:office");
+            const expectedChanges = {
+                name: "本地新名称",
+                ...(localProxyChanged ? { proxy: localProxy } : {}),
+            };
+            await test.act(() => button(test.dialog, "保存修改").click());
+            assertEquals(test.requests.length, 1);
+            assertEquals(
+                JSON.parse(String(test.requests[0]!.init?.body)),
+                expectedChanges,
+            );
+            assert(find(test.dialog, 'select[name="source-proxy"]').disabled);
+            assert(button(test.dialog, "保存修改").disabled);
+            assertEquals(test.closes, 0);
+            await test.act(() => button(test.dialog, "读取最新信息").click());
+            assertEquals(test.requests.length, 2);
+            assertEquals(test.requests[1]!.input, "/api/admin/sources");
+            assertEquals(
+                find(test.dialog, 'select[name="source-proxy"]').value,
+                localProxyChanged ? "proxy:office" : "direct",
+            );
+            assert(!find(test.dialog, 'select[name="source-proxy"]').disabled);
+            assertEquals(
+                find(test.dialog, 'input[name="source-name"]').value,
+                "本地新名称",
+            );
+            assertEquals(
+                find(test.dialog, 'input[name="source-priority"]').value,
+                "29",
+            );
+            await test.act(() => button(test.dialog, "保存修改").click());
+            assertEquals(test.requests.length, 3);
+            const retry = test.requests[2]!;
+            assertEquals(JSON.parse(String(retry.init?.body)), expectedChanges);
+            assertEquals(
+                new Headers(retry.init?.headers).get("if-match"),
+                latest.versionstamp,
+            );
+            assertEquals(test.changes, [{
+                kind: "saved",
+                source: { ...latest, ...expectedChanges },
+            }]);
+            assertEquals(test.closes, 1);
         } finally {
             await test.dispose();
         }

@@ -23,6 +23,7 @@ const targetDirectories = [
     clientRoot,
     "packages/admin-contracts",
     "packages/contracts",
+    "packages/source-sdk",
     "packages/hip",
     "packages/kernel",
     "packages/plugin-host",
@@ -372,6 +373,12 @@ Deno.test("architecture: plugins cannot import host implementation details", asy
                 isPluginUiEntry(file) &&
                 resolved === "packages/admin-contracts/preset-ui.ts"
             ) continue;
+            // Preset browser entries share decorative icons through the public
+            // UI alias; host state, transport, and other UI internals stay private.
+            if (
+                isPluginUiEntry(file) && specifier === "@heimdall/ui/icons" &&
+                resolved === `${sharedRoot}/icons.tsx`
+            ) continue;
             if (forbiddenRoots.some((root) => isUnder(resolved, root))) {
                 violations.push(`${file} -> ${specifier}`);
             }
@@ -380,7 +387,38 @@ Deno.test("architecture: plugins cannot import host implementation details", asy
     assertEquals(
         violations,
         [],
-        "plugins depend on HIP/contracts and own modules",
+        "plugins depend on public contracts, optional SDK and own modules",
+    );
+});
+
+Deno.test("architecture: outbound proxy transports are an optional plugin SDK", async () => {
+    const violations: string[] = [];
+    for (const { file, imports } of await sourcesUnder("packages/source-sdk")) {
+        for (const { specifier, resolved } of imports) {
+            if (
+                isUnder(resolved, "src") ||
+                isUnder(resolved, "plugins") ||
+                ["packages/kernel", "packages/plugin-host", "packages/storage"]
+                    .some((root) => isUnder(resolved, root))
+            ) violations.push(`${file} -> ${specifier}`);
+        }
+    }
+    for (const directory of ["packages/kernel", "src/composition"]) {
+        for (const { file, source, imports } of await sourcesUnder(directory)) {
+            for (const { specifier, resolved } of imports) {
+                if (isUnder(resolved, "packages/source-sdk")) {
+                    violations.push(`${file} -> ${specifier}`);
+                }
+            }
+            if (/\bglobalThis\s*\.\s*fetch\s*=/.test(withoutComments(source))) {
+                violations.push(`${file} -> global fetch replacement`);
+            }
+        }
+    }
+    assertEquals(
+        violations,
+        [],
+        "the host supplies proxy data; plugins choose transports",
     );
 });
 

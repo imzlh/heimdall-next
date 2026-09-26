@@ -1,18 +1,17 @@
-/* Original Heimdall composer: one floating surface changes width and height. */
+/* Original Heimdall composer: one floating surface, stable width. */
 .chat-composer-region {
-    position: relative;
+    position: absolute;
     z-index: 5;
     flex: 0 0 auto;
     width: 100%;
     margin: 0 auto;
     padding: 14px 28px 18px;
-    background: var(--bg);
+    bottom: 0;
+    left: 0;
 }
 .chat-composer {
-    --island-duration: 420ms;
-    --island-ease: cubic-bezier(.32, .72, 0, 1);
     position: relative;
-    width: min(480px, 100%);
+    width: min(720px, 100%);
     margin: 0 auto;
     border: 1px solid color-mix(in srgb, var(--text) 6%, transparent);
     /* A 50px single row clamps this to a 25px semicircle; multiline stays 26px. */
@@ -22,20 +21,38 @@
         0 8px 22px rgb(1 5 12 / 12%),
         0 1px 0 rgb(255 255 255 / 4%) inset;
     transition:
-        width var(--island-duration) var(--island-ease),
-        border-radius var(--island-duration) var(--island-ease),
-        transform 280ms cubic-bezier(.16, 1, .3, 1),
         border-color 200ms ease,
         background 200ms ease,
         box-shadow 280ms ease;
 }
 .chat-composer:focus-within {
-    width: min(720px, 100%);
-    transform: translateY(-1px);
     border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
     box-shadow:
         0 10px 28px rgb(1 5 12 / 16%),
         0 1px 0 rgb(255 255 255 / 5%) inset;
+}
+/* Floating pill that returns to the newest message while streaming. */
+.chat-jump-latest {
+    position: absolute;
+    z-index: 6;
+    bottom: 128px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 7px 14px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 12px;
+    box-shadow: 0 10px 28px rgb(0 0 0 / 18%);
+    animation: chat-composer-asset-in 200ms cubic-bezier(.22, 1, .36, 1) both;
+}
+.chat-jump-latest:hover {
+    background: var(--surface-muted);
+    text-decoration: none;
 }
 .chat-composer-input {
     display: flex;
@@ -68,7 +85,7 @@
     font-size: 15px;
     line-height: 22px;
     caret-color: var(--accent);
-    transition: height var(--island-duration) var(--island-ease);
+    transition: height 260ms cubic-bezier(.22, 1, .36, 1);
 }
 .chat-composer .chat-draft:focus,
 .chat-composer .chat-draft:focus-visible,
@@ -93,7 +110,7 @@
     place-items: center;
     flex: 0 0 32px;
     border: 0;
-    border-radius: 9px;
+    border-radius: 50%;
     background: transparent;
     color: color-mix(in srgb, var(--subtle) 82%, transparent);
     transition: background 180ms ease, color 180ms ease, transform 180ms ease;
@@ -169,7 +186,7 @@
     border-radius: 50%;
     background: var(--button-bg);
     color: #fff;
-    box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 16%, transparent);
+    box-shadow: none;
     transition:
         opacity 140ms ease,
         transform 200ms cubic-bezier(.22, 1, .36, 1),
@@ -187,11 +204,7 @@
     height: 16px;
 }
 .chat-send:hover:not(:disabled) {
-    transform: translateY(-1px);
     background: var(--button-hover);
-}
-.chat-send:active:not(:disabled) {
-    transform: scale(.94);
 }
 .chat-send:disabled {
     opacity: 1;

@@ -4,6 +4,10 @@ export interface ChatConversation {
     title: string;
     createdAt: string;
     updatedAt: string;
+    /** Injected before every completion of this conversation. */
+    systemPrompt?: string;
+    /** Reasoning effort preference: "low" | "medium" | "high". */
+    reasoningEffort?: "low" | "medium" | "high";
 }
 
 export interface ChatAttachment {
@@ -19,6 +23,9 @@ export interface ChatMessage {
     createdAt: string;
     callId?: string;
     name?: string;
+    /** Absent on legacy messages, which are treated as completed. */
+    status?: "completed" | "failed" | "stopped";
+    error?: { code: string; message: string };
     attachments?: ChatAttachment[];
 }
 

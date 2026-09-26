@@ -1,5 +1,4 @@
-/** @jsxRuntime automatic */
-/** @jsxImportSource hono/jsx/dom */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { render } from "hono/jsx/dom";
 import type { ChatInitial } from "@heimdall/admin-contracts/chat.ts";
 import { ChatApp } from "./chat-app.tsx";

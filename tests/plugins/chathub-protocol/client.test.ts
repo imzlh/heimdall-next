@@ -1,4 +1,4 @@
-import { assertEquals } from "@std/assert";
+import { assert, assertEquals } from "@std/assert";
 import { ChatHubClient } from "../../../plugins/chathub-source/protocol/client.ts";
 import { encodeRecord } from "../../../plugins/chathub-source/protocol/codec.ts";
 import { SignalRMessageType } from "../../../plugins/chathub-source/protocol/constants.ts";
@@ -105,4 +105,69 @@ Deno.test("the client separates the answer text from the chain-of-thought", asyn
     assertEquals(result.chatName, "Available tools");
     assertEquals(result.throttling?.metering?.LLMOnly?.remainingAllowance, 100);
     assertEquals(result.throttling?.numUserMessagesInConversation, 1);
+});
+
+/**
+ * Records every record the client sends and lets the test inject frames on
+ * demand, so a mid-stream gap can be held open long enough to observe the
+ * client keepalive ping and the pong it owes a server ping.
+ */
+class RecordingSocket extends EventTarget implements WebSocketLike {
+    readyState = 0;
+    readonly sent: string[] = [];
+    #handshaken = false;
+    constructor() {
+        super();
+        queueMicrotask(() => {
+            this.readyState = 1;
+            this.dispatchEvent(new Event("open"));
+        });
+    }
+    send(data: string | ArrayBufferLike | Blob | ArrayBufferView): void {
+        this.sent.push(String(data));
+        if (!this.#handshaken) {
+            this.#handshaken = true;
+            queueMicrotask(() => this.emit(encodeRecord({})));
+        }
+    }
+    close(): void {
+        this.readyState = 3;
+    }
+    emit(data: string): void {
+        this.dispatchEvent(new MessageEvent("message", { data }));
+    }
+    /** Records the client has sent that decode to a bare SignalR ping. */
+    pings(): number {
+        return this.sent.filter((record) => record.includes('"type":6')).length;
+    }
+}
+
+Deno.test("the client keeps the stream alive and answers a server ping", async () => {
+    const socket = new RecordingSocket();
+    const client = new ChatHubClient({
+        webSocketFactory: () => socket,
+        // Short cadence keeps the test fast; a real client uses the 15s default.
+        pingIntervalMs: 10,
+    });
+    const run = client.chat(CONNECTION, { text: "hi" });
+    // Let the handshake settle and the initial payload (which carries one ping)
+    // flush before counting keepalive activity.
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    const beforePong = socket.pings();
+    // A server ping mid-gap must be echoed immediately.
+    socket.emit(encodeRecord({ type: SignalRMessageType.Ping }));
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    assert(socket.pings() > beforePong, "server ping was not echoed");
+    // The interval must have fired at least once on its own during the gap.
+    assert(beforePong >= 2, `expected periodic pings, saw ${beforePong}`);
+    socket.emit(
+        encodeRecord({
+            type: SignalRMessageType.StreamItem,
+            item: {
+                messages: [{ author: "bot", text: "done", messageType: "" }],
+            },
+        }) + encodeRecord({ type: SignalRMessageType.Completion }),
+    );
+    const result = await run;
+    assertEquals(result.finalText ?? result.text, "done");
 });

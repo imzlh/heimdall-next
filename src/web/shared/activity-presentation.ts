@@ -1,10 +1,19 @@
-/** Use one explicit time zone so the server and browser show the same time. */
+/** Render timestamps in the viewer's local time, like the original console. */
 export function requestReceivedTime(value?: string): string {
     if (!value) return "时间未知";
     const date = new Date(value);
-    return Number.isNaN(date.getTime())
-        ? value
-        : date.toISOString().slice(0, 19).replace("T", " ");
+    if (Number.isNaN(date.getTime())) return value;
+    const pad = (input: number) => String(input).padStart(2, "0");
+    const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${
+        pad(date.getSeconds())
+    }`;
+    const sameYear = date.getFullYear() === new Date().getFullYear();
+    const day = sameYear
+        ? `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+        : `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${
+            pad(date.getDate())
+        }`;
+    return `${day} ${time}`;
 }
 
 export function requestState(status?: string): {

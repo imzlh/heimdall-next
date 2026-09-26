@@ -65,7 +65,7 @@ async function authorized(app: Hono, headers?: HeadersInit): Promise<boolean> {
 }
 
 function bridgeRequest(
-    app: Hono,
+    app: Pick<Hono, "request">,
     envelope: unknown,
     cookie?: string,
     extraHeaders?: HeadersInit,
@@ -273,18 +273,23 @@ Deno.test("UI bridge forwards only configured credentials and safe concurrency h
         });
     });
     const cookie = await loginCookie(app);
-    const response = await bridgeRequest(app, {
-        path: "/api/admin/settings",
-        method: "PUT",
-        headers: {
-            authorization: "Bearer caller-controlled-token",
-            cookie: "caller_controlled=value",
-            "If-Match": '"version-1"',
-            "X-Request-Id": "request-1",
-            "x-extra": "untrusted",
+    const response = await bridgeRequest(
+        app,
+        {
+            path: "/api/admin/settings",
+            method: "PUT",
+            headers: {
+                authorization: "Bearer caller-controlled-token",
+                cookie: "caller_controlled=value",
+                "If-Match": '"version-1"',
+                "X-Request-Id": "envelope-cannot-replace-trace",
+                "x-extra": "untrusted",
+            },
+            body: { limitPerMinute: 15 },
         },
-        body: { limitPerMinute: 15 },
-    }, cookie);
+        cookie,
+        { "x-request-id": "request-1" },
+    );
     assertEquals(response.status, 200);
     assert(forwarded !== undefined);
     assertEquals(forwarded.url, `${origin}/api/admin/settings`);
@@ -300,8 +305,8 @@ Deno.test("UI bridge forwards only configured credentials and safe concurrency h
     assertEquals(await forwarded.json(), { limitPerMinute: 15 });
     assertEquals(await response.json(), { saved: true });
     assertEquals(response.headers.get("etag"), '"version-2"');
-    assertEquals(response.headers.get("x-request-id"), "request-2");
-    assertEquals(response.headers.get("x-heimdall-request-id"), "heimdall-2");
+    assertEquals(response.headers.get("x-request-id"), null);
+    assertEquals(response.headers.get("x-heimdall-request-id"), "request-1");
     assertEquals(response.headers.get("set-cookie"), null);
     assertEquals(response.headers.get("access-control-allow-origin"), null);
     assertEquals(response.headers.get("cache-control"), "no-store");
@@ -517,7 +522,12 @@ Deno.test("UI bridge preserves management errors and rejects non-JSON responses"
     const conflict = await bridgeRequest(failed, envelope);
     assertEquals(conflict.status, 409);
     assertEquals(conflict.headers.get("etag"), '"latest"');
-    assertEquals(await conflict.json(), { error: { code: "conflict" } });
+    assertEquals(await conflict.json(), {
+        error: {
+            code: "conflict",
+            request_id: conflict.headers.get("x-heimdall-request-id"),
+        },
+    });
     const invalid = createHarness(
         {},
         () =>
@@ -551,4 +561,176 @@ Deno.test("web cookies never authorize existing management API prefixes", async 
         });
         assertEquals(bearer.status, 200);
     }
+});
+
+Deno.test("server bridge shares one host trace with nested management failures", async () => {
+    const received: { context: string; header: string | null }[] = [];
+    const app = createServerApp({
+        adminManagement: {
+            saveProxies: (context) => {
+                received.push({
+                    context: context.requestId,
+                    header: context.request.headers.get("x-request-id"),
+                });
+                throw new TypeError("invalid proxy pool configuration");
+            },
+        },
+    });
+    for (const requestId of ["outer-http-trace", undefined]) {
+        const response = await bridgeRequest(
+            app,
+            {
+                path: "/api/admin/proxies",
+                method: "PUT",
+                headers: { "x-request-id": "different-envelope-trace" },
+                body: {},
+            },
+            undefined,
+            requestId ? { "x-request-id": requestId } : {},
+        );
+        assertEquals(response.status, 400);
+        const trace = response.headers.get("x-heimdall-request-id");
+        assert(trace);
+        if (requestId !== undefined) assertEquals(trace, requestId);
+        assert(trace !== "different-envelope-trace");
+        assertEquals(received.at(-1), { context: trace, header: trace });
+        assertEquals(await response.json(), {
+            error: {
+                code: "invalid_config",
+                message: "invalid proxy pool configuration",
+                request_id: trace,
+            },
+        });
+    }
+});
+
+Deno.test("server bridge keeps its trace when plugin responses supply different trace headers and errors", async () => {
+    const plugin = new Hono();
+    const pluginRequests: string[] = [];
+    plugin.get("/proxies", (context) => {
+        pluginRequests.push(context.req.header("x-request-id")!);
+        return Response.json({
+            error: {
+                code: "provider_error",
+                message: "插件暂时不可用",
+                request_id: "plugin-body-trace",
+                detail: { retryable: true },
+            },
+        }, {
+            status: 503,
+            headers: {
+                "x-heimdall-request-id": "plugin-header-trace",
+                "x-request-id": "provider-private-trace",
+                etag: '"plugin-version"',
+            },
+        });
+    });
+    const app = createServerApp({ adminRoutes: plugin });
+    const response = await bridgeRequest(
+        app,
+        {
+            path: "/api/admin/proxies",
+            method: "GET",
+            headers: { "x-request-id": "envelope-trace" },
+        },
+        undefined,
+        { "x-request-id": "host-trace" },
+    );
+    assertEquals(response.status, 503);
+    assertEquals(pluginRequests, ["host-trace"]);
+    assertEquals(response.headers.get("x-heimdall-request-id"), "host-trace");
+    assertEquals(response.headers.get("x-request-id"), null);
+    assertEquals(response.headers.get("etag"), '"plugin-version"');
+    assertEquals(await response.json(), {
+        error: {
+            code: "provider_error",
+            message: "插件暂时不可用",
+            request_id: "host-trace",
+            detail: { retryable: true },
+        },
+    });
+    const direct = await app.request(`${origin}/api/admin/proxies`, {
+        headers: { "x-request-id": "direct-host-trace" },
+    });
+    assertEquals(
+        direct.headers.get("x-heimdall-request-id"),
+        "direct-host-trace",
+    );
+    await direct.body?.cancel();
+});
+
+Deno.test("server bridge validation, authentication and upstream failures return the outer error trace", async () => {
+    const app = createServerApp();
+    const cases = [
+        { body: "{", headers: {}, status: 400 },
+        {
+            body: JSON.stringify({
+                path: "/api/admin/proxies/",
+                method: "GET",
+            }),
+            headers: {},
+            status: 403,
+        },
+        {
+            body: JSON.stringify({ path: "/api/admin/proxies", method: "GET" }),
+            headers: { origin: "https://attacker.example.test" },
+            status: 403,
+        },
+    ];
+    for (const test of cases) {
+        const response = await app.request(`${origin}/admin/ui/request`, {
+            method: "POST",
+            headers: {
+                origin,
+                "content-type": "application/json",
+                "x-request-id": "validation-trace",
+                ...test.headers,
+            },
+            body: test.body,
+        });
+        assertEquals(response.status, test.status);
+        assertEquals(
+            response.headers.get("x-heimdall-request-id"),
+            "validation-trace",
+        );
+        assertEquals(
+            (await response.json()).error.request_id,
+            "validation-trace",
+        );
+    }
+    const secured = createServerApp({ adminAuthToken: adminToken });
+    const denied = await bridgeRequest(
+        secured,
+        {
+            path: "/api/admin/proxies",
+            method: "GET",
+        },
+        undefined,
+        { "x-request-id": "unauthorized-trace" },
+    );
+    assertEquals(denied.status, 401);
+    assertEquals(
+        denied.headers.get("x-heimdall-request-id"),
+        "unauthorized-trace",
+    );
+    assertEquals((await denied.json()).error.request_id, "unauthorized-trace");
+
+    const malformed = new Hono();
+    malformed.get("/proxies", () => new Response("not JSON"));
+    const upstream = createServerApp({ adminRoutes: malformed });
+    const invalid = await bridgeRequest(
+        upstream,
+        {
+            path: "/api/admin/proxies",
+            method: "GET",
+        },
+        undefined,
+        { "x-request-id": "upstream-trace" },
+    );
+    assertEquals(invalid.status, 502);
+    assertEquals(
+        invalid.headers.get("x-heimdall-request-id"),
+        "upstream-trace",
+    );
+    assertEquals((await invalid.json()).error.request_id, "upstream-trace");
 });

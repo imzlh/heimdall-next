@@ -133,6 +133,11 @@ Deno.test("island boot retains SSR requests usage settings and the settings ETag
                     },
                 }, { headers: { etag: "settings-version" } });
             }
+            if (path === "/api/admin/proxies") {
+                return Response.json({
+                    pool: { defaultProxyId: null, entries: [] },
+                }, { headers: { etag: "proxies-version" } });
+            }
             return Response.json({ status: "ok" });
         },
     });
@@ -157,7 +162,11 @@ Deno.test("island boot retains SSR requests usage settings and the settings ETag
             },
             etag: "settings-version",
         },
-        errors: { requests: "", usage: "", settings: "" },
+        proxies: {
+            pool: { defaultProxyId: null, entries: [] },
+            etag: "proxies-version",
+        },
+        errors: { requests: "", usage: "", settings: "", proxies: "" },
     });
     assert(!html.includes("NEVER-IN-BOOT"));
 });

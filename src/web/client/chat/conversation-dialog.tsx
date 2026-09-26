@@ -1,5 +1,4 @@
-/** @jsxRuntime automatic */
-/** @jsxImportSource hono/jsx/dom */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { useEffect, useRef, useState } from "hono/jsx/dom";
 import { Icon } from "../../shared/icons.tsx";
 

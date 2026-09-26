@@ -31,6 +31,12 @@ import type {
 
 const OPEN = 1;
 
+// The project's DOM lib supplies the browser-only constructor overload. Deno's
+// native WebSocket also accepts a client; keep that server extension localized.
+const DenoWebSocket = WebSocket as unknown as {
+    new (url: string, options: { client?: Deno.HttpClient }): WebSocket;
+};
+
 export class ChatHubTransportError extends Error {
     constructor(message: string, options?: ErrorOptions) {
         super(message, options);
@@ -57,15 +63,19 @@ interface RunOptions extends ChatCallOptions {
 }
 
 function eventError(event: Event, fallback: string): Error {
-    if (event instanceof ErrorEvent && event.error instanceof Error) {
-        return event.error;
+    const error = (event as ErrorEvent).error;
+    if (error instanceof Error) {
+        return new ChatHubTransportError(error.message || fallback, {
+            cause: error,
+        });
     }
     return new ChatHubTransportError(fallback);
 }
 
 function messageText(event: Event): string | undefined {
-    if (!(event instanceof MessageEvent)) return undefined;
-    return typeof event.data === "string" ? event.data : undefined;
+    // A standards-compatible WebSocket may use its own MessageEvent class.
+    const data: unknown = (event as MessageEvent).data;
+    return typeof data === "string" ? data : undefined;
 }
 
 function uniqueByJson<T>(items: T[]): T[] {
@@ -83,11 +93,14 @@ export class ChatHubClient {
     readonly #connectTimeoutMs: number;
     readonly #handshakeTimeoutMs: number;
     readonly #idleTimeoutMs: number;
+    readonly #pingIntervalMs: number;
     readonly #clock: () => Date;
 
     constructor(options: ChatHubClientOptions = {}) {
-        this.#factory = options.webSocketFactory ??
-            ((url) => new WebSocket(url));
+        this.#factory = options.webSocketFactory
+            ? (url) => options.webSocketFactory!(url, options.httpClient)
+            : (url) => new DenoWebSocket(url, { client: options.httpClient });
+        this.#pingIntervalMs = options.pingIntervalMs ?? 15_000;
         this.#connectTimeoutMs = options.connectTimeoutMs ?? 15_000;
         this.#handshakeTimeoutMs = options.handshakeTimeoutMs ?? 15_000;
         this.#idleTimeoutMs = options.idleTimeoutMs ?? 120_000;
@@ -150,6 +163,7 @@ export class ChatHubClient {
         let connectTimer: ReturnType<typeof setTimeout> | undefined;
         let handshakeTimer: ReturnType<typeof setTimeout> | undefined;
         let idleTimer: ReturnType<typeof setTimeout> | undefined;
+        let pingTimer: ReturnType<typeof setInterval> | undefined;
         let settled = false;
         let responsesSent = 0;
         let lastReceivedAt: Date | undefined;
@@ -201,6 +215,7 @@ export class ChatHubClient {
                 if (connectTimer !== undefined) clearTimeout(connectTimer);
                 if (handshakeTimer !== undefined) clearTimeout(handshakeTimer);
                 if (idleTimer !== undefined) clearTimeout(idleTimer);
+                if (pingTimer !== undefined) clearInterval(pingTimer);
             };
 
             const cleanup = (): void => {
@@ -216,8 +231,13 @@ export class ChatHubClient {
                 if (settled) return;
                 settled = true;
                 cleanup();
-                if (socket.readyState === OPEN) {
-                    socket.close(1000, "operation failed");
+                if (socket.readyState <= OPEN) {
+                    // Closing a connecting socket also cancels its pending handshake.
+                    try {
+                        socket.close(1000, "operation failed");
+                    } catch {
+                        // A custom socket may already have closed during the event.
+                    }
                 }
                 reject(error);
             };
@@ -250,6 +270,27 @@ export class ChatHubClient {
                         ),
                     this.#idleTimeoutMs,
                 );
+            };
+
+            // SignalR drops a client that stops sending records (~30s server
+            // timeout), so the answer stalls mid-stream and the type:3
+            // Completion never arrives. Keep the connection alive with the
+            // protocol's 15s client ping and echo any server ping immediately.
+            const sendPing = (): void => {
+                if (socket.readyState !== OPEN) return;
+                try {
+                    socket.send(encodeRecord(createPingFrame()));
+                } catch {
+                    // A racing close leaves the send to fail harmlessly; the
+                    // close/error handlers own settling the run.
+                }
+            };
+
+            const startPingTimer = (): void => {
+                if (pingTimer !== undefined || this.#pingIntervalMs <= 0) {
+                    return;
+                }
+                pingTimer = setInterval(sendPing, this.#pingIntervalMs);
             };
 
             const publish = async (event: ChatHubEvent): Promise<void> => {
@@ -298,12 +339,19 @@ export class ChatHubClient {
                     }
                     socket.send(options.initialPayload);
                     resetIdleTimer();
+                    startPingTimer();
                     return;
                 }
 
                 const event = normalizeFrame(raw);
                 await publish(event);
                 const frame = event.frame;
+                if (frame.type === SignalRMessageType.Ping) {
+                    // The server pings during long stream gaps and expects the
+                    // same record back; a missed pong is read as a dead client.
+                    sendPing();
+                    return;
+                }
                 const protocolError = completionError(frame);
                 if (protocolError) throw protocolError;
                 if (frame.type === SignalRMessageType.Completion) {
@@ -367,6 +415,13 @@ export class ChatHubClient {
             socket.addEventListener("error", onError);
             socket.addEventListener("close", onClose);
             options.signal?.addEventListener("abort", onAbort, { once: true });
+
+            // A custom socket factory may synchronously abort while creating
+            // the connection, before the listener above could be attached.
+            if (options.signal?.aborted) {
+                onAbort();
+                return;
+            }
 
             connectTimer = setTimeout(
                 () =>

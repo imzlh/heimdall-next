@@ -1,9 +1,12 @@
-/**
- * @jsxRuntime automatic
- * @jsxImportSource hono/jsx/dom
- */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import type { Child } from "hono/jsx";
 import type { ListedModel, ListedPreset, ListedSource } from "./api/admin.ts";
+import type { ProxyPoolView } from "@heimdall/admin-contracts/proxies.ts";
+import {
+    PROXY_IMPLEMENTATION_NOTE,
+    sourceProxyLabel,
+    sourceProxySummaryLabel,
+} from "../shared/proxy-presentation.ts";
 import { Icon } from "../shared/icons.tsx";
 import {
     sourceAvailabilityText,
@@ -14,6 +17,7 @@ import {
 export function SourceCard(
     {
         source,
+        proxyPool,
         onConfigure,
         onManage,
         onToggle,
@@ -22,6 +26,7 @@ export function SourceCard(
         configurable = false,
     }: {
         source: ListedSource;
+        proxyPool?: ProxyPoolView | null;
         onConfigure?: (id: string) => void;
         onManage?: (source: ListedSource) => void;
         onToggle?: (source: ListedSource) => void;
@@ -67,7 +72,21 @@ export function SourceCard(
             <p class="source-probe" title={sourceAvailabilityText(source)}>
                 {sourceAvailabilityText(source)}
             </p>
-            {status && <div class="source-status-slot">{status}</div>}
+            <p class="source-proxy-summary" title={PROXY_IMPLEMENTATION_NOTE}>
+                代理：{proxyPool
+                    ? sourceProxyLabel(source.proxy, proxyPool)
+                    : source.proxySummary
+                    ? sourceProxySummaryLabel(source.proxySummary)
+                    : sourceProxyLabel(source.proxy)}
+            </p>
+            {status && (
+                <details class="source-status-slot">
+                    <summary>
+                        渠道详情 <Icon name="chevron-down" size={14} />
+                    </summary>
+                    <div class="source-status-content">{status}</div>
+                </details>
+            )}
             <footer class="source-card-actions">
                 {onConfigure || onManage
                     ? (
@@ -140,7 +159,7 @@ export function SourceCard(
                     )
                     : (
                         <a class="section-link" href="/admin?view=channels">
-                            查看渠道 <span aria-hidden="true">→</span>
+                            查看渠道 <Icon name="arrow-right" size={16} />
                         </a>
                     )}
             </footer>

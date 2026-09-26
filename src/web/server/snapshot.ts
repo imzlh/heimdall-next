@@ -9,6 +9,12 @@ import type {
     UsageResponse,
 } from "@heimdall/admin-contracts/console.ts";
 import { projectListedPlugins } from "@heimdall/admin-contracts/plugin-catalog.ts";
+import type {
+    SourceProxySelection,
+    SourceProxySummary,
+} from "@heimdall/admin-contracts/proxies.ts";
+import { readProxyPoolView } from "../shared/proxy-presentation.ts";
+import { readStatsOverview, readStatsSeries } from "../shared/stats.ts";
 import type { AdminDispatch } from "./bridge.ts";
 import { readBoundedBody } from "./request.ts";
 
@@ -88,7 +94,17 @@ export async function loadConsoleSnapshot(
     };
     const protectedRead = (path: string): Promise<Resource> =>
         options.authorized ? read(path) : Promise.resolve(EMPTY);
-    const [health, models, status, requests, usage, settings] = await Promise
+    const [
+        health,
+        models,
+        status,
+        requests,
+        usage,
+        settings,
+        proxies,
+        overview,
+        series,
+    ] = await Promise
         .all([
             read("/health"),
             protectedRead("/api/admin/models"),
@@ -96,6 +112,9 @@ export async function loadConsoleSnapshot(
             protectedRead("/api/admin/requests?limit=20"),
             protectedRead("/api/admin/usage"),
             protectedRead("/api/admin/settings"),
+            protectedRead("/api/admin/proxies"),
+            protectedRead("/api/admin/stats"),
+            protectedRead("/api/admin/stats/series?days=7"),
         ]);
     const text = (value: unknown): string | undefined =>
         typeof value === "string" ? redact(value) : undefined;
@@ -121,6 +140,11 @@ export async function loadConsoleSnapshot(
                         instanceEnabled: bool(source.instanceEnabled),
                         pluginEnabled: bool(source.pluginEnabled),
                         versionstamp: text(source.versionstamp),
+                        proxy: sourceProxySelection(source.proxy, redact),
+                        proxySummary: sourceProxySummary(
+                            source.proxySummary,
+                            redact,
+                        ),
                         health: text(source.health),
                         models: strings(source.models, redact),
                         capabilities: strings(source.capabilities, redact),
@@ -147,9 +171,16 @@ export async function loadConsoleSnapshot(
             })),
         },
         authRequired: !options.authorized ||
-            [models, status, requests, usage, settings].some((item) =>
-                item.unauthorized
-            ),
+            [
+                models,
+                status,
+                requests,
+                usage,
+                settings,
+                proxies,
+                overview,
+                series,
+            ].some((item) => item.unauthorized),
         errors: {
             health: health.error,
             models: models.error,
@@ -182,6 +213,12 @@ export async function loadConsoleSnapshot(
                 day,
                 requestCount: finite(entry.requestCount, 0),
                 totalTokens: finite(entry.totalTokens, 0),
+                ...(entry.inputTokens === undefined
+                    ? {}
+                    : { inputTokens: finite(entry.inputTokens, 0) }),
+                ...(entry.outputTokens === undefined
+                    ? {}
+                    : { outputTokens: finite(entry.outputTokens, 0) }),
             }];
         }),
     };
@@ -198,16 +235,104 @@ export async function loadConsoleSnapshot(
             },
             etag: settings.etag,
         };
+    let proxiesData: ConsoleSnapshot["proxies"] = null;
+    let proxiesError = proxies.error;
+    if (options.authorized && !proxies.error) {
+        try {
+            const pool = readProxyPoolView(proxies.data.pool);
+            proxiesData = {
+                pool: {
+                    defaultProxyId: pool.defaultProxyId === null
+                        ? null
+                        : redact(pool.defaultProxyId),
+                    entries: pool.entries.map((entry) => ({
+                        id: redact(entry.id),
+                        name: redact(entry.name),
+                        url: redact(entry.url),
+                        enabled: entry.enabled,
+                        authConfigured: entry.authConfigured,
+                    })),
+                },
+                etag: proxies.etag,
+            };
+        } catch {
+            proxiesError = "暂时无法读取代理池。";
+        }
+    }
+    const stats: NonNullable<ConsoleSnapshot["stats"]> = {
+        overview: null,
+        series: null,
+        errors: { overview: overview.error, series: series.error },
+    };
+    if (options.authorized) {
+        if (!overview.error) {
+            try {
+                stats.overview = readStatsOverview(overview.data, redact);
+            } catch {
+                stats.errors.overview = "暂时无法读取统计总览。";
+            }
+        }
+        if (!series.error) {
+            try {
+                stats.series = readStatsSeries(series.data, redact);
+            } catch {
+                stats.errors.series = "暂时无法读取统计趋势。";
+            }
+        }
+    }
     return {
         dashboard,
         requests: journal,
         usage: usageData,
         settings: settingsData,
+        proxies: proxiesData,
+        stats,
         errors: {
             requests: requests.error,
             usage: usage.error,
             settings: settings.error,
+            proxies: proxiesError,
         },
+    };
+}
+
+function sourceProxySelection(
+    value: unknown,
+    redact: (value: string) => string,
+): SourceProxySelection | undefined {
+    const selection = record(value);
+    if (selection?.mode === "inherit" || selection?.mode === "direct") {
+        return { mode: selection.mode };
+    }
+    if (selection?.mode === "proxy" && typeof selection.proxyId === "string") {
+        return { mode: "proxy", proxyId: redact(selection.proxyId) };
+    }
+    return undefined;
+}
+
+function sourceProxySummary(
+    value: unknown,
+    redact: (value: string) => string,
+): SourceProxySummary | undefined {
+    const summary = record(value);
+    if (
+        !summary ||
+        (summary.mode !== "direct" && summary.mode !== "proxy" &&
+            summary.mode !== "unavailable") ||
+        (summary.selectedBy !== "global" && summary.selectedBy !== "source")
+    ) return undefined;
+    return {
+        mode: summary.mode,
+        selectedBy: summary.selectedBy,
+        ...(typeof summary.proxyId === "string"
+            ? { proxyId: redact(summary.proxyId) }
+            : {}),
+        ...(typeof summary.name === "string"
+            ? { name: redact(summary.name) }
+            : {}),
+        ...(summary.reason === "missing" || summary.reason === "disabled"
+            ? { reason: summary.reason }
+            : {}),
     };
 }
 

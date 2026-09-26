@@ -1,9 +1,12 @@
-/**
- * @jsxRuntime automatic
- * @jsxImportSource hono/jsx/dom
- */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { useEffect, useLayoutEffect, useRef, useState } from "hono/jsx/dom";
 import type { UpdateSourceInput } from "@heimdall/admin-contracts";
+import type {
+    ProxyPoolView,
+    SourceProxySelection,
+} from "@heimdall/admin-contracts/proxies.ts";
+import { sourceProxyValue } from "../shared/proxy-presentation.ts";
+import { SourceProxySelect } from "./source-proxy-select.tsx";
 import {
     AdminApiError,
     deleteSource,
@@ -26,6 +29,7 @@ export function sourceManagementError(error: unknown): string {
 
 interface SourceManagementProps {
     readonly source: ListedSource;
+    readonly proxyPool?: ProxyPoolView | null;
     readonly onClose: () => void;
     readonly onChanged: (
         kind: "saved" | "deleted",
@@ -35,7 +39,7 @@ interface SourceManagementProps {
 
 /** Instance identity, provider configuration and plugin state are separate edits. */
 export function SourceManagementDialog(
-    { source, onClose, onChanged }: SourceManagementProps,
+    { source, proxyPool, onClose, onChanged }: SourceManagementProps,
 ) {
     const dialog = useRef<HTMLDialogElement | null>(null);
     const nameInput = useRef<HTMLInputElement | null>(null);
@@ -48,6 +52,9 @@ export function SourceManagementDialog(
     const [baseline, setBaseline] = useState(source);
     const [name, setName] = useState(source.name || source.id || "");
     const [priority, setPriority] = useState(String(source.priority ?? 0));
+    const [proxy, setProxy] = useState<SourceProxySelection>(
+        source.proxy ?? { mode: "inherit" },
+    );
     const [view, setView] = useState<"edit" | "delete">("edit");
     const [action, setAction] = useState<"save" | "delete" | "reload" | "">("");
     const [closing, setClosing] = useState(false);
@@ -129,7 +136,11 @@ export function SourceManagementDialog(
     async function run(kind: "save" | "delete" | "reload") {
         if (pending.current || closing || !baseline.id) return;
         if (conflict && kind !== "reload") return;
-        const changes: { name?: string; priority?: number } = {};
+        const changes: {
+            name?: string;
+            priority?: number;
+            proxy?: SourceProxySelection;
+        } = {};
         if (kind === "save") {
             if (!name.trim() || name.trim().length > 120) {
                 setError("渠道名称不能为空，且不能超过 120 个字符。");
@@ -148,6 +159,9 @@ export function SourceManagementDialog(
             }
             if (Number(priority) !== (baseline.priority ?? 0)) {
                 changes.priority = Number(priority);
+            }
+            if (sourceProxyValue(proxy) !== sourceProxyValue(baseline.proxy)) {
+                changes.proxy = proxy;
             }
             if (!Object.keys(changes).length) {
                 close();
@@ -168,6 +182,11 @@ export function SourceManagementDialog(
                 }
                 if (Number(priority) === (baseline.priority ?? 0)) {
                     setPriority(String(latest.priority ?? 0));
+                }
+                if (
+                    sourceProxyValue(proxy) === sourceProxyValue(baseline.proxy)
+                ) {
+                    setProxy(latest.proxy ?? { mode: "inherit" });
                 }
                 setBaseline(latest);
                 setConflict(false);
@@ -290,6 +309,12 @@ export function SourceManagementDialog(
                         <p id="source-priority-help" class="field-help">
                             数值越小，路由时越优先使用此渠道。
                         </p>
+                        <SourceProxySelect
+                            value={proxy}
+                            pool={proxyPool}
+                            disabled={busy || conflict}
+                            onChange={setProxy}
+                        />
                         {renderFeedback()}
                         <div class="config-actions source-management-actions">
                             <button

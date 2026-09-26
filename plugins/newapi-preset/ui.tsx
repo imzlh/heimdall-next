@@ -1,7 +1,5 @@
-/**
- * @jsxRuntime automatic
- * @jsxImportSource hono/jsx/dom
- */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
+import { Icon } from "@heimdall/ui/icons";
 import {
     flushSync,
     render,
@@ -215,14 +213,17 @@ function NewApiSetup({ element, context }: {
                             />
                             <button
                                 type="button"
-                                class="text-button"
+                                class="icon-button"
                                 aria-controls={`${prefix}-key`}
                                 aria-pressed={visible ? "true" : "false"}
                                 aria-label="显示访问令牌"
+                                title={visible
+                                    ? "隐藏访问令牌"
+                                    : "显示访问令牌"}
                                 disabled={busy || saved}
                                 onClick={() => setVisible((value) => !value)}
                             >
-                                {visible ? "隐藏" : "显示"}
+                                <Icon name={visible ? "eye-off" : "eye"} />
                             </button>
                         </div>
                         <p class="field-help" id={`${prefix}-key-help`}>

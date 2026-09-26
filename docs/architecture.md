@@ -54,6 +54,12 @@ server modules. DTOs come from `packages/admin-contracts` through type-only
 imports. Explicit shared form utilities operate on data only. Credentials and
 storage handles are excluded from page props, extension contexts, and HTML.
 
+Browser TSX files also imported by DOM tests use the single-line pragma
+`/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */`. Both the
+server-configured Deno test compiler and browser bundler recognize this form;
+separate or multiline directives can select the wrong JSX runtime or produce
+unsupported-directive warnings.
+
 The console page is `/admin`. Management clients use `/api/admin/*`; existing
 `/admin/*` management API aliases remain available. New page paths must not
 overwrite those aliases. `/admin/assets/*` is reserved for static browser
@@ -79,6 +85,7 @@ read-only SSR pages work without JavaScript.
 | -------------------------------- | -------------------------------------------------------- | ------------------------------------------- |
 | `packages/hip`                   | HIP types, frame rules, reducers, hashes                 | HTTP, persistence, provider DTOs            |
 | `packages/contracts`             | Plugin manifests and capability contracts                | Hono, KV, SQLite, process startup           |
+| `packages/source-sdk`            | Optional Deno transports for source plugins              | Host state, storage, forced routing         |
 | `packages/kernel`                | Routing and lifecycle                                    | Wire parsing, provider names, Hono contexts |
 | `packages/storage`               | Runtime-neutral storage ports                            | Concrete KV/SQLite adapters and HTTP routes |
 | `packages/plugin-host`           | Verification, lifecycle, runtime ports                   | Implicit import/eval of packages            |
@@ -92,7 +99,30 @@ read-only SSR pages work without JavaScript.
 Packages cannot import applications, concrete plugins, or Hono. Plugins depend
 on HIP/contracts and their own modules. Hono imports stay in the server's HTTP
 and web layers. The composition root selects and assembles concrete
-implementations.
+implementations. The optional source SDK supplies provider-side Deno transports;
+the kernel and composition root never invoke it.
+
+## Outbound proxy configuration
+
+Composition owns a versioned proxy pool in `heimdall/proxy-pool`. Each channel
+stores its selection alongside name and priority in host metadata, independently
+of provider configuration. Pool and channel writes share the management write
+queue; durable CAS writes precede updates to active selection bindings. Existing
+source instances read those bindings through `getProxy()` at operation start.
+
+`GET/PUT /admin/proxies` and `/api/admin/proxies` expose a credential-free pool
+view and accept write-only Basic credentials. Omitting `basicAuth` retains an
+entry's existing credentials by stable ID; `null` clears them. Updates use
+`If-Match` and return the new ETag. URL userinfo, paths, queries and fragments
+are rejected. The settings island and source dialogs consume only this view.
+Pool changes do not replace source instances or alter in-flight transports.
+
+The global default is either an enabled pool entry or direct. Channel overrides
+can inherit, connect directly, or select an entry. A missing or disabled
+explicit reference remains visible as unavailable. The host does not enforce
+network routing; adoption belongs to each plugin. This outbound pool is
+independent of `RuntimeSettings.proxyKey`, which is the gateway's inbound access
+credential.
 
 ## UI contracts
 

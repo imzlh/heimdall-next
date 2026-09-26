@@ -1,3 +1,10 @@
+import type {
+    ProxyPoolView,
+    SourceProxySelection,
+    SourceProxySummary,
+} from "./proxies.ts";
+import type { StatsOverviewDto, StatsSeriesDto } from "./mod.ts";
+
 /** Serializable console view data shared by SSR and hono/jsx/dom islands. */
 export interface ServiceHealth {
     status?: string;
@@ -21,6 +28,8 @@ export interface ListedSource {
     models?: unknown[];
     capabilities?: unknown[];
     probe?: { ok?: boolean; message?: string };
+    proxy?: SourceProxySelection;
+    proxySummary?: SourceProxySummary;
 }
 
 export interface ListedPlugin {
@@ -84,6 +93,8 @@ export interface UsageDay {
     day: string;
     requestCount: number;
     totalTokens: number;
+    inputTokens?: number;
+    outputTokens?: number;
 }
 
 export interface UsageResponse {
@@ -107,5 +118,16 @@ export interface ConsoleSnapshot {
     requests: JournalRequest[];
     usage: UsageResponse;
     settings: RuntimeSettingsEnvelope | null;
-    errors: { requests: string; usage: string; settings: string };
+    proxies?: { pool: ProxyPoolView; etag: string } | null;
+    stats?: {
+        overview: StatsOverviewDto | null;
+        series: StatsSeriesDto | null;
+        errors: { overview: string; series: string };
+    };
+    errors: {
+        requests: string;
+        usage: string;
+        settings: string;
+        proxies?: string;
+    };
 }

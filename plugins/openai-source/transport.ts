@@ -26,13 +26,18 @@ import { executePassthrough } from "./operations.ts";
 import { jsonEvents } from "./response.ts";
 import { streamResponse } from "./stream.ts";
 import type { SourceContext } from "./types.ts";
+import {
+    SourceProxyError,
+    SourceTransport,
+} from "../../packages/source-sdk/mod.ts";
 
 /** Source plugin that speaks the OpenAI Chat Completions upstream dialect. */
 export class OpenAICompatibleSource implements InferenceSource {
     readonly id: string;
     readonly capabilities: readonly SourceCapability[];
     readonly config: OpenAICompatibleSourceConfig;
-    readonly #fetch: NonNullable<OpenAICompatibleSourceOptions["fetch"]>;
+    readonly #fetch: OpenAICompatibleSourceOptions["fetch"];
+    readonly #getProxy: OpenAICompatibleSourceOptions["getProxy"];
     readonly #now: () => Date;
     readonly #streamId: (requestId: string) => string;
 
@@ -43,20 +48,28 @@ export class OpenAICompatibleSource implements InferenceSource {
         this.config = validateOpenAICompatibleSourceConfig(config);
         this.id = this.config.id ?? "openai-compatible";
         this.capabilities = advertisedCapabilities(this.config);
-        this.#fetch = options.fetch ?? fetch;
+        this.#fetch = options.fetch;
+        this.#getProxy = options.getProxy;
         this.#now = options.now ?? (() => new Date());
         this.#streamId = options.streamId ??
             ((requestId) => `openai:${requestId}:${crypto.randomUUID()}`);
     }
 
     async probe(signal: AbortSignal): Promise<SourceProbeResult> {
+        let transport: SourceTransport | undefined;
         try {
+            transport = new SourceTransport({
+                getProxy: this.#getProxy,
+                fetch: this.#fetch,
+                secrets: [this.config.apiKey],
+                signal,
+            });
             const headers = new Headers(this.config.headers);
             headers.set("accept", "application/json");
             if (this.config.apiKey !== undefined) {
                 headers.set("authorization", `Bearer ${this.config.apiKey}`);
             }
-            const response = await this.#fetch(
+            const response = await transport.fetch(
                 `${this.config.baseUrl}/models`,
                 {
                     method: "GET",
@@ -66,13 +79,17 @@ export class OpenAICompatibleSource implements InferenceSource {
                 },
             );
             if (response.ok) {
-                const models = await readModelIds(response, this.config.apiKey);
+                const models =
+                    (await readModelIds(response, this.config.apiKey))
+                        .filter((id) => transport!.redact(id) === id);
+                signal.throwIfAborted();
                 return {
                     ok: true,
                     message: "models endpoint reachable",
                     ...(models.length === 0 ? {} : { models }),
                 };
             }
+            await response.body?.cancel();
             return {
                 ok: false,
                 message: `models probe failed with status ${response.status}`,
@@ -82,10 +99,14 @@ export class OpenAICompatibleSource implements InferenceSource {
             const secret = this.config.apiKey;
             return {
                 ok: false,
-                message: secret === undefined
+                message: transport
+                    ? transport.redact(raw)
+                    : secret === undefined
                     ? raw
                     : raw.replaceAll(secret, "[redacted]"),
             };
+        } finally {
+            await transport?.close();
         }
     }
 
@@ -104,28 +125,40 @@ export class OpenAICompatibleSource implements InferenceSource {
         const emit = frameFactory(streamId, input.requestId, this.#now);
         yield emit({ kind: "run.started", request: input });
 
+        let transport: SourceTransport | undefined;
         try {
+            transport = new SourceTransport({
+                getProxy: this.#getProxy,
+                fetch: this.#fetch,
+                secrets: [this.config.apiKey],
+                signal: context.signal,
+            });
             if (input.operation !== "generation.create") {
                 const outcome = yield* executePassthrough(
                     input,
                     this.config,
-                    this.#fetch,
+                    transport.fetch,
                     emit,
                     context.signal,
                 );
                 if (outcome === "cancelled") return;
             } else {
                 const request = generationPayload(input);
-                const response = await this.#fetch(upstreamUrl(this.config), {
-                    method: "POST",
-                    headers: upstreamHeaders(
-                        this.config,
-                        request.stream === true,
-                    ),
-                    body: JSON.stringify(toWireRequest(request, this.config)),
-                    signal: context.signal,
-                    redirect: "error",
-                });
+                const response = await transport.fetch(
+                    upstreamUrl(this.config),
+                    {
+                        method: "POST",
+                        headers: upstreamHeaders(
+                            this.config,
+                            request.stream === true,
+                        ),
+                        body: JSON.stringify(
+                            toWireRequest(request, this.config),
+                        ),
+                        signal: context.signal,
+                        redirect: "error",
+                    },
+                );
                 if (!response.ok) {
                     throw new OpenAIUpstreamError(
                         await responseError(response),
@@ -174,11 +207,23 @@ export class OpenAICompatibleSource implements InferenceSource {
                 });
                 return;
             }
-            const canonical = error instanceof OpenAIUpstreamError
+            const canonical = error instanceof SourceProxyError
+                ? {
+                    code: error.code,
+                    message: error.message,
+                    retryable: error.retryable,
+                    status: error.status,
+                }
+                : error instanceof OpenAIUpstreamError
                 ? error.error
                 : transportError(error);
-            yield emit({ kind: "run.error", error: canonical });
+            yield emit({
+                kind: "run.error",
+                error: transport?.redactError(canonical) ?? canonical,
+            });
             return;
+        } finally {
+            await transport?.close();
         }
         yield emit({ kind: "run.completed" });
     }

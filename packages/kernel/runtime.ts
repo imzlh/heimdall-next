@@ -85,15 +85,17 @@ export class KernelRuntime implements Kernel {
     ): Promise<KernelExecution> {
         validateLifecycle(request, lifecycle);
         lifecycle.signal.throwIfAborted();
+        const middleware = this.middleware.snapshot();
         const transformed = await this.transformRequest(
             request,
             options.requestContext,
+            middleware,
         );
         lifecycle.signal.throwIfAborted();
         return {
             request: transformed,
             lifecycle,
-            frames: this.frames(transformed, lifecycle, options),
+            frames: this.frames(transformed, lifecycle, options, middleware),
         };
     }
 
@@ -108,12 +110,15 @@ export class KernelRuntime implements Kernel {
     ): KernelExecution {
         validateLifecycle(request, lifecycle);
         let prepared = request;
+        let middleware = this.middleware;
         let preparation: Promise<void> | undefined;
         const prepare = async (): Promise<void> => {
             if (preparation === undefined) {
+                middleware = this.middleware.snapshot();
                 preparation = this.transformRequest(
                     request,
                     options.requestContext,
+                    middleware,
                 ).then(
                     (value) => {
                         prepared = value;
@@ -127,6 +132,7 @@ export class KernelRuntime implements Kernel {
             () => prepared,
             lifecycle,
             options,
+            () => middleware,
         );
         return {
             get request() {
@@ -154,14 +160,15 @@ export class KernelRuntime implements Kernel {
     private async transformRequest(
         request: OperationRequest,
         context: RequestContext | undefined,
+        middleware: MiddlewareRegistry,
     ): Promise<OperationRequest> {
-        if (this.middleware.list().length === 0) return request;
+        if (middleware.list().length === 0) return request;
         if (context === undefined) {
             throw new KernelContextError(
                 "a RequestContext is required when middleware plugins are registered",
             );
         }
-        return await this.middleware.transformRequest(request, context);
+        return await middleware.transformRequest(request, context);
     }
 
     private lazyFrames(
@@ -169,8 +176,15 @@ export class KernelRuntime implements Kernel {
         request: () => OperationRequest,
         lifecycle: RequestLifecycle,
         options: KernelExecuteOptions,
+        middleware: () => MiddlewareRegistry,
     ): AsyncIterable<StreamFrame> {
-        return this.lazyFrameStream(prepare, request, lifecycle, options);
+        return this.lazyFrameStream(
+            prepare,
+            request,
+            lifecycle,
+            options,
+            middleware,
+        );
     }
 
     private async *lazyFrameStream(
@@ -178,11 +192,17 @@ export class KernelRuntime implements Kernel {
         request: () => OperationRequest,
         lifecycle: RequestLifecycle,
         options: KernelExecuteOptions,
+        middleware: () => MiddlewareRegistry,
     ): AsyncIterable<StreamFrame> {
         lifecycle.signal.throwIfAborted();
         await prepare();
         lifecycle.signal.throwIfAborted();
-        const execution = this.frames(request(), lifecycle, options);
+        const execution = this.frames(
+            request(),
+            lifecycle,
+            options,
+            middleware(),
+        );
         for await (const frame of execution) yield frame;
     }
 
@@ -190,14 +210,16 @@ export class KernelRuntime implements Kernel {
         request: OperationRequest,
         lifecycle: RequestLifecycle,
         options: KernelExecuteOptions,
+        middleware: MiddlewareRegistry,
     ): AsyncIterable<StreamFrame> {
-        return this.frameStream(request, lifecycle, options);
+        return this.frameStream(request, lifecycle, options, middleware);
     }
 
     private async *frameStream(
         request: OperationRequest,
         lifecycle: RequestLifecycle,
         options: KernelExecuteOptions,
+        middleware: MiddlewareRegistry,
     ): AsyncIterable<StreamFrame> {
         const context = options.requestContext;
         const hookContext: LifecycleHookContext = { request, lifecycle };
@@ -242,13 +264,13 @@ export class KernelRuntime implements Kernel {
                 },
             };
             let sourceFrames = this.sources.run(request, sourceContext);
-            if (this.middleware.list().length > 0) {
+            if (middleware.list().length > 0) {
                 if (context === undefined) {
                     throw new KernelContextError(
                         "a RequestContext is required when middleware plugins are registered",
                     );
                 }
-                sourceFrames = await this.middleware.transformFrames(
+                sourceFrames = await middleware.transformFrames(
                     request,
                     context,
                     sourceFrames,

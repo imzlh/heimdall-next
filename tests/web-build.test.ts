@@ -167,3 +167,104 @@ Deno.test("browser build planning rejects external, traversing and non-module ou
         }
     });
 });
+
+/** Run bundleIsFresh in a child that owns cwd, so entry/config resolve like a real build. */
+async function freshInDir(
+    root: string,
+    output: string,
+    entry: string,
+    config: string,
+): Promise<boolean> {
+    const source =
+        `import { bundleIsFresh } from ${JSON.stringify(planner.href)};\n` +
+        `console.log(JSON.stringify(await bundleIsFresh(${
+            JSON.stringify(output)
+        }, ${JSON.stringify(entry)}, ${JSON.stringify(config)})));`;
+    const result = await new Deno.Command(Deno.execPath(), {
+        args: ["eval", "--no-config", "--no-lock", source],
+        cwd: root,
+        stdout: "piped",
+        stderr: "piped",
+    }).output();
+    if (!result.success) {
+        throw new Error(new TextDecoder().decode(result.stderr));
+    }
+    return JSON.parse(new TextDecoder().decode(result.stdout));
+}
+
+async function withGraph(
+    test: (root: string) => Promise<void>,
+) {
+    const directory = await Deno.makeTempDir({ prefix: "heimdall-fresh-" });
+    await Deno.writeTextFile(
+        `${directory}/entry.ts`,
+        'import "./dep.ts";\nimport "./style.css";\n',
+    );
+    await Deno.writeTextFile(
+        `${directory}/dep.ts`,
+        "export const value = 1;\n",
+    );
+    await Deno.writeTextFile(
+        `${directory}/style.css`,
+        "body { color: red; }\n",
+    );
+    await Deno.writeTextFile(`${directory}/config.json`, "{}\n");
+    await Deno.writeTextFile(`${directory}/out.js`, "// built\n");
+    try {
+        await test(directory);
+    } finally {
+        await Deno.remove(directory, { recursive: true });
+    }
+}
+
+const OLD = new Date("2020-01-01T00:00:00Z");
+const NEW = new Date("2021-01-01T00:00:00Z");
+
+Deno.test("bundleIsFresh treats an output newer than every input as fresh", async () => {
+    await withGraph(async (root) => {
+        for (const name of ["entry.ts", "dep.ts", "style.css", "config.json"]) {
+            await Deno.utime(`${root}/${name}`, OLD, OLD);
+        }
+        await Deno.utime(`${root}/out.js`, NEW, NEW);
+        assertEquals(
+            await freshInDir(root, "out.js", "entry.ts", "config.json"),
+            true,
+        );
+    });
+});
+
+Deno.test("bundleIsFresh rebuilds when a transitive dependency is newer", async () => {
+    await withGraph(async (root) => {
+        for (const name of ["entry.ts", "style.css", "config.json", "out.js"]) {
+            await Deno.utime(`${root}/${name}`, OLD, OLD);
+        }
+        await Deno.utime(`${root}/dep.ts`, NEW, NEW);
+        assertEquals(
+            await freshInDir(root, "out.js", "entry.ts", "config.json"),
+            false,
+        );
+    });
+});
+
+Deno.test("bundleIsFresh rebuilds when an imported stylesheet is newer", async () => {
+    await withGraph(async (root) => {
+        for (const name of ["entry.ts", "dep.ts", "config.json", "out.js"]) {
+            await Deno.utime(`${root}/${name}`, OLD, OLD);
+        }
+        await Deno.utime(`${root}/style.css`, NEW, NEW);
+        assertEquals(
+            await freshInDir(root, "out.js", "entry.ts", "config.json"),
+            false,
+        );
+    });
+});
+
+Deno.test("bundleIsFresh rebuilds when the output is missing", async () => {
+    await withGraph(async (root) => {
+        await Deno.remove(`${root}/out.js`);
+        assertEquals(
+            await freshInDir(root, "out.js", "entry.ts", "config.json"),
+            false,
+        );
+    });
+});

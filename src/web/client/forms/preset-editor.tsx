@@ -1,11 +1,11 @@
-/** @jsxRuntime automatic */
-/** @jsxImportSource hono/jsx/dom */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { useEffect, useRef, useState } from "hono/jsx/dom";
 import type {
     PresetJsonObject,
     PresetUiContext,
 } from "@heimdall/admin-contracts/preset-ui.ts";
 import { safeUiAssetPath } from "@heimdall/admin-contracts/ui.ts";
+import { sourceProxyValue } from "../../shared/proxy-presentation.ts";
 import {
     mountPresetEditor,
     type PresetEditorActions,
@@ -71,6 +71,7 @@ export function PresetEditor(props: PresetEditorProps) {
         context.draft.id,
         context.draft.name,
         context.draft.priority,
+        sourceProxyValue(context.proxy),
         !!props.onPreview,
     ]);
     return (

@@ -76,7 +76,9 @@ Deno.test("OpenAI source probe GETs /models and omits the api key", async () => 
     assertEquals(seen.init?.method, "GET");
     assertEquals(seen.init?.body, undefined);
     assertEquals(seen.init?.redirect, "error");
-    assertEquals(seen.init?.signal, signal);
+    // The provider combines request cancellation with its operation lifetime.
+    assertEquals(seen.init?.signal?.aborted, true);
+    assertEquals(signal.aborted, false);
     const headers = new Headers(seen.init?.headers);
     assertEquals(headers.get("accept"), "application/json");
     assertEquals(headers.get("authorization"), `Bearer ${apiKey}`);

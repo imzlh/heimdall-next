@@ -33,6 +33,7 @@ const ROUTES: Readonly<Record<string, readonly string[]>> = {
     "/api/admin/plugin": ["DELETE"],
     "/api/admin/source-probe": ["POST"],
     "/api/admin/settings": ["GET", "PUT"],
+    "/api/admin/proxies": ["GET", "PUT"],
     "/api/admin/requests": ["GET"],
     "/api/admin/usage": ["GET"],
     "/api/admin/stats": ["GET"],
@@ -43,6 +44,11 @@ const ROUTES: Readonly<Record<string, readonly string[]>> = {
 /** A cookie-authenticated adapter for exact host-owned management operations. */
 export function createUiBridge(options: UiBridgeOptions) {
     return async (context: Context): Promise<Response> => {
+        // The outer HTTP request owns the trace. A nested management dispatch
+        // is part of that same operation; envelope and plugin response headers
+        // cannot replace the ID already accepted by the host middleware.
+        const requestId = context.get("requestId") ||
+            context.req.header("x-request-id")?.trim() || crypto.randomUUID();
         try {
             assertSameOrigin(context.req.raw);
             if (!await options.session.authorized(context)) {
@@ -115,6 +121,7 @@ export function createUiBridge(options: UiBridgeOptions) {
                 );
             }
             const headers = forwardingHeaders(input.headers);
+            headers.set("x-request-id", requestId);
             if (options.adminAuthToken !== undefined) {
                 headers.set(
                     "authorization",
@@ -140,26 +147,30 @@ export function createUiBridge(options: UiBridgeOptions) {
                 "cache-control": "no-store",
                 "content-type": "application/json; charset=utf-8",
                 "x-content-type-options": "nosniff",
+                "x-heimdall-request-id": requestId,
             });
-            for (
-                const name of ["etag", "x-heimdall-request-id", "x-request-id"]
-            ) {
-                const value = response.headers.get(name);
-                if (value !== null) outgoing.set(name, value);
-            }
+            const etag = response.headers.get("etag");
+            if (etag !== null) outgoing.set("etag", etag);
             if (response.status === 204 || response.status === 304) {
                 return new Response(null, {
                     status: response.status,
                     headers: outgoing,
                 });
             }
-            const responseBody = await readBoundedBody(
+            let responseBody = await readBoundedBody(
                 response.body,
                 MAX_RESPONSE_BYTES,
                 response.headers.get("content-length"),
             );
             try {
-                JSON.parse(responseBody);
+                const result: unknown = JSON.parse(responseBody);
+                if (
+                    response.status >= 400 && isRecord(result) &&
+                    isRecord(result.error)
+                ) {
+                    result.error.request_id = requestId;
+                    responseBody = JSON.stringify(result);
+                }
             } catch {
                 throw new WebRequestError(
                     502,
@@ -172,7 +183,7 @@ export function createUiBridge(options: UiBridgeOptions) {
                 headers: outgoing,
             });
         } catch (error) {
-            return requestError(error);
+            return requestError(error, requestId);
         }
     };
 }

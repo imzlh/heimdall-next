@@ -1,7 +1,4 @@
-/**
- * @jsxRuntime automatic
- * @jsxImportSource hono/jsx/dom
- */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { useEffect, useRef } from "hono/jsx/dom";
 import {
     resolveUiBlock,

@@ -79,7 +79,7 @@ export async function readBoundedBody(
     }
 }
 
-export function requestError(error: unknown): Response {
+export function requestError(error: unknown, requestId?: string): Response {
     const failure = error instanceof WebRequestError
         ? error
         : new WebRequestError(
@@ -88,9 +88,18 @@ export function requestError(error: unknown): Response {
             "暂时无法访问管理服务。",
         );
     return Response.json({
-        error: { code: failure.code, message: failure.message },
+        error: {
+            code: failure.code,
+            message: failure.message,
+            ...(requestId === undefined ? {} : { request_id: requestId }),
+        },
     }, {
         status: failure.status,
-        headers: { "cache-control": "no-store" },
+        headers: {
+            "cache-control": "no-store",
+            ...(requestId === undefined
+                ? {}
+                : { "x-heimdall-request-id": requestId }),
+        },
     });
 }

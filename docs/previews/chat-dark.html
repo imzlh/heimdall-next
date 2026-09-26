@@ -229,6 +229,9 @@ svg {
     flex-shrink: 0;
 }
 .section-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     font-size: 12px;
     font-weight: 500;
 }
@@ -329,8 +332,7 @@ form > .form-success,
     white-space: nowrap;
     transition: background var(--motion-fast) ease,
         border-color var(--motion-fast) ease, color var(--motion-fast) ease,
-        box-shadow var(--motion-fast) ease, opacity var(--motion-fast) ease,
-        transform var(--motion-fast) var(--motion-ease);
+        opacity var(--motion-fast) ease;
 }
 .primary-button {
     color: #fff;
@@ -352,11 +354,6 @@ form > .form-success,
     border-color: var(--border-strong);
     background: var(--surface-muted);
     text-decoration: none;
-}
-.primary-button:active:not(:disabled),
-.text-button:active:not(:disabled),
-.secondary-button:active:not(:disabled) {
-    transform: translateY(1px);
 }
 .icon-button {
     display: inline-flex;
@@ -495,6 +492,20 @@ input[type="radio"] {
 }
 .secret-control input {
     flex: 1;
+}
+.secret-control:has(> .icon-button) {
+    position: relative;
+}
+.secret-control:has(> .icon-button) input {
+    padding-right: 48px;
+}
+.secret-control > .icon-button {
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 32px;
+    height: 32px;
 }
 .authorization-control {
     flex-wrap: wrap;
@@ -815,8 +826,6 @@ form > .config-actions,
 .template-option-arrow {
     flex-shrink: 0;
     color: var(--accent);
-    font-size: 20px;
-    transition: transform var(--motion-fast) var(--motion-ease);
 }
 .template-option.selected,
 .template-option[aria-pressed="true"],
@@ -978,15 +987,6 @@ form > .config-actions,
     .source-created-toast.is-closing {
         animation: source-toast-out var(--motion-exit) ease both;
         pointer-events: none;
-    }
-}
-@media (hover: hover) and (pointer: fine) {
-    .primary-button:hover:not(:disabled) {
-        box-shadow: 0 3px 10px color-mix(in srgb, var(--accent) 18%,
-            transparent);
-    }
-    .template-option-link:hover .template-option-arrow {
-        transform: translateX(2px);
     }
 }
 .table-wrap,
@@ -1668,14 +1668,12 @@ form > .config-actions,
     transition:
         width var(--island-duration) var(--island-ease),
         border-radius var(--island-duration) var(--island-ease),
-        transform 280ms cubic-bezier(.16, 1, .3, 1),
         border-color 200ms ease,
         background 200ms ease,
         box-shadow 280ms ease;
 }
 .chat-composer:focus-within {
     width: min(720px, 100%);
-    transform: translateY(-1px);
     border-color: color-mix(in srgb, var(--accent) 20%, var(--border));
     box-shadow:
         0 10px 28px rgb(1 5 12 / 16%),
@@ -1737,7 +1735,7 @@ form > .config-actions,
     place-items: center;
     flex: 0 0 32px;
     border: 0;
-    border-radius: 9px;
+    border-radius: 50%;
     background: transparent;
     color: color-mix(in srgb, var(--subtle) 82%, transparent);
     transition: background 180ms ease, color 180ms ease, transform 180ms ease;
@@ -1813,7 +1811,7 @@ form > .config-actions,
     border-radius: 50%;
     background: var(--button-bg);
     color: #fff;
-    box-shadow: 0 4px 12px color-mix(in srgb, var(--accent) 16%, transparent);
+    box-shadow: none;
     transition:
         opacity 140ms ease,
         transform 200ms cubic-bezier(.22, 1, .36, 1),
@@ -1831,11 +1829,7 @@ form > .config-actions,
     height: 16px;
 }
 .chat-send:hover:not(:disabled) {
-    transform: translateY(-1px);
     background: var(--button-hover);
-}
-.chat-send:active:not(:disabled) {
-    transform: scale(.94);
 }
 .chat-send:disabled {
     opacity: 1;

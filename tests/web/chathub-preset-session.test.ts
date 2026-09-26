@@ -5,6 +5,9 @@ import { apiPluginTarget } from "@heimdall/core/http/manifest-routes.ts";
 import { Hono } from "hono";
 import { createUiBridge } from "@heimdall/core/web/server/bridge.ts";
 import { createWebSession } from "@heimdall/core/web/server/session.ts";
+import authPlugin, {
+    createChatHubAuthPlugin,
+} from "../../plugins/chathub-auth/mod.ts";
 
 const origin = "https://operator.example.test";
 const adminAuthToken = "fixture-private-admin-token";
@@ -12,6 +15,17 @@ const authPath = "/api/admin/plugins/chathub/auth";
 
 Deno.test("ChatHub preset authorizes through the session bridge and creates a redacted channel", async () => {
     await using resources = new AsyncDisposableStack();
+    let tokenFetch: typeof fetch = () =>
+        Promise.reject(new Error("unexpected token request"));
+    const originalHandle = authPlugin.handle;
+    // Keep composition's proxy resolver and the real session/route chain while
+    // injecting token I/O directly into this plugin instance.
+    authPlugin.handle = createChatHubAuthPlugin({
+        fetch: (input, init) => tokenFetch(input, init),
+    }).handle;
+    resources.defer(() => {
+        authPlugin.handle = originalHandle;
+    });
     const builtins = await loadBuiltinComposition({ env: () => undefined });
     resources.defer(() => builtins.close());
     const app = createServerApp({
@@ -81,9 +95,8 @@ Deno.test("ChatHub preset authorizes through the session bridge and creates a re
             exp: Math.floor(Date.now() / 1000) + 3600,
         }))
     }.signature`;
-    const fetcher = globalThis.fetch;
     let tokenRequests = 0;
-    globalThis.fetch = async (input, init) => {
+    tokenFetch = async (input, init) => {
         tokenRequests++;
         assertEquals(
             String(input),
@@ -114,9 +127,6 @@ Deno.test("ChatHub preset authorizes through the session bridge and creates a re
             expires_in: 3600,
         });
     };
-    resources.defer(() => {
-        globalThis.fetch = fetcher;
-    });
     const exchangeInput = {
         action: "exchange",
         state: started.state,

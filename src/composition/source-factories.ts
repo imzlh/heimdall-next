@@ -28,7 +28,8 @@ export function sourceFactoryFromModule(
         ) {
             return {
                 manifest: module.sourceManifest as unknown as PluginManifest,
-                create: (config) => create(config) as InferenceSource,
+                create: (config, options) =>
+                    create(config, options) as InferenceSource,
                 validate: (config) => validate(config),
             };
         }
@@ -44,8 +45,9 @@ export function withSourcePersistence(
     const sources = store.namespace("heimdall", "source-config");
     return {
         ...factory,
-        create(config) {
+        create(config, options) {
             return factory.create(config, {
+                ...options,
                 async onConfigUpdate(updated, previous) {
                     if (!record(previous) || typeof previous.id !== "string") {
                         return;

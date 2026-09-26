@@ -3,6 +3,16 @@
  * These types intentionally contain serializable data only.
  */
 
+import type { SourceProxySelection, SourceProxySummary } from "./proxies.ts";
+
+export type {
+    ProxyEntryView,
+    ProxyPoolInput,
+    ProxyPoolView,
+    SourceProxySelection,
+    SourceProxySummary,
+} from "./proxies.ts";
+
 export type {
     AuthorizationState,
     AuthorizationStates,
@@ -85,6 +95,7 @@ export interface CreateSourceInput {
     readonly id: string;
     readonly name: string;
     readonly priority: number;
+    readonly proxy?: SourceProxySelection;
     readonly sourcePluginId: string;
     readonly presetId?: string;
     readonly config: unknown;
@@ -95,12 +106,15 @@ export interface UpdateSourceInput {
     readonly name?: string;
     readonly priority?: number;
     readonly enabled?: boolean;
+    readonly proxy?: SourceProxySelection;
 }
 
 export interface SourceDto {
     readonly id: string;
     readonly name?: string;
     readonly priority?: number;
+    readonly proxy?: SourceProxySelection;
+    readonly proxySummary?: SourceProxySummary;
     readonly sourcePluginId?: string;
     readonly enabled: boolean;
     /** Operator's instance switch, independent of the parent plugin switch. */

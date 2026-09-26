@@ -326,25 +326,32 @@ export async function* readSse(
             dataLines.push(line.slice(5).trimStart());
         }
     };
-    while (true) {
-        const { done, value } = await reader.read();
-        buffer += decoder.decode(value, { stream: !done });
+    try {
         while (true) {
-            const lf = buffer.indexOf("\n");
-            const cr = buffer.indexOf("\r");
-            const newline = lf < 0 ? cr : cr < 0 ? lf : Math.min(lf, cr);
-            if (newline < 0) break;
-            const width =
-                buffer[newline] === "\r" && buffer[newline + 1] === "\n"
-                    ? 2
-                    : 1;
-            const line = buffer.slice(0, newline);
-            buffer = buffer.slice(newline + width);
-            yield* flushLine(line);
+            const { done, value } = await reader.read();
+            buffer += decoder.decode(value, { stream: !done });
+            while (true) {
+                const lf = buffer.indexOf("\n");
+                const cr = buffer.indexOf("\r");
+                const newline = lf < 0 ? cr : cr < 0 ? lf : Math.min(lf, cr);
+                if (newline < 0) break;
+                const width =
+                    buffer[newline] === "\r" && buffer[newline + 1] === "\n"
+                        ? 2
+                        : 1;
+                const line = buffer.slice(0, newline);
+                buffer = buffer.slice(newline + width);
+                yield* flushLine(line);
+            }
+            if (done) break;
         }
-        if (done) break;
+        if (buffer.length > 0) yield* flushLine(buffer);
+        const event = dispatch();
+        if (event !== undefined) yield event;
+    } finally {
+        // Providers may keep the connection open after their terminal frame.
+        // Release it on early return, parse failure, and consumer cancellation.
+        await reader.cancel().catch(() => {});
+        reader.releaseLock();
     }
-    if (buffer.length > 0) yield* flushLine(buffer);
-    const event = dispatch();
-    if (event !== undefined) yield event;
 }

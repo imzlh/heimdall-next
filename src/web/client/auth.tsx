@@ -1,5 +1,4 @@
-/** @jsxRuntime automatic */
-/** @jsxImportSource hono/jsx/dom */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { useState } from "hono/jsx/dom";
 import { controlValue } from "./dom.ts";
 import { Icon } from "../shared/icons.tsx";

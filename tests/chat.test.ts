@@ -575,3 +575,124 @@ Deno.test("chat regenerate keeps the previous reply when generation fails", asyn
         await Deno.remove(directory, { recursive: true });
     }
 });
+
+Deno.test("chat conversation settings inject a system prompt and reasoning effort", async () => {
+    const directory = await Deno.makeTempDir({
+        prefix: "heimdall-chat-settings-",
+    });
+    const store = openSqliteChatStore(`${directory}/chat.sqlite`);
+    const captured: OperationRequest[] = [];
+    try {
+        const app = createServer({
+            sources: [{
+                id: "chat-source",
+                capabilities: [{
+                    operation: "generation.create",
+                    models: ["chat-model"],
+                    streaming: false,
+                }],
+                execute(input) {
+                    captured.push(input);
+                    return (async function* (): AsyncIterable<StreamFrame> {
+                        yield frame(input, 1, {
+                            kind: "run.started",
+                            request: input,
+                        });
+                        yield frame(input, 2, {
+                            kind: "part.delta",
+                            messageId: "m",
+                            partId: "p",
+                            delta: "done",
+                        });
+                        yield frame(input, 3, { kind: "run.completed" });
+                    })();
+                },
+            }],
+            chat: { store },
+        });
+        const created = await app.request(
+            "http://localhost/api/chat/conversations",
+            { method: "POST" },
+        );
+        const conversationId = (await created.json()).conversation.id as string;
+
+        const invalid = await app.request(
+            `http://localhost/api/chat/conversation?id=${conversationId}`,
+            {
+                method: "PATCH",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ reasoningEffort: "maximum" }),
+            },
+        );
+        assertEquals(invalid.status, 400);
+
+        const empty = await app.request(
+            `http://localhost/api/chat/conversation?id=${conversationId}`,
+            {
+                method: "PATCH",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({}),
+            },
+        );
+        assertEquals(empty.status, 400);
+
+        const patched = await app.request(
+            `http://localhost/api/chat/conversation?id=${conversationId}`,
+            {
+                method: "PATCH",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                    systemPrompt: "Always answer in Chinese.",
+                    reasoningEffort: "high",
+                }),
+            },
+        );
+        assertEquals(patched.status, 200);
+        const stored = (await patched.json()).conversation;
+        assertEquals(stored.systemPrompt, "Always answer in Chinese.");
+        assertEquals(stored.reasoningEffort, "high");
+
+        const sent = await app.request("http://localhost/api/chat/message", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+                conversationId,
+                model: "chat-model",
+                text: "hello",
+            }),
+        });
+        assertEquals(sent.status, 200);
+        assertEquals(captured.length, 1);
+        const payload = captured[0]!.payload as unknown as {
+            messages: readonly {
+                role: string;
+                parts: readonly { type: string; text?: string }[];
+            }[];
+            extensions?: { raw?: { reasoning_effort?: string } };
+        };
+        const messages = payload.messages;
+        assertEquals(messages[0]!.role, "system");
+        assertEquals(messages[0]!.parts[0]!.text, "Always answer in Chinese.");
+        assertEquals(messages[1]!.role, "user");
+        assertEquals(payload.extensions?.raw?.reasoning_effort, "high");
+
+        const cleared = await app.request(
+            `http://localhost/api/chat/conversation?id=${conversationId}`,
+            {
+                method: "PATCH",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({
+                    systemPrompt: "",
+                    reasoningEffort: null,
+                }),
+            },
+        );
+        assertEquals(cleared.status, 200);
+        const after = (await cleared.json()).conversation;
+        assertEquals(after.systemPrompt, undefined);
+        assertEquals(after.reasoningEffort, undefined);
+    } finally {
+        store.close();
+        await Deno.remove(directory, { recursive: true });
+    }
+});

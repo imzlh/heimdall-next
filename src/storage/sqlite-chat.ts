@@ -12,7 +12,9 @@ CREATE TABLE IF NOT EXISTS conversations (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
   created_at TEXT NOT NULL,
-  updated_at TEXT NOT NULL
+  updated_at TEXT NOT NULL,
+  system_prompt TEXT,
+  reasoning_effort TEXT
 );
 CREATE TABLE IF NOT EXISTS messages (
   id TEXT PRIMARY KEY,
@@ -22,6 +24,9 @@ CREATE TABLE IF NOT EXISTS messages (
   created_at TEXT NOT NULL,
   call_id TEXT,
   tool_name TEXT,
+  status TEXT,
+  error_code TEXT,
+  error_message TEXT,
   FOREIGN KEY (conversation_id) REFERENCES conversations(id)
 );
 CREATE TABLE IF NOT EXISTS message_attachments (
@@ -41,6 +46,8 @@ interface ConversationRow {
     title: string;
     created_at: string;
     updated_at: string;
+    system_prompt: string | null;
+    reasoning_effort: string | null;
 }
 
 interface MessageRow {
@@ -51,6 +58,9 @@ interface MessageRow {
     created_at: string;
     call_id: string | null;
     tool_name: string | null;
+    status: string | null;
+    error_code: string | null;
+    error_message: string | null;
 }
 
 interface RunResult {
@@ -85,7 +95,7 @@ export class SqliteChatStore implements ChatStore {
     listConversations(limit = 50): readonly ConversationRecord[] {
         this.#alive();
         const rows = this.#db.prepare(
-            `SELECT id, title, created_at, updated_at
+            `SELECT id, title, created_at, updated_at, system_prompt, reasoning_effort
              FROM conversations
              ORDER BY updated_at DESC, id DESC
              LIMIT ?`,
@@ -96,7 +106,7 @@ export class SqliteChatStore implements ChatStore {
     getConversation(id: string): ConversationRecord | null {
         this.#alive();
         const row = this.#db.prepare(
-            `SELECT id, title, created_at, updated_at
+            `SELECT id, title, created_at, updated_at, system_prompt, reasoning_effort
              FROM conversations WHERE id = ?`,
         ).get(id) as ConversationRow | undefined;
         return row === undefined ? null : toConversation(row);
@@ -104,16 +114,38 @@ export class SqliteChatStore implements ChatStore {
 
     updateConversation(
         id: string,
-        patch: { readonly title?: string; readonly updatedAt: string },
+        patch: {
+            readonly title?: string;
+            readonly updatedAt: string;
+            readonly systemPrompt?: string;
+            readonly reasoningEffort?: string;
+        },
     ): void {
         this.#alive();
         const result = this.#db.prepare(
             `UPDATE conversations
-             SET title = COALESCE(?, title), updated_at = ?
+             SET title = COALESCE(?, title),
+                 updated_at = ?,
+                 system_prompt = CASE
+                     WHEN ? IS NULL THEN system_prompt
+                     WHEN ? = '' THEN NULL
+                     ELSE ?
+                 END,
+                 reasoning_effort = CASE
+                     WHEN ? IS NULL THEN reasoning_effort
+                     WHEN ? = '' THEN NULL
+                     ELSE ?
+                 END
              WHERE id = ?`,
         ).run(
             patch.title === undefined ? null : patch.title,
             patch.updatedAt,
+            patch.systemPrompt === undefined ? null : patch.systemPrompt,
+            patch.systemPrompt === undefined ? null : patch.systemPrompt,
+            patch.systemPrompt === undefined ? null : patch.systemPrompt,
+            patch.reasoningEffort === undefined ? null : patch.reasoningEffort,
+            patch.reasoningEffort === undefined ? null : patch.reasoningEffort,
+            patch.reasoningEffort === undefined ? null : patch.reasoningEffort,
             id,
         ) as RunResult;
         if (Number(result.changes) === 0) {
@@ -155,8 +187,9 @@ export class SqliteChatStore implements ChatStore {
         }
         this.#db.prepare(
             `INSERT INTO messages (
-                id, conversation_id, role, text, created_at, call_id, tool_name
-             ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                id, conversation_id, role, text, created_at, call_id, tool_name,
+                status, error_code, error_message
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         ).run(
             message.id,
             message.conversationId,
@@ -165,6 +198,9 @@ export class SqliteChatStore implements ChatStore {
             message.createdAt,
             message.callId ?? null,
             message.name ?? null,
+            message.status ?? null,
+            message.error?.code ?? null,
+            message.error?.message ?? null,
         );
         for (
             const [position, attachment] of (message.attachments ?? [])
@@ -186,7 +222,8 @@ export class SqliteChatStore implements ChatStore {
     listMessages(conversationId: string): readonly ChatMessageRecord[] {
         this.#alive();
         const rows = this.#db.prepare(
-            `SELECT id, conversation_id, role, text, created_at, call_id, tool_name
+            `SELECT id, conversation_id, role, text, created_at, call_id, tool_name,
+                    status, error_code, error_message
              FROM messages
              WHERE conversation_id = ?
              ORDER BY rowid ASC`,
@@ -255,6 +292,11 @@ export function openSqliteChatStore(path: string): SqliteChatStore {
     db.exec(SCHEMA);
     ensureColumn(db, "call_id");
     ensureColumn(db, "tool_name");
+    ensureColumn(db, "status");
+    ensureColumn(db, "error_code");
+    ensureColumn(db, "error_message");
+    ensureConversationColumn(db, "system_prompt");
+    ensureConversationColumn(db, "reasoning_effort");
     return new SqliteChatStore(db);
 }
 
@@ -264,6 +306,12 @@ function toConversation(row: ConversationRow): ConversationRecord {
         title: row.title,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+        ...(row.system_prompt ? { systemPrompt: row.system_prompt } : {}),
+        ...(row.reasoning_effort === "low" ||
+                row.reasoning_effort === "medium" ||
+                row.reasoning_effort === "high"
+            ? { reasoningEffort: row.reasoning_effort }
+            : {}),
     };
 }
 
@@ -290,6 +338,13 @@ function toMessage(
         createdAt: row.created_at,
         ...(row.call_id === null ? {} : { callId: row.call_id }),
         ...(row.tool_name === null ? {} : { name: row.tool_name }),
+        ...(row.status === "completed" || row.status === "failed" ||
+                row.status === "stopped"
+            ? { status: row.status }
+            : {}),
+        ...(row.error_code === null || row.error_message === null ? {} : {
+            error: { code: row.error_code, message: row.error_message },
+        }),
         ...(attachments.length === 0 ? {} : { attachments }),
     };
 }
@@ -300,6 +355,14 @@ function ensureColumn(db: DatabaseSync, column: string): void {
     }[];
     if (rows.some((row) => row.name === column)) return;
     db.exec(`ALTER TABLE messages ADD COLUMN ${column} TEXT`);
+}
+
+function ensureConversationColumn(db: DatabaseSync, column: string): void {
+    const rows = db.prepare("PRAGMA table_info(conversations)").all() as {
+        name: string;
+    }[];
+    if (rows.some((row) => row.name === column)) return;
+    db.exec(`ALTER TABLE conversations ADD COLUMN ${column} TEXT`);
 }
 
 function clamp(limit: number): number {

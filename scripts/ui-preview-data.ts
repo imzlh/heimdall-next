@@ -39,6 +39,7 @@ export const snapshot: ConsoleSnapshot = {
                     id: "openai-compatible",
                     name: "主力模型服务",
                     priority: 10,
+                    proxy: { mode: "inherit" },
                     sourcePluginId: "heimdall.source.openai-compatible",
                     enabled: true,
                     instanceEnabled: true,
@@ -56,6 +57,7 @@ export const snapshot: ConsoleSnapshot = {
                     id: "anthropic",
                     name: "备用推理服务",
                     priority: 0,
+                    proxy: { mode: "direct" },
                     sourcePluginId: "heimdall.source.anthropic",
                     enabled: true,
                     instanceEnabled: true,
@@ -69,6 +71,7 @@ export const snapshot: ConsoleSnapshot = {
                     id: "chathub-preview",
                     name: "团队 ChatHub",
                     priority: 5,
+                    proxy: { mode: "proxy", proxyId: "backup" },
                     sourcePluginId: "heimdall.source.chathub",
                     enabled: false,
                     instanceEnabled: false,
@@ -235,7 +238,29 @@ export const snapshot: ConsoleSnapshot = {
         },
         etag: '"preview-settings-v1"',
     },
-    errors: { requests: "", usage: "", settings: "" },
+    proxies: {
+        pool: {
+            defaultProxyId: "office",
+            entries: [
+                {
+                    id: "office",
+                    name: "办公室出口",
+                    url: "http://127.0.0.1:7890/",
+                    enabled: true,
+                    authConfigured: true,
+                },
+                {
+                    id: "backup",
+                    name: "备用出口",
+                    url: "socks5://127.0.0.1:1080",
+                    enabled: false,
+                    authConfigured: false,
+                },
+            ],
+        },
+        etag: "preview-proxy-pool",
+    },
+    errors: { requests: "", usage: "", settings: "", proxies: "" },
 };
 
 export const contributions: readonly UiContribution[] = [

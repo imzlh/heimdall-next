@@ -271,6 +271,11 @@ Deno.test("custom configuration validates in place, preserves failed input and p
 Deno.test("custom configuration creates a new source and closes the dialog after saving", async () => {
     const test = await setup();
     try {
+        await test.act(() => {
+            const select = find(test.dialog, 'select[name="source-proxy"]');
+            select.value = "direct";
+            select.dispatchEvent(new Event("input"));
+        });
         await test.details();
         await test.act(() => button(test.dialog, "自定义配置").click());
         await test.act(() =>
@@ -293,6 +298,8 @@ Deno.test("custom configuration creates a new source and closes the dialog after
         assertEquals(value.draft.priority, 17);
         assertEquals(value.draft.mode, "custom");
         assertEquals(value.draft.presetId, undefined);
+        assertEquals(value.draft.proxy, { mode: "direct" });
+        assertEquals(value.config.proxy, undefined);
         assertEquals(value.config.baseUrl, "https://upstream.example.test/v1");
         assertEquals(value.config.apiKey, "new-source-secret");
         assertEquals(test.completed, [value.draft]);
@@ -320,10 +327,16 @@ Deno.test("preset JSX validates, masks secrets and creates a source without navi
         const secret = find(test.dialog, 'input[name="apiKey"]');
         await test.act(() => input(secret, "preset-secret"));
         assertEquals(secret.getAttribute("type"), "password");
-        await test.act(() => button(test.dialog, "显示").click());
+        const visibility = find(
+            test.dialog,
+            'button[aria-label="显示访问令牌"]',
+        );
+        await test.act(() => visibility.click());
         assertEquals(secret.getAttribute("type"), "text");
-        await test.act(() => button(test.dialog, "隐藏").click());
+        assertEquals(visibility.getAttribute("aria-pressed"), "true");
+        await test.act(() => visibility.click());
         assertEquals(secret.getAttribute("type"), "password");
+        assertEquals(visibility.getAttribute("aria-pressed"), "false");
         await test.act(() => button(test.dialog, "保存渠道").click());
         await test.act(() =>
             find(test.dialog, "form").dispatchEvent(

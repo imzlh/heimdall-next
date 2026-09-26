@@ -72,6 +72,7 @@ Deno.test("channel toggle patches instance state with its revision while its plu
     const dom = installTestDom();
     const calls: { path: string; body: unknown; revision: string | null }[] =
         [];
+    const notes: string[] = [];
     let refreshes = 0;
     configureAdminTransport((input, init) => {
         calls.push({
@@ -91,6 +92,7 @@ Deno.test("channel toggle patches instance state with its revision while its plu
                         refreshes++;
                         return Promise.resolve();
                     }}
+                    onNotify={(_tone, message) => notes.push(message)}
                 />,
                 dom.root as unknown as HTMLElement,
             )
@@ -104,7 +106,7 @@ Deno.test("channel toggle patches instance state with its revision while its plu
             revision: "revision-1",
         }]);
         assertEquals(refreshes, 1);
-        assertStringIncludes(dom.root.textContent, "已停用 备用模型渠道");
+        assertEquals(notes, ["已停用 备用模型渠道。"]);
         assertEquals(dom.navigation, []);
     } finally {
         await dom.act(() => render(null, dom.root as unknown as HTMLElement));
@@ -172,6 +174,7 @@ Deno.test("channel toggle prevents duplicate writes and offers refresh on a vers
 Deno.test("channel management launches an in-place dialog and refreshes only after save", async () => {
     const dom = installTestDom();
     const calls: { method?: string; body: unknown }[] = [];
+    const notes: string[] = [];
     let refreshes = 0;
     configureAdminTransport((_input, init) => {
         calls.push({
@@ -190,6 +193,7 @@ Deno.test("channel management launches an in-place dialog and refreshes only aft
                         refreshes++;
                         return Promise.resolve();
                     }}
+                    onNotify={(_tone, message) => notes.push(message)}
                 />,
                 dom.root as unknown as HTMLElement,
             )
@@ -211,7 +215,7 @@ Deno.test("channel management launches an in-place dialog and refreshes only aft
         }]);
         assertEquals(refreshes, 1);
         assertEquals(dom.root.querySelector("dialog"), null);
-        assertStringIncludes(dom.root.textContent, "已保存 备用渠道 · 东京");
+        assertEquals(notes, ["已保存 备用渠道 · 东京。"]);
         assertEquals(dom.navigation, []);
         assertEquals(dom.storageWrites, []);
     } finally {

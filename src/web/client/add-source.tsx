@@ -1,12 +1,15 @@
-/**
- * @jsxRuntime automatic
- * @jsxImportSource hono/jsx/dom
- */
+/** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { useEffect, useLayoutEffect, useRef, useState } from "hono/jsx/dom";
 import type { Child } from "hono/jsx";
 import type { PresetJsonObject } from "@heimdall/admin-contracts/preset-ui.ts";
+import type {
+    ProxyPoolView,
+    SourceProxySelection,
+} from "@heimdall/admin-contracts/proxies.ts";
 import { controlValue } from "./dom.ts";
 import { Icon } from "../shared/icons.tsx";
+import { SourceProxySelect } from "./source-proxy-select.tsx";
+import { sourceProxyLabel } from "../shared/proxy-presentation.ts";
 import { describeError, type ListedPreset } from "./api/admin.ts";
 import {
     createSourceSetupDraft,
@@ -31,6 +34,7 @@ export interface AddSourceFlowProps {
     readonly sources: readonly SourceSetupSource[];
     readonly initialDraft?: SourceSetupDraft;
     readonly initialStep?: AddSourceStep;
+    readonly proxyPool?: ProxyPoolView | null;
     readonly onClose: () => void;
     readonly onSave: (input: SourceSetupSaveInput) => Promise<void>;
     readonly onSaved?: (draft: SourceSetupDraft) => void;
@@ -48,6 +52,7 @@ export function AddSourceFlow(
         sources,
         initialDraft,
         initialStep = "details",
+        proxyPool,
         onClose,
         onSave,
         onSaved,
@@ -76,6 +81,9 @@ export function AddSourceFlow(
     const [name, setName] = useState(initialDraft?.name ?? "");
     const [priority, setPriority] = useState(
         String(initialDraft?.priority ?? 0),
+    );
+    const [proxy, setProxy] = useState<SourceProxySelection>(
+        initialDraft?.proxy ?? { mode: "inherit" },
     );
     const configurable = sources.filter((source) => source.schema);
     const [sourcePluginId, setSourcePluginId] = useState(
@@ -209,6 +217,7 @@ export function AddSourceFlow(
             setDraft(createSourceSetupDraft({
                 name,
                 priority: Number(priority),
+                proxy,
                 mode: presetId ? "preset" : "custom",
                 ...(presetId ? { presetId } : {}),
             }, draft?.id));
@@ -303,6 +312,7 @@ export function AddSourceFlow(
                 <p class="source-flow-context" id="source-flow-context">
                     <span>{name.trim()}</span>
                     <span>优先级 {priority}</span>
+                    <span>{sourceProxyLabel(proxy, proxyPool)}</span>
                 </p>
             )}
             {step === "details" && (
@@ -352,6 +362,12 @@ export function AddSourceFlow(
                                 }}
                             />
                         </label>
+                        <SourceProxySelect
+                            value={proxy}
+                            pool={proxyPool}
+                            disabled={busy}
+                            onChange={setProxy}
+                        />
                         {error && (
                             <p
                                 id="source-details-error"
@@ -413,12 +429,10 @@ export function AddSourceFlow(
                                             </span>
                                         )}
                                     </span>
-                                    <span
+                                    <Icon
+                                        name="chevron-right"
                                         class="template-option-arrow"
-                                        aria-hidden="true"
-                                    >
-                                        →
-                                    </span>
+                                    />
                                 </button>
                             ))}
                             <button
@@ -437,12 +451,10 @@ export function AddSourceFlow(
                                         手动填写连接参数
                                     </span>
                                 </span>
-                                <span
+                                <Icon
+                                    name="chevron-right"
                                     class="template-option-arrow"
-                                    aria-hidden="true"
-                                >
-                                    →
-                                </span>
+                                />
                             </button>
                         </div>
                         {error && (

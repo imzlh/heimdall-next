@@ -1,4 +1,7 @@
-import type { InferenceSource } from "@heimdall/contracts";
+import type {
+    InferenceSource,
+    SourceProxySelection,
+} from "@heimdall/contracts";
 
 const originalSources = new WeakMap<InferenceSource, InferenceSource>();
 
@@ -6,6 +9,7 @@ const originalSources = new WeakMap<InferenceSource, InferenceSource>();
 export interface SourceRecordMetadata {
     readonly name?: string;
     readonly priority?: number;
+    readonly proxy?: SourceProxySelection;
 }
 
 export interface StoredSourceConfig extends SourceRecordMetadata {

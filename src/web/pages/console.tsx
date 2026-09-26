@@ -7,6 +7,10 @@ import { ChannelsSnapshot, OverviewSnapshot } from "./catalog.tsx";
 import { type ConsolePage, consolePageInfo } from "../shared/page-info.ts";
 import { dashboardUiContext } from "../shared/ui-context.ts";
 import {
+    PROXY_IMPLEMENTATION_NOTE,
+    sourceProxyLabel,
+} from "../shared/proxy-presentation.ts";
+import {
     requestReceivedTime,
     requestState,
 } from "../shared/activity-presentation.ts";
@@ -72,6 +76,8 @@ export function ConsolePageView(props: ConsolePageProps) {
                         <>
                             <OverviewSnapshot
                                 dashboard={dashboard}
+                                stats={snapshot.stats}
+                                proxyPool={snapshot.proxies?.pool}
                                 widgets={
                                     <PluginSlots
                                         slot="dashboard.widget"
@@ -87,6 +93,7 @@ export function ConsolePageView(props: ConsolePageProps) {
                     {page === "channels" && (
                         <ChannelsSnapshot
                             dashboard={dashboard}
+                            proxyPool={snapshot.proxies?.pool}
                             contributions={contributions}
                             context={context}
                             policy={policy}
@@ -96,7 +103,7 @@ export function ConsolePageView(props: ConsolePageProps) {
                     {page === "settings" && (
                         <>
                             <section class="panel">
-                                <h2>代理与探测</h2>
+                                <h2>网关与探测</h2>
                                 {snapshot.settings
                                     ? (
                                         <dl class="settings-summary">
@@ -110,7 +117,7 @@ export function ConsolePageView(props: ConsolePageProps) {
                                                 {snapshot.settings.settings
                                                     .probeIntervalMs} ms
                                             </dd>
-                                            <dt>代理密钥</dt>
+                                            <dt>网关访问密钥</dt>
                                             <dd>
                                                 {snapshot.settings.settings
                                                         .proxyKeyConfigured
@@ -126,6 +133,7 @@ export function ConsolePageView(props: ConsolePageProps) {
                                         </p>
                                     )}
                             </section>
+                            <ProxyPoolSnapshot snapshot={snapshot} />
                             <PluginSlots
                                 slot="settings.section"
                                 contributions={contributions}
@@ -153,6 +161,86 @@ export function ConsolePageView(props: ConsolePageProps) {
                 </>
             )}
         </div>
+    );
+}
+
+function ProxyPoolSnapshot({ snapshot }: { snapshot: ConsoleSnapshot }) {
+    const pool = snapshot.proxies?.pool;
+    return (
+        <section
+            class="panel proxy-pool-panel"
+            aria-labelledby="proxy-pool-title"
+        >
+            <div class="panel-heading">
+                <div>
+                    <h2 id="proxy-pool-title">出站代理池</h2>
+                    <p>{PROXY_IMPLEMENTATION_NOTE}</p>
+                </div>
+                {pool && (
+                    <span class="status-chip chip-muted">
+                        {pool.entries.length} 个代理
+                    </span>
+                )}
+            </div>
+            {pool
+                ? (
+                    <>
+                        <dl class="settings-summary">
+                            <dt>全局默认</dt>
+                            <dd>
+                                {sourceProxyLabel({ mode: "inherit" }, pool)}
+                            </dd>
+                        </dl>
+                        <div class="proxy-entry-list">
+                            {pool.entries.map((entry) => (
+                                <article class="proxy-entry" key={entry.id}>
+                                    <div class="proxy-entry-heading">
+                                        <div class="proxy-entry-identity">
+                                            <strong>{entry.name}</strong>
+                                            <small>{entry.url}</small>
+                                        </div>
+                                        <div class="proxy-entry-actions">
+                                            {pool.defaultProxyId === entry.id &&
+                                                (
+                                                    <span class="status-chip chip-muted">
+                                                        默认
+                                                    </span>
+                                                )}
+                                            <span
+                                                class={`status-chip chip-${
+                                                    entry.enabled
+                                                        ? "success"
+                                                        : "muted"
+                                                }`}
+                                            >
+                                                {entry.enabled
+                                                    ? "已启用"
+                                                    : "已停用"}
+                                            </span>
+                                            <span class="plugin-chip">
+                                                {entry.authConfigured
+                                                    ? "认证已配置"
+                                                    : "无认证"}
+                                            </span>
+                                        </div>
+                                    </div>
+                                </article>
+                            ))}
+                        </div>
+                        {!pool.entries.length && (
+                            <p class="empty-state">
+                                尚未添加代理，全局默认使用直连。
+                            </p>
+                        )}
+                    </>
+                )
+                : (
+                    <p class="empty-state">
+                        {snapshot.errors.proxies ||
+                            "当前实例未配置代理池服务。"}
+                    </p>
+                )}
+        </section>
     );
 }
 

@@ -28,7 +28,9 @@ function NavGlyph({ id }: { id: string }) {
     const names: Record<string, IconName> = {
         overview: "overview",
         channels: "channels",
+        logs: "logs",
         settings: "settings",
+        chat: "chat",
     };
     return <Icon name={names[id] ?? "plugin"} class="nav-icon" />;
 }

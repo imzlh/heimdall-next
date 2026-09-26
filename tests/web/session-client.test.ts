@@ -47,12 +47,15 @@ async function withBrowser(
     }
 }
 
-function envelope(call: FetchCall): unknown {
+function envelope(call: FetchCall, requestId?: string): unknown {
     assertEquals(call.input, "/admin/ui/request");
     assertEquals(call.init?.method, "POST");
     assertEquals(call.init?.credentials, "same-origin");
     const headers = new Headers(call.init?.headers);
-    assertEquals([...headers], [["content-type", "application/json"]]);
+    assertEquals([...headers], [
+        ["content-type", "application/json"],
+        ...(requestId === undefined ? [] : [["x-request-id", requestId]]),
+    ]);
     assert(typeof call.init?.body === "string");
     return JSON.parse(call.init.body);
 }
@@ -81,7 +84,7 @@ Deno.test("sessionFetch sends tokenless bridge envelopes with JSON and concurren
         );
         assertEquals(result.status, 200);
         assertEquals(calls.length, 1);
-        assertEquals(envelope(calls[0]!), {
+        assertEquals(envelope(calls[0]!, "request-7"), {
             path: "/api/admin/source-config?id=source%2Fone",
             method: "PUT",
             headers: {
@@ -175,7 +178,7 @@ Deno.test("sessionFetch preserves method headers and JSON body from Request inpu
             body: JSON.stringify({ limitPerMinute: 23 }),
         });
         await sessionFetch(request);
-        assertEquals(envelope(calls[0]!), {
+        assertEquals(envelope(calls[0]!, "request-input-1"), {
             path: "/api/admin/settings",
             method: "PUT",
             headers: {
@@ -211,7 +214,7 @@ Deno.test("sessionFetch replaces Request headers when init supplies a new header
         await sessionFetch(request, {
             headers: { "x-request-id": "replacement" },
         });
-        assertEquals(envelope(calls[0]!), {
+        assertEquals(envelope(calls[0]!, "replacement"), {
             path: "/api/admin/settings",
             method: "PUT",
             headers: { "x-request-id": "replacement" },

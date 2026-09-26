@@ -51,12 +51,20 @@ function text(value: unknown): string {
 
 function readConversation(value: unknown): ChatConversation {
     const body = record(value);
-    return {
+    const conversation: ChatConversation = {
         id: text(body.id),
         title: text(body.title),
         createdAt: text(body.createdAt),
         updatedAt: text(body.updatedAt),
     };
+    if (typeof body.systemPrompt === "string" && body.systemPrompt.length > 0) {
+        conversation.systemPrompt = body.systemPrompt;
+    }
+    if (
+        body.reasoningEffort === "low" || body.reasoningEffort === "medium" ||
+        body.reasoningEffort === "high"
+    ) conversation.reasoningEffort = body.reasoningEffort;
+    return conversation;
 }
 
 function readMessage(value: unknown): ChatMessage {
@@ -75,6 +83,20 @@ function readMessage(value: unknown): ChatMessage {
     };
     if (body.callId !== undefined) message.callId = text(body.callId);
     if (body.name !== undefined) message.name = text(body.name);
+    if (body.status !== undefined) {
+        if (
+            body.status !== "completed" && body.status !== "failed" &&
+            body.status !== "stopped"
+        ) return invalidResponse();
+        message.status = body.status;
+    }
+    if (body.error !== undefined) {
+        const error = record(body.error);
+        message.error = {
+            code: text(error.code),
+            message: text(error.message),
+        };
+    }
     if (body.attachments !== undefined) {
         if (!Array.isArray(body.attachments)) return invalidResponse();
         message.attachments = body.attachments.map((item) => {
@@ -200,6 +222,37 @@ export async function renameChatConversation(
         ),
     );
     const conversation = readConversation(body.conversation);
+    if (conversation.id !== id) invalidResponse();
+    return conversation;
+}
+
+export interface ChatSettingsPatch {
+    readonly systemPrompt?: string;
+    readonly reasoningEffort?: "low" | "medium" | "high" | null;
+}
+
+/** Partial conversation settings update; omitted fields stay untouched. */
+export async function updateChatConversationSettings(
+    id: string,
+    patch: ChatSettingsPatch,
+    options: ChatRequestOptions = {},
+): Promise<ChatConversation> {
+    const body: Record<string, unknown> = {};
+    if (patch.systemPrompt !== undefined) {
+        body.systemPrompt = patch.systemPrompt;
+    }
+    if (patch.reasoningEffort !== undefined) {
+        body.reasoningEffort = patch.reasoningEffort;
+    }
+    const payload = record(
+        await chatRequest(
+            `conversation?id=${encodeURIComponent(id)}`,
+            options,
+            "PATCH",
+            body,
+        ),
+    );
+    const conversation = readConversation(payload.conversation);
     if (conversation.id !== id) invalidResponse();
     return conversation;
 }

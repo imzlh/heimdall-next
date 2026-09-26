@@ -232,6 +232,8 @@ const requestIdMiddleware: MiddlewareHandler<ServerEnv> = async (
     context.set("requestId", requestId);
     context.header("x-heimdall-request-id", requestId);
     await next();
+    // Route/plugin responses never replace the host trace. Internal bridge
+    // dispatches inherit this ID rather than installing their own response ID.
     context.header("x-heimdall-request-id", requestId);
 };
 
