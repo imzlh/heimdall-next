@@ -80,6 +80,8 @@ export interface NewRequestRecord {
 export interface RequestRecord extends NewRequestRecord {
     readonly status: RequestStatus;
     readonly completedAt?: string;
+    /** When the first content frame arrived; the gap from `receivedAt` is TTFT. */
+    readonly firstTokenAt?: string;
     readonly response?: JsonValue;
     readonly error?: JsonValue;
 }
@@ -93,6 +95,14 @@ export interface RequestPatch {
 
 export interface RequestListOptions {
     readonly status?: RequestStatus;
+    /** Literal substring across request id, model, operation and plugin ids. */
+    readonly q?: string;
+    /** Exclusive position in receivedAt DESC, requestId DESC order. */
+    readonly cursor?: {
+        readonly receivedAt: string;
+        readonly requestId: string;
+    };
+    /** Legacy exclusive timestamp filter; prefer cursor when paging. */
     readonly before?: string;
     readonly limit?: number;
 }
@@ -159,6 +169,8 @@ export interface RequestStore {
     createRequest(record: NewRequestRecord): void;
     getRequest(requestId: string): RequestRecord | null;
     updateRequest(requestId: string, patch: RequestPatch): void;
+    /** Record the first content frame's timestamp once, keeping the earliest. */
+    markFirstToken(requestId: string, timestamp: string): void;
     listRequests(options?: RequestListOptions): readonly RequestRecord[];
     appendFrame(frame: StoredFrame): boolean;
     listFrames(
@@ -166,6 +178,11 @@ export interface RequestStore {
         afterSeq?: number,
         limit?: number,
     ): readonly StoredFrame[];
+    /** Captures the current export boundary without loading the event bodies. */
+    getFrameSummary(requestId: string): {
+        readonly count: number;
+        readonly lastSeq: number | null;
+    };
     putUsage(usage: UsageRecord): void;
     getUsage(requestId: string): UsageRecord | null;
     usageTotals(from?: string, until?: string): UsageTotals;
@@ -189,11 +206,29 @@ export interface ConversationRecord {
     readonly systemPrompt?: string;
     /** Upstream reasoning effort preference: "low" | "medium" | "high". */
     readonly reasoningEffort?: "low" | "medium" | "high";
+    /** Tool plugin ids the model must not see in this conversation. */
+    readonly disabledTools?: readonly string[];
+    /** Leaf of the currently selected path; other branches remain stored. */
+    readonly activeMessageId?: string;
 }
 
-export interface ChatAttachment {
+export type ChatAttachment = ChatAssetAttachment | ChatInlineAttachment;
+
+/** URLs are derived at the presentation boundary and are never stored. */
+export interface ChatAssetAttachment {
+    readonly assetId: string;
+    /** Accepted at the command boundary, stripped before storing a message. */
+    readonly leaseId?: string;
+    readonly mediaType: string;
+    readonly dataBase64?: never;
+}
+
+/** Compatibility input for histories created before image assets were introduced. */
+export interface ChatInlineAttachment {
     readonly mediaType: string;
     readonly dataBase64: string;
+    readonly assetId?: never;
+    readonly leaseId?: never;
 }
 
 export interface ChatMessageRecord {
@@ -202,6 +237,15 @@ export interface ChatMessageRecord {
     readonly role: "system" | "user" | "assistant" | "tool";
     readonly text: string;
     readonly createdAt: string;
+    /** Omitted by legacy writers to append to the selected path. */
+    readonly parentId?: string | null;
+    /** Write-only variant intent; adapters preserve its stable group after deletion. */
+    readonly variantOf?: string;
+    readonly branch?: {
+        readonly index: number;
+        readonly count: number;
+        readonly messageIds: readonly string[];
+    };
     /** Absent on legacy messages, which are treated as completed. */
     readonly status?: "completed" | "failed" | "stopped";
     readonly error?: { readonly code: string; readonly message: string };
@@ -209,6 +253,25 @@ export interface ChatMessageRecord {
     readonly callId?: string;
     readonly name?: string;
     readonly attachments?: readonly ChatAttachment[];
+    /** Public reasoning transcript surfaced alongside the answer. */
+    readonly reasoning?: string;
+    /** Cloud activity lines (e.g. searches) the model ran for this reply. */
+    readonly activity?: readonly { readonly summary: string }[];
+    /** Sources the answer cited. */
+    readonly citations?: readonly {
+        readonly label?: string;
+        readonly url?: string;
+        readonly ref?: string;
+    }[];
+    /** Per-turn account quota snapshot shown with the reply. */
+    readonly quota?: {
+        readonly meters: readonly {
+            readonly name: string;
+            readonly remaining?: number;
+            readonly blocked?: boolean;
+            readonly error?: string;
+        }[];
+    };
 }
 
 /** Single-tenant chat history. The kernel does not depend on this port. */
@@ -225,14 +288,49 @@ export interface ChatStore {
             readonly systemPrompt?: string;
             /** Empty string clears; undefined keeps; otherwise low/medium/high. */
             readonly reasoningEffort?: string;
+            /** Undefined keeps the list; otherwise it replaces it wholesale. */
+            readonly disabledTools?: readonly string[];
         },
     ): void;
     /** Atomically delete the conversation, its messages and attachments. */
     deleteConversation(id: string): void;
     addMessage(message: ChatMessageRecord): void;
+    /** Atomically append a chain and select its leaf. Explicit null starts a root. */
+    appendMessages(
+        messages: readonly ChatMessageRecord[],
+        patch?: { readonly title?: string; readonly updatedAt: string },
+    ): void;
+    /** The selected path, annotated with sibling variants. */
     listMessages(conversationId: string): readonly ChatMessageRecord[];
+    listAllMessages(conversationId: string): readonly ChatMessageRecord[];
+    /** Ancestors through the target, without changing the selected path. */
+    messagePath(
+        conversationId: string,
+        messageId: string,
+    ): readonly ChatMessageRecord[];
+    /** Restore the selected descendants of this node, preserving other choices. */
+    selectBranch(conversationId: string, messageId: string, now: string): void;
+    /** Copy only the ancestry through the target, with new ids and settings. */
+    forkConversation(
+        conversationId: string,
+        messageId: string,
+        now: string,
+        title?: string,
+    ): ConversationRecord;
+    replaceMessageAttachments(
+        messageId: string,
+        attachments: readonly ChatAttachment[],
+    ): void;
+    assetIdsForMessages(ids: readonly string[]): readonly string[];
+    assetIdsForConversation(id: string): readonly string[];
+    referencedAssetIds(ids: readonly string[]): readonly string[];
+    quarantineLegacyAttachments(
+        messageId: string,
+        indices: readonly number[],
+        reason: string,
+    ): void;
     /** Delete these message ids and their attachments. Missing ids are ignored. */
-    deleteMessages(ids: readonly string[]): void;
+    deleteMessages(ids: readonly string[], updatedAt?: string): void;
     close(): void;
 }
 

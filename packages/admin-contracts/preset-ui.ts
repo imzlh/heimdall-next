@@ -1,6 +1,7 @@
 import { copyFormJson } from "./form-json.ts";
 import type { UiJsonObject, UiJsonValue } from "./ui.ts";
 import type { SourceProxySelection } from "./proxies.ts";
+import type { SourceDraftProbeResult } from "./source-probe.ts";
 
 export type PresetJsonValue = UiJsonValue;
 export type PresetJsonObject = UiJsonObject;
@@ -28,7 +29,7 @@ export interface PresetUiContext {
 
 /** Newly entered configuration travels to the host; the host owns persistence. */
 export interface PresetUiAction {
-    readonly kind: "save" | "preview";
+    readonly kind: "save" | "preview" | "probe";
     readonly config: PresetJsonObject;
 }
 
@@ -37,6 +38,7 @@ export interface PresetUiFeedback {
     readonly kind: PresetUiAction["kind"];
     readonly status: "pending" | "success" | "error";
     readonly errors?: Readonly<Record<string, string>>;
+    readonly probe?: SourceDraftProbeResult;
 }
 
 const pluginId = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/;
@@ -79,7 +81,8 @@ export function parsePresetUiAction(value: unknown): PresetUiAction {
     const action = jsonObject(value, PRESET_UI_LIMITS.actionBytes);
     keys(action, ["kind", "config"]);
     ensure(
-        action.kind === "save" || action.kind === "preview",
+        action.kind === "save" || action.kind === "preview" ||
+            action.kind === "probe",
         "invalid action",
     );
     record(action.config);
@@ -88,9 +91,10 @@ export function parsePresetUiAction(value: unknown): PresetUiAction {
 
 export function parsePresetUiFeedback(value: unknown): PresetUiFeedback {
     const feedback = jsonObject(value, PRESET_UI_LIMITS.feedbackBytes);
-    keys(feedback, ["kind", "status"], ["errors"]);
+    keys(feedback, ["kind", "status"], ["errors", "probe"]);
     ensure(
-        feedback.kind === "save" || feedback.kind === "preview",
+        feedback.kind === "save" || feedback.kind === "preview" ||
+            feedback.kind === "probe",
         "invalid action",
     );
     ensure(
@@ -105,6 +109,27 @@ export function parsePresetUiFeedback(value: unknown): PresetUiFeedback {
             ensure(
                 text(key, 128) && text(message, 1024),
                 "invalid field error",
+            );
+        }
+    }
+    if (feedback.probe !== undefined) {
+        ensure(
+            feedback.kind === "probe" && feedback.status === "success",
+            "unexpected probe result",
+        );
+        const probe = record(feedback.probe);
+        keys(probe, ["ok", "message", "checkedAt"], ["models"]);
+        ensure(
+            typeof probe.ok === "boolean" && text(probe.message, 1024) &&
+                text(probe.checkedAt, 64) &&
+                Number.isFinite(Date.parse(probe.checkedAt)),
+            "invalid probe result",
+        );
+        if (probe.models !== undefined) {
+            ensure(
+                Array.isArray(probe.models) && probe.models.length <= 256 &&
+                    probe.models.every((model) => text(model, 256)),
+                "invalid models",
             );
         }
     }

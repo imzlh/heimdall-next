@@ -12,11 +12,13 @@ import {
     initialState,
 } from "@heimdall/hip";
 import { ProtocolError } from "@heimdall/contracts";
+import { encodeResponseId } from "./conversation.ts";
 import {
     chatFinishReason,
     isPublicReasoning,
     isTerminalStatus,
     responsesStatus,
+    statusPartSummary,
     toUnixSeconds,
 } from "./wire.ts";
 
@@ -82,10 +84,17 @@ export function buildChatResponse(
 }
 
 export function toChatMessage(message: Message): Record<string, unknown> {
-    const text = message.parts
+    const status = message.parts
+        .map((part) => statusPartSummary(part))
+        .filter((summary): summary is string => summary !== undefined);
+    const answer = message.parts
         .filter((part) => part.type === "text")
         .map((part) => part.text)
         .join("");
+    // Compatible clients have no status field; fold the pre-rendered summaries
+    // into the reply text so cloud activity is not silently dropped.
+    const text = [...status, answer].filter((value) => value.length > 0)
+        .join("\n");
     const refusal = message.parts
         .filter((part) => part.type === "refusal")
         .map((part) => part.text)
@@ -119,8 +128,16 @@ export function buildResponsesResponse(
     incompleteReason?: string,
 ): Record<string, unknown> {
     const status = statusOverride ?? responsesStatus(state?.status);
+    // The conversation id rides inside the response id (so the client's next
+    // `previous_response_id` carries it back) and is stripped from the echoed
+    // metadata, where it is our routing key rather than caller-visible data.
+    const conversationId = typeof request.metadata?.conversationId === "string"
+        ? request.metadata.conversationId
+        : undefined;
     return {
-        id,
+        id: conversationId === undefined
+            ? id
+            : encodeResponseId(conversationId, id),
         object: "response",
         created_at: createdAt,
         status,
@@ -137,9 +154,18 @@ export function buildResponsesResponse(
         instructions: request.instructions ?? null,
         model: request.model ?? "",
         output: state ? responsesOutput(state) : [],
-        metadata: request.metadata ?? {},
+        metadata: publicMetadata(request.metadata),
         ...(state?.usage ? { usage: toOpenAIUsage(state.usage) } : {}),
     };
+}
+
+/** Caller metadata without the internal conversation routing key. */
+function publicMetadata(
+    metadata: GenerateRequest["metadata"],
+): Record<string, unknown> {
+    if (!metadata) return {};
+    const { conversationId: _conversationId, ...rest } = metadata;
+    return rest;
 }
 
 export function responsesOutput(
@@ -283,6 +309,15 @@ export function toResponsesContent(
             });
         } else if (part.type === "refusal") {
             content.push({ type: "refusal", refusal: part.text });
+        } else {
+            const summary = statusPartSummary(part);
+            if (summary !== undefined) {
+                content.push({
+                    type: "output_text",
+                    text: summary,
+                    annotations: [],
+                });
+            }
         }
     }
     return content;

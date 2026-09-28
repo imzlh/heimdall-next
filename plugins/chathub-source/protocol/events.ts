@@ -1,6 +1,7 @@
 import { ChatHubTarget, SignalRMessageType } from "./constants.ts";
 import type {
     ChatHubEvent,
+    ChatHubMeterError,
     ChatHubReference,
     ChatHubThrottling,
     ChatMessage,
@@ -45,25 +46,70 @@ function collectMessages(
     return output;
 }
 
+/**
+ * The turn's citations, taken only from `references` dictionaries (both the
+ * message-level and the argument-level ones), never from every url-bearing
+ * object in the payload — search cards, image tiles and the like are not
+ * citations, and scanning the whole tree is what bloated the source list. Each
+ * dictionary is keyed by the id the inline `cite` markers point at (e.g.
+ * `turn1search42`); that key is stamped onto the reference as `id` when it has
+ * none, so the source can tie a marker to the exact reference it cites.
+ */
 function collectReferences(value: unknown): ChatHubReference[] {
     const references: ChatHubReference[] = [];
+    const push = (key: string | undefined, ref: unknown): void => {
+        if (
+            !isRecord(ref) ||
+            (typeof ref.targetLink !== "string" && typeof ref.url !== "string")
+        ) return;
+        references.push(
+            key !== undefined && typeof ref.id !== "string"
+                ? { ...ref, id: key } as ChatHubReference
+                : ref as ChatHubReference,
+        );
+    };
     const visit = (item: unknown): void => {
         if (Array.isArray(item)) {
             for (const child of item) visit(child);
             return;
         }
         if (!isRecord(item)) return;
-
-        if (
-            typeof item.targetLink === "string" ||
-            typeof item.url === "string"
-        ) {
-            references.push(item as ChatHubReference);
+        const refs = item.references;
+        if (isRecord(refs)) {
+            for (const [key, ref] of Object.entries(refs)) push(key, ref);
+        } else if (Array.isArray(refs)) {
+            for (const ref of refs) push(undefined, ref);
         }
         for (const child of Object.values(item)) visit(child);
     };
     visit(value);
     return references;
+}
+
+/**
+ * Cloud search queries the model ran, from `message.searchQueries` and from
+ * dedicated SearchQuery/InternalSearchQuery status messages. Surfaced as a
+ * one-line status so the wait before the first answer token is explainable.
+ */
+function collectSearchQueries(messages: ChatMessage[]): string[] {
+    const queries: string[] = [];
+    const add = (value: unknown): void => {
+        if (typeof value !== "string") return;
+        const query = value.trim();
+        if (query.length > 0 && !queries.includes(query)) queries.push(query);
+    };
+    for (const message of messages) {
+        if (Array.isArray(message.searchQueries)) {
+            for (const query of message.searchQueries) add(query);
+        }
+        if (
+            message.messageType === "SearchQuery" ||
+            message.messageType === "InternalSearchQuery"
+        ) {
+            add(message.text);
+        }
+    }
+    return queries;
 }
 
 function collectSuggestions(messages: ChatMessage[]): SuggestedResponse[] {
@@ -74,6 +120,29 @@ function collectSuggestions(messages: ChatMessage[]): SuggestedResponse[] {
         suggestions.push(...value.filter(isRecord) as SuggestedResponse[]);
     }
     return suggestions;
+}
+
+/**
+ * Generated-image URLs from `contentGenerationProgressList[].ImageReferenceUrls`.
+ * Copilot fills these on later update frames of an image-generation turn; the
+ * source downloads them to bytes. Only https image references are kept.
+ */
+function collectImageUrls(messages: ChatMessage[]): string[] {
+    const urls: string[] = [];
+    for (const message of messages) {
+        const list = message.contentGenerationProgressList;
+        if (!Array.isArray(list)) continue;
+        for (const progress of list) {
+            const refs = progress?.ImageReferenceUrls;
+            if (!Array.isArray(refs)) continue;
+            for (const ref of refs) {
+                if (typeof ref === "string" && ref.startsWith("https://")) {
+                    urls.push(ref);
+                }
+            }
+        }
+    }
+    return urls;
 }
 
 /**
@@ -103,9 +172,22 @@ function isAnswerText(message: ChatMessage): boolean {
     return true;
 }
 
+/**
+ * Copilot wraps inline citation markers in private-use control characters, e.g.
+ * `citeturn1search42`. Left in place they render as tofu boxes
+ * and keep the marker from being recognized. Dropping the U+E200–U+E20F control
+ * block collapses each run to the contiguous `citeturn1search42` form the chat
+ * renderer turns into a badge, while the references travel as citation parts.
+ */
+function normalizeCitations(text: string): string {
+    return text.replace(/[\u{e200}-\u{e20f}]/gu, "");
+}
+
 function latestText(messages: ChatMessage[]): string | undefined {
     for (let index = messages.length - 1; index >= 0; index--) {
-        if (isAnswerText(messages[index]!)) return messages[index]!.text;
+        if (isAnswerText(messages[index]!)) {
+            return normalizeCitations(messages[index]!.text as string);
+        }
     }
     return undefined;
 }
@@ -128,7 +210,9 @@ function reasoningText(messages: ChatMessage[]): string | undefined {
     for (const message of messages) {
         if (isReasoningText(message)) parts.push(message.text as string);
     }
-    return parts.length > 0 ? parts.join("\n\n") : undefined;
+    return parts.length > 0
+        ? normalizeCitations(parts.join("\n\n"))
+        : undefined;
 }
 
 /**
@@ -149,6 +233,48 @@ function chatNameOf(payload: unknown): string | undefined {
     return typeof name === "string" && name.trim() ? name.trim() : undefined;
 }
 
+/** Terminal turn state (e.g. "Completed"/"Failed") on the StreamItem's `item`. */
+function turnStateOf(payload: unknown): string | undefined {
+    if (!isRecord(payload)) return undefined;
+    const state = payload.turnState;
+    return typeof state === "string" && state.trim() ? state.trim() : undefined;
+}
+
+/**
+ * The StreamItem's `item.result`: `value` (e.g. "Success"), the authoritative
+ * `message` text fallback, and the reliable `meteringInformation[]` access
+ * signals. ChatHub reports soft-rejects here — HTTP/WS stay 200 and `value` is
+ * still "Success" while a `meteringInformation` entry carries `hasAccess:false`
+ * (copilot2api docs 07 §1.1) — so callers must inspect it, not just the status.
+ */
+function resultOf(payload: unknown): {
+    value?: string;
+    message?: string;
+    meteringInformation?: ChatHubMeterError[];
+} | undefined {
+    if (!isRecord(payload)) return undefined;
+    const result = payload.result;
+    if (!isRecord(result)) return undefined;
+    const value = typeof result.value === "string" ? result.value : undefined;
+    const message = typeof result.message === "string" && result.message.trim()
+        ? result.message
+        : undefined;
+    const meteringInformation = Array.isArray(result.meteringInformation)
+        ? result.meteringInformation.filter(isRecord) as ChatHubMeterError[]
+        : undefined;
+    if (
+        value === undefined && message === undefined &&
+        meteringInformation === undefined
+    ) return undefined;
+    return {
+        ...(value !== undefined ? { value } : {}),
+        ...(message !== undefined ? { message } : {}),
+        ...(meteringInformation && meteringInformation.length > 0
+            ? { meteringInformation }
+            : {}),
+    };
+}
+
 export function normalizeFrame(raw: unknown): ChatHubEvent {
     if (!isRecord(raw)) {
         return {
@@ -165,6 +291,9 @@ export function normalizeFrame(raw: unknown): ChatHubEvent {
     const messages = collectMessages(payload);
     const references = collectReferences(payload);
     const suggestions = collectSuggestions(messages);
+    const images = collectImageUrls(messages);
+    const searchQueries = collectSearchQueries(messages);
+    const result = resultOf(payload);
     const common = {
         frame,
         raw,
@@ -172,9 +301,15 @@ export function normalizeFrame(raw: unknown): ChatHubEvent {
         reasoning: reasoningText(messages),
         throttling: throttlingOf(payload),
         chatName: chatNameOf(payload),
+        turnState: turnStateOf(payload),
+        resultValue: result?.value,
+        resultMessage: result?.message,
+        meteringInformation: result?.meteringInformation,
         messages: messages.length > 0 ? messages : undefined,
         references: references.length > 0 ? references : undefined,
+        searchQueries: searchQueries.length > 0 ? searchQueries : undefined,
         suggestions: suggestions.length > 0 ? suggestions : undefined,
+        images: images.length > 0 ? images : undefined,
     };
 
     if (frame.type === SignalRMessageType.Ping) {
@@ -233,14 +368,25 @@ export class ChatHubTextAccumulator {
 
     update(candidate: string | undefined): string {
         if (!candidate) return "";
-        if (candidate.startsWith(this.#text)) {
-            const delta = candidate.slice(this.#text.length);
-            this.#text = candidate;
-            return delta;
+        // ChatHub streams the reply on two redundant channels (see
+        // protocol/README and copilot2api docs 05 §3): the DeepLeo `messages[].text`
+        // snapshot channel is a cumulative, strictly prefix-monotonic full text,
+        // while writeAtCursor re-sends the same reply as append fragments. Only a
+        // candidate that extends the accumulated text advances it, and we emit
+        // just the new tail. Anything else — a writeAtCursor fragment, a
+        // stale/shorter snapshot, or a divergent rewrite — is dropped, never
+        // appended: concatenating the two channels double-counts the answer (the
+        // bug that made the reply repeat itself mid-stream). A later snapshot and
+        // the authoritative finalize still carry the canonical text.
+        if (
+            candidate.length <= this.#text.length ||
+            !candidate.startsWith(this.#text)
+        ) {
+            return "";
         }
-        if (this.#text.endsWith(candidate)) return "";
-        this.#text += candidate;
-        return candidate;
+        const delta = candidate.slice(this.#text.length);
+        this.#text = candidate;
+        return delta;
     }
 
     finalize(authoritative: string | undefined): string {

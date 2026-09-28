@@ -1,5 +1,9 @@
 import type { RequestContext, SourceContext } from "../contracts/mod.ts";
-import type { OperationRequest, StreamFrame } from "../hip/mod.ts";
+import type {
+    CanonicalError,
+    OperationRequest,
+    StreamFrame,
+} from "../hip/mod.ts";
 import { FrameValidationError, validateFrames } from "./sources.ts";
 import {
     type LifecycleHookContext,
@@ -227,6 +231,8 @@ export class KernelRuntime implements Kernel {
         let finished = false;
         let terminal = false;
         let outcome: "completed" | "error" | "cancelled" | undefined;
+        let lastSeq = 0;
+        let lastStreamId = lifecycle.streamId;
 
         const complete = async (
             nextOutcome: "completed" | "error" | "cancelled",
@@ -294,6 +300,8 @@ export class KernelRuntime implements Kernel {
                 }
                 this.lifecycle?.append(frame);
                 await this.lifecycleHooks.frame(frame, hookContext);
+                lastSeq = frame.seq;
+                lastStreamId = frame.streamId;
                 terminal = isTerminal(frame);
                 if (terminal) {
                     outcome = terminalOutcome(frame);
@@ -315,11 +323,36 @@ export class KernelRuntime implements Kernel {
         } catch (error) {
             const cancelled = lifecycle.signal.aborted;
             const failure = cancelled ? "cancelled" : "error";
+            // Give the failure a concrete reason instead of a silent, empty
+            // stream. A real failure (not a client cancel) with no terminal yet
+            // is recorded as a `run.error` frame so the request journal always
+            // shows *why* it failed. It is also streamed to the client, but
+            // only once the source had already emitted output: a pre-output
+            // failure still travels as a thrown error so protocol adapters map
+            // it to the right HTTP status before any bytes are sent.
+            const errorFrame = began && !cancelled && !terminal
+                ? errorEventFrame(request, lastStreamId, lastSeq + 1, error, {
+                    now: this.#now,
+                    fallbackStreamId: lifecycle.streamId,
+                })
+                : undefined;
             try {
                 await this.lifecycleHooks.error(error, hookContext);
             } finally {
-                if (began) await complete(failure);
+                if (began) {
+                    // Record before completing so the journal captures the
+                    // reason alongside the failed status.
+                    if (errorFrame !== undefined) {
+                        try {
+                            this.lifecycle?.append(errorFrame);
+                        } catch {
+                            // Recording must never mask the original failure.
+                        }
+                    }
+                    await complete(failure);
+                }
             }
+            if (errorFrame !== undefined && lastSeq > 0) yield errorFrame;
             throw error;
         } finally {
             // Closing an async iterator early (for example when an HTTP client
@@ -369,5 +402,83 @@ function terminalOutcome(
             return "cancelled";
         default:
             return "completed";
+    }
+}
+
+/**
+ * Build the synthetic terminal `run.error` frame the runtime emits when the
+ * execution pipeline fails without the source having produced its own terminal
+ * event (a validation failure, a stream that ended early, a middleware or
+ * context error). It gives the journal and every client a concrete reason
+ * instead of an empty stream.
+ */
+function errorEventFrame(
+    request: OperationRequest,
+    streamId: string,
+    seq: number,
+    error: unknown,
+    options: { now: () => Date; fallbackStreamId: string },
+): StreamFrame {
+    const stream = streamId.trim().length > 0
+        ? streamId
+        : options.fallbackStreamId;
+    return {
+        version: 1,
+        streamId: stream,
+        requestId: request.requestId,
+        seq,
+        eventId: `${stream}:error:${seq}`,
+        timestamp: options.now().toISOString(),
+        event: { kind: "run.error", error: toCanonicalError(error) },
+    };
+}
+
+/** Map an arbitrary thrown value onto the provider-independent error envelope. */
+function toCanonicalError(error: unknown): CanonicalError {
+    if (isCanonicalError(error)) return error;
+    const message = error instanceof Error && error.message.length > 0
+        ? error.message
+        : "generation failed";
+    const name = error instanceof Error ? error.name : "";
+    return {
+        code: errorCodeForName(name),
+        message,
+        status: statusForName(name),
+    };
+}
+
+function isCanonicalError(value: unknown): value is CanonicalError {
+    return typeof value === "object" && value !== null &&
+        typeof (value as { code?: unknown }).code === "string" &&
+        typeof (value as { message?: unknown }).message === "string" &&
+        !(value instanceof Error);
+}
+
+/** Stable, non-secret codes so clients can branch on the failure class. */
+function errorCodeForName(name: string): string {
+    switch (name) {
+        case "FrameValidationError":
+            return "invalid_upstream_response";
+        case "KernelExecutionError":
+            return "incomplete_stream";
+        case "KernelContextError":
+            return "kernel_misconfigured";
+        case "SourceUnavailableError":
+            return "upstream_unavailable";
+        default:
+            return "internal_error";
+    }
+}
+
+/** HTTP status a protocol adapter should map the failure class onto. */
+function statusForName(name: string): number {
+    switch (name) {
+        case "SourceUnavailableError":
+            return 503;
+        case "FrameValidationError":
+        case "KernelExecutionError":
+            return 502;
+        default:
+            return 500;
     }
 }

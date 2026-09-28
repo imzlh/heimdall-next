@@ -490,15 +490,90 @@ function ChatHubSetup({ element, context }: {
                 {errors._form && (
                     <p class="form-error" role="alert">{errors._form}</p>
                 )}
-                {feedback?.status === "success" && (
-                    <p class="form-success" role="status">
-                        {saved
-                            ? "渠道已创建。"
-                            : "配置校验通过，可以保存渠道。"}
-                    </p>
+                {feedback?.status === "success" && feedback.kind !== "probe" &&
+                    (
+                        <p class="form-success" role="status">
+                            {saved
+                                ? "渠道已创建。"
+                                : "配置校验通过，可以保存渠道。"}
+                        </p>
+                    )}
+                {feedback?.probe && (
+                    <div
+                        class="source-probe-result"
+                        data-state={feedback.probe.ok ? "success" : "error"}
+                    >
+                        <p
+                            class={feedback.probe.ok
+                                ? "form-success"
+                                : "form-error"}
+                            role={feedback.probe.ok ? "status" : "alert"}
+                        >
+                            {feedback.probe.message}
+                        </p>
+                        {feedback.probe.ok && feedback.probe.models?.length
+                            ? (
+                                <>
+                                    <p class="field-help">
+                                        点击模型加入发布列表。
+                                    </p>
+                                    <div
+                                        class="source-model-list"
+                                        aria-label="上游模型"
+                                    >
+                                        {feedback.probe.models.map((model) => (
+                                            <button
+                                                key={model}
+                                                type="button"
+                                                class="source-model-chip"
+                                                aria-pressed={models.split(
+                                                        /[\s,]+/,
+                                                    ).includes(model)
+                                                    ? "true"
+                                                    : "false"}
+                                                disabled={busy || saved}
+                                                onClick={() =>
+                                                    setModels((current) =>
+                                                        [
+                                                            ...new Set([
+                                                                ...current
+                                                                    .split(
+                                                                        /[\s,]+/,
+                                                                    ).filter(
+                                                                        Boolean,
+                                                                    ),
+                                                                model,
+                                                            ]),
+                                                        ].join(", ")
+                                                    )}
+                                            >
+                                                {model}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </>
+                            )
+                            : feedback.probe.ok && (
+                                <p class="field-help">
+                                    插件未返回模型列表，可以继续使用默认模型。
+                                </p>
+                            )}
+                    </div>
                 )}
             </div>
             <div class="config-actions source-flow-footer source-preset-actions">
+                <button
+                    type="button"
+                    class="secondary-button"
+                    disabled={phase !== "authorized" || busy || saved}
+                    onClick={() => submit("probe")}
+                >
+                    {busy && feedback?.kind === "probe"
+                        ? "测试连接并获取模型…"
+                        : feedback?.probe?.ok === false
+                        ? "重新测试连接"
+                        : "测试连接并获取模型"}
+                </button>
                 <button
                     type="button"
                     class="secondary-button"

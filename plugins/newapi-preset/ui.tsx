@@ -52,6 +52,9 @@ function NewApiSetup({ element, context }: {
 }) {
     const [baseUrl, setBaseUrl] = useState("");
     const [apiKey, setApiKey] = useState("");
+    const [modelMap, setModelMap] = useState<Readonly<Record<string, string>>>(
+        {},
+    );
     const [visible, setVisible] = useState(false);
     const [feedback, setFeedback] = useState<PresetUiFeedback | null>(null);
     const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
@@ -101,6 +104,7 @@ function NewApiSetup({ element, context }: {
                 id: context.draft.id,
                 baseUrl,
                 ...(apiKey.trim() ? { apiKey } : {}),
+                ...(Object.keys(modelMap).length ? { modelMap } : {}),
             });
         } catch {
             setErrors({
@@ -117,6 +121,9 @@ function NewApiSetup({ element, context }: {
                     id: context.draft.id,
                     baseUrl: normalized.baseUrl,
                     ...(normalized.apiKey ? { apiKey: normalized.apiKey } : {}),
+                    ...(normalized.modelMap
+                        ? { modelMap: normalized.modelMap }
+                        : {}),
                 },
             });
         } catch {
@@ -234,15 +241,96 @@ function NewApiSetup({ element, context }: {
                 {errors._form && (
                     <p class="form-error" role="alert">{errors._form}</p>
                 )}
-                {feedback?.status === "success" && (
-                    <p class="form-success" role="status">
-                        {saved
-                            ? "渠道已创建。"
-                            : "配置校验通过，可以保存渠道。"}
+                {feedback?.status === "success" && feedback.kind !== "probe" &&
+                    (
+                        <p class="form-success" role="status">
+                            {saved
+                                ? "渠道已创建。"
+                                : "配置校验通过，可以保存渠道。"}
+                        </p>
+                    )}
+                {feedback?.probe && (
+                    <div
+                        class="source-probe-result"
+                        data-state={feedback.probe.ok ? "success" : "error"}
+                    >
+                        <p
+                            class={feedback.probe.ok
+                                ? "form-success"
+                                : "form-error"}
+                            role={feedback.probe.ok ? "status" : "alert"}
+                        >
+                            {feedback.probe.message}
+                        </p>
+                        {feedback.probe.ok && feedback.probe.models?.length
+                            ? (
+                                <>
+                                    <p class="field-help">
+                                        发现 {feedback.probe.models.length}{" "}
+                                        个模型，点击加入模型映射。
+                                    </p>
+                                    <div
+                                        class="source-model-list"
+                                        aria-label="上游模型"
+                                    >
+                                        {feedback.probe.models.map((model) => (
+                                            <button
+                                                key={model}
+                                                type="button"
+                                                class="source-model-chip"
+                                                aria-pressed={Object.hasOwn(
+                                                        modelMap,
+                                                        model,
+                                                    )
+                                                    ? "true"
+                                                    : "false"}
+                                                disabled={busy || saved}
+                                                onClick={() =>
+                                                    setModelMap((current) => ({
+                                                        ...current,
+                                                        [model]: model,
+                                                    }))}
+                                            >
+                                                {model}
+                                            </button>
+                                        ))}
+                                    </div>
+                                </>
+                            )
+                            : feedback.probe.ok && (
+                                <p class="field-help">
+                                    插件未返回模型列表，仍可保存渠道。
+                                </p>
+                            )}
+                    </div>
+                )}
+                {Object.keys(modelMap).length > 0 && (
+                    <p class="field-help">
+                        已选择 {Object.keys(modelMap).length}{" "}
+                        个模型，将随渠道一起保存。<button
+                            type="button"
+                            class="text-button"
+                            disabled={busy || saved}
+                            onClick={() => setModelMap({})}
+                        >
+                            清空选择
+                        </button>
                     </p>
                 )}
             </div>
             <div class="config-actions source-flow-footer source-preset-actions">
+                <button
+                    type="button"
+                    class="secondary-button"
+                    disabled={busy || saved}
+                    onClick={() => submit("probe")}
+                >
+                    {busy && feedback.kind === "probe"
+                        ? "测试连接并获取模型…"
+                        : feedback?.probe?.ok === false
+                        ? "重新测试连接"
+                        : "测试连接并获取模型"}
+                </button>
                 <button
                     type="button"
                     class="secondary-button"

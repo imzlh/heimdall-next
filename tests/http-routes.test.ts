@@ -514,3 +514,89 @@ Deno.test("admin management maps validation failures to client errors", async ()
     assertEquals(response.status, 400);
     assertEquals((await response.json()).error.code, "invalid_config");
 });
+
+Deno.test("admin mutations narrate themselves into the system log", async () => {
+    const entries: Array<{ level: string; scope: string; message: string }> = [];
+    const systemLog = {
+        record(input: { level: string; scope: string; message: string }) {
+            entries.push({
+                level: input.level,
+                scope: input.scope,
+                message: input.message,
+            });
+            return {
+                seq: entries.length,
+                time: "2026-09-28T00:00:00.000Z",
+                level: input.level,
+                scope: input.scope,
+                message: input.message,
+            };
+        },
+    };
+    const app = createAdminRoutes({
+        systemLog: systemLog as never,
+        management: {
+            createSource: (_context, input) => ({ data: { source: input } }),
+            updateSource: (_context, sourceId, input) => ({
+                data: { source: { sourceId, ...input } },
+            }),
+            deleteSource: (_context, sourceId) => ({ data: { sourceId } }),
+            probeSource: (_context, sourceId) => ({
+                sourceId,
+                ok: false,
+                message: "probe timed out",
+                health: "cooldown" as const,
+            }),
+            setPluginEnabled: (_context, pluginId, enabled) => ({
+                pluginId,
+                enabled,
+            }),
+        },
+    });
+
+    const create = await app.request("http://localhost/sources", {
+        method: "POST",
+        body: JSON.stringify({
+            id: "019834c2-9abc-4def-8abc-000000000001",
+            name: "测试渠道",
+            priority: 10,
+            sourcePluginId: "openai-compatible",
+            config: { baseUrl: "https://provider.example/v1" },
+        }),
+    });
+    assertEquals(create.status, 201);
+
+    const update = await app.request(
+        "http://localhost/sources?id=019834c2-9abc-4def-8abc-000000000001",
+        { method: "PATCH", body: JSON.stringify({ enabled: false }) },
+    );
+    assertEquals(update.status, 200);
+
+    const toggle = await app.request("http://localhost/plugin-state", {
+        method: "POST",
+        body: JSON.stringify({ pluginId: "source.openai", enabled: true }),
+    });
+    assertEquals(toggle.status, 200);
+
+    const remove = await app.request(
+        "http://localhost/sources?id=019834c2-9abc-4def-8abc-000000000001",
+        { method: "DELETE" },
+    );
+    assertEquals(remove.status, 200);
+
+    const probe = await app.request("http://localhost/source-probe", {
+        method: "POST",
+        body: JSON.stringify({
+            sourceId: "019834c2-9abc-4def-8abc-000000000001",
+        }),
+    });
+    assertEquals(probe.status, 200);
+
+    assertEquals(entries.map((entry) => [entry.scope, entry.level, entry.message]), [
+        ["渠道", "info", "添加渠道「测试渠道」"],
+        ["渠道", "info", "更新渠道 019834c2…"],
+        ["插件", "info", "启用插件 source.openai"],
+        ["渠道", "info", "删除渠道 019834c2…"],
+        ["渠道", "warn", "探测渠道 019834c2…"],
+    ]);
+});

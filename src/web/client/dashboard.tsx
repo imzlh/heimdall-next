@@ -7,11 +7,13 @@ import { updateSource } from "./api/admin.ts";
 import type { Child } from "hono/jsx";
 import { PluginsPanel } from "./plugins.tsx";
 import { ModelDirectory, SourceCard } from "./catalog.tsx";
+import { Dropdown } from "./forms/dropdown.tsx";
 import {
     SourceManagementDialog,
     sourceManagementError,
 } from "./source-management.tsx";
 import {
+    shortSourceId,
     sourceAvailabilityText,
     sourceInstanceEnabled,
     sourceState,
@@ -109,7 +111,10 @@ function OverviewBody(
                     插件 {activePlugins}/{plugins.length}
                 </span>
             </div>
-            <StatsPanels stats={statistics} loading={statistics.loading} />
+            <StatsPanels
+                stats={{ ...statistics, onModeChange: statistics.setMode }}
+                loading={statistics.loading}
+            />
             {widgets}
             <section
                 class="catalog-section"
@@ -164,6 +169,10 @@ function OverviewBody(
 
 type ChannelSortKey = "name" | "priority" | "state";
 type ChannelSortDir = "asc" | "desc";
+export type ChannelViewMode = "list" | "cards";
+
+/** Fired on globalThis whenever ChannelViewToggle rewrites the stored mode. */
+export const CHANNEL_VIEW_EVENT = "heimdall:channels-view";
 
 interface ChannelViewPrefs {
     query: string;
@@ -171,6 +180,7 @@ interface ChannelViewPrefs {
     type: string;
     sortKey: ChannelSortKey;
     sortDir: ChannelSortDir;
+    viewMode: ChannelViewMode;
 }
 
 const CHANNEL_PREFS_KEY = "heimdall.console.channels";
@@ -199,6 +209,7 @@ function loadChannelPrefs(): ChannelViewPrefs {
         type: "全部",
         sortKey: "priority",
         sortDir: "asc",
+        viewMode: "list",
     };
     try {
         const raw = globalThis.localStorage?.getItem(CHANNEL_PREFS_KEY);
@@ -215,6 +226,7 @@ function loadChannelPrefs(): ChannelViewPrefs {
                 ? parsed.sortKey
                 : fallback.sortKey,
             sortDir: parsed.sortDir === "desc" ? "desc" : "asc",
+            viewMode: parsed.viewMode === "cards" ? "cards" : "list",
         };
     } catch {
         return fallback;
@@ -228,6 +240,48 @@ function saveChannelPrefs(prefs: ChannelViewPrefs) {
             JSON.stringify(prefs),
         );
     } catch { /* Preference persistence is optional. */ }
+}
+
+/** Segmented list/cards switch; state lives in the shared channel prefs. */
+export function ChannelViewToggle() {
+    const [mode, setMode] = useState<ChannelViewMode>(
+        () => loadChannelPrefs().viewMode,
+    );
+    const select = (next: ChannelViewMode) => {
+        setMode(next);
+        saveChannelPrefs({ ...loadChannelPrefs(), viewMode: next });
+        globalThis.dispatchEvent(new CustomEvent(CHANNEL_VIEW_EVENT));
+    };
+    return (
+        <div class="view-toggle" role="group" aria-label="渠道显示模式">
+            <button
+                type="button"
+                class={mode === "list" ? "is-active" : ""}
+                aria-pressed={mode === "list"}
+                aria-label="列表视图"
+                title="列表视图"
+                onClick={() => select("list")}
+            >
+                <Icon name="list" />
+            </button>
+            <button
+                type="button"
+                class={mode === "cards" ? "is-active" : ""}
+                aria-pressed={mode === "cards"}
+                aria-label="卡片视图"
+                title="卡片视图"
+                onClick={() => select("cards")}
+            >
+                <Icon name="layout-grid" />
+            </button>
+        </div>
+    );
+}
+
+/** "heimdall.source.openai-compatible" reads better as "openai-compatible". */
+function sourceTypeLabel(pluginId?: string): string {
+    if (!pluginId) return "—";
+    return pluginId.replace(/^heimdall\.source\./, "");
 }
 
 function haystack(source: ListedSource): string {
@@ -323,9 +377,17 @@ export function ChannelsPanel(
     const [actionError, setActionError] = useState("");
     const pending = useRef(false);
     const mounted = useRef(true);
-    const heading = useRef<HTMLHeadingElement | null>(null);
+    const heading = useRef<HTMLElement | null>(null);
     const focusListAfterClose = useRef(false);
     const [prefs, setPrefs] = useState<ChannelViewPrefs>(loadChannelPrefs);
+    useEffect(() => {
+        // The header toggle writes the stored mode; reload prefs when it fires.
+        const onModeChanged = () => setPrefs(loadChannelPrefs());
+        globalThis.addEventListener(CHANNEL_VIEW_EVENT, onModeChanged);
+        return () => {
+            globalThis.removeEventListener(CHANNEL_VIEW_EVENT, onModeChanged);
+        };
+    }, []);
     useEffect(() => {
         mounted.current = true;
         return () => {
@@ -420,17 +482,12 @@ export function ChannelsPanel(
     const sort = { key: prefs.sortKey, dir: prefs.sortDir };
     return (
         <>
-            <section class="catalog-section" aria-labelledby="sources-title">
-                <div class="panel-heading">
-                    <div>
-                        <h2 id="sources-title" ref={heading} tabIndex={-1}>
-                            上游渠道
-                        </h2>
-                    </div>
-                    <span class="panel-count">
-                        显示 {visible.length} / {sources.length} 个渠道
-                    </span>
-                </div>
+            <section
+                class="catalog-section"
+                aria-label="上游渠道"
+                ref={heading}
+                tabIndex={-1}
+            >
                 <ErrorMessage
                     message={dashboard.errors.source || dashboard.errors.status}
                 />
@@ -465,226 +522,270 @@ export function ChannelsPanel(
                                 })}
                         />
                     </div>
-                    <select
-                        aria-label="按状态筛选"
+                    <Dropdown
+                        class="channels-filter"
+                        ariaLabel="按状态筛选"
                         value={prefs.status}
-                        onChange={(event) =>
-                            updatePrefs({
-                                status:
-                                    (event.currentTarget as HTMLSelectElement)
-                                        .value,
-                            })}
-                    >
-                        {CHANNEL_STATUS_OPTIONS.map((option) => (
-                            <option key={option} value={option}>
-                                {option === "全部" ? "全部状态" : option}
-                            </option>
-                        ))}
-                    </select>
-                    <select
-                        aria-label="按类型筛选"
+                        options={CHANNEL_STATUS_OPTIONS.map((option) => ({
+                            value: option,
+                            label: option === "全部" ? "全部状态" : option,
+                        }))}
+                        onChange={(status) => updatePrefs({ status })}
+                    />
+                    <Dropdown
+                        class="channels-filter"
+                        ariaLabel="按类型筛选"
                         value={prefs.type}
-                        onChange={(event) =>
-                            updatePrefs({
-                                type: (event.currentTarget as HTMLSelectElement)
-                                    .value,
-                            })}
-                    >
-                        <option value="全部">全部类型</option>
-                        {types.map((type) => (
-                            <option key={type} value={type}>{type}</option>
-                        ))}
-                    </select>
+                        options={[
+                            { value: "全部", label: "全部类型" },
+                            ...types.map((type) => ({
+                                value: type,
+                                label: type,
+                            })),
+                        ]}
+                        onChange={(type) => updatePrefs({ type })}
+                    />
                 </div>
+                {Boolean(sources.length) && (
+                    <div class="channels-meta">
+                        <span>
+                            显示 {visible.length} / {sources.length} 个渠道
+                        </span>
+                    </div>
+                )}
                 {sources.length
                     ? (
                         <>
-                            <div class="table-wrap channels-table-wrap desktop-only">
-                                <table class="request-table channels-table">
-                                    <caption class="sr-only">上游渠道</caption>
-                                    <thead>
-                                        <tr>
-                                            <SortHeader
-                                                label="名称"
-                                                sortKey="name"
-                                                sort={sort}
-                                                onSort={setSort}
-                                            />
-                                            <th scope="col">类型</th>
-                                            <SortHeader
-                                                label="优先级"
-                                                sortKey="priority"
-                                                sort={sort}
-                                                onSort={setSort}
-                                            />
-                                            <SortHeader
-                                                label="状态"
-                                                sortKey="state"
-                                                sort={sort}
-                                                onSort={setSort}
-                                            />
-                                            <th
-                                                scope="col"
-                                                class="channel-actions-col"
-                                            >
-                                                操作
-                                            </th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        {visible.map((source, index) => {
-                                            const state = sourceState(source);
-                                            const id = source.id || "";
-                                            return (
-                                                <tr
-                                                    key={id || index}
-                                                    class={`channels-row row-tone-${state.tone}`}
+                            {prefs.viewMode === "list" && (
+                                <div class="table-wrap channels-table-wrap desktop-only">
+                                    <table class="request-table channels-table">
+                                        <caption class="sr-only">
+                                            上游渠道
+                                        </caption>
+                                        <thead>
+                                            <tr>
+                                                <SortHeader
+                                                    label="名称"
+                                                    sortKey="name"
+                                                    sort={sort}
+                                                    onSort={setSort}
+                                                />
+                                                <th scope="col">类型</th>
+                                                <SortHeader
+                                                    label="状态"
+                                                    sortKey="state"
+                                                    sort={sort}
+                                                    onSort={setSort}
+                                                />
+                                                <th
+                                                    scope="col"
+                                                    class="channel-plugin-col"
                                                 >
-                                                    <td class="channels-name">
-                                                        <strong
-                                                            title={source
-                                                                .name ||
-                                                                id}
-                                                        >
-                                                            {source.name ||
-                                                                id ||
-                                                                "未命名渠道"}
-                                                        </strong>
-                                                        <code title={id}>
-                                                            {id}
-                                                        </code>
-                                                    </td>
-                                                    <td>
-                                                        <span class="plugin-chip">
-                                                            {source
-                                                                .sourcePluginId ||
-                                                                "—"}
-                                                        </span>
-                                                    </td>
-                                                    <td class="channels-priority">
-                                                        {source.priority !==
-                                                                undefined
-                                                            ? `P${source.priority}`
-                                                            : "—"}
-                                                    </td>
-                                                    <td class="channels-state">
-                                                        <span
-                                                            class={`status-chip chip-${state.tone}`}
-                                                        >
-                                                            {state.label}
-                                                        </span>
-                                                        <small
-                                                            title={sourceAvailabilityText(
-                                                                source,
+                                                    插件信息
+                                                </th>
+                                                <th
+                                                    scope="col"
+                                                    class="channel-actions-col"
+                                                >
+                                                    操作
+                                                </th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {visible.map((source, index) => {
+                                                const state = sourceState(
+                                                    source,
+                                                );
+                                                const id = source.id || "";
+                                                return [
+                                                    <tr
+                                                        key={id || index}
+                                                        class={`channels-row row-tone-${state.tone}`}
+                                                    >
+                                                        <td class="channels-name">
+                                                            <div class="channels-name-row">
+                                                                <strong
+                                                                    title={source
+                                                                        .name ||
+                                                                        id}
+                                                                >
+                                                                    {source
+                                                                        .name ||
+                                                                        id ||
+                                                                        "未命名渠道"}
+                                                                </strong>
+                                                                {source
+                                                                            .priority !==
+                                                                        undefined &&
+                                                                    (
+                                                                        <span
+                                                                            class="channel-priority-tag"
+                                                                            title={`优先级 ${source.priority}`}
+                                                                        >
+                                                                            P{source
+                                                                                .priority}
+                                                                        </span>
+                                                                    )}
+                                                            </div>
+                                                            {id && (
+                                                                <code
+                                                                    title={id}
+                                                                >
+                                                                    {shortSourceId(
+                                                                        id,
+                                                                    )}
+                                                                </code>
                                                             )}
-                                                        >
-                                                            {sourceAvailabilityText(
-                                                                source,
+                                                        </td>
+                                                        <td>
+                                                            <span
+                                                                class="plugin-chip"
+                                                                title={source
+                                                                    .sourcePluginId}
+                                                            >
+                                                                {sourceTypeLabel(
+                                                                    source
+                                                                        .sourcePluginId,
+                                                                )}
+                                                            </span>
+                                                        </td>
+                                                        <td class="channels-state">
+                                                            <span
+                                                                class={`status-chip chip-${state.tone}`}
+                                                            >
+                                                                {state.label}
+                                                            </span>
+                                                            {source.probe && (
+                                                                <small
+                                                                    title={sourceAvailabilityText(
+                                                                        source,
+                                                                    )}
+                                                                >
+                                                                    {sourceAvailabilityText(
+                                                                        source,
+                                                                    )}
+                                                                </small>
                                                             )}
-                                                        </small>
-                                                    </td>
-                                                    <td class="channel-actions-col">
-                                                        <div
-                                                            class="channel-row-actions"
-                                                            role="group"
-                                                            aria-label={`操作 ${
-                                                                source.name ||
-                                                                id ||
-                                                                "渠道"
-                                                            }`}
-                                                        >
-                                                            <button
-                                                                type="button"
-                                                                class="icon-button"
-                                                                disabled={Boolean(
-                                                                    pendingId,
-                                                                ) || !id}
-                                                                aria-label={`${
-                                                                    sourceInstanceEnabled(
+                                                        </td>
+                                                        <td class="channel-plugin-col">
+                                                            {sourceStatus
+                                                                ? sourceStatus(
+                                                                    source,
+                                                                )
+                                                                : (
+                                                                    <span class="channel-plugin-empty">
+                                                                        —
+                                                                    </span>
+                                                                )}
+                                                        </td>
+                                                        <td class="channel-actions-col">
+                                                            <div
+                                                                class="channel-row-actions"
+                                                                role="group"
+                                                                aria-label={`操作 ${
+                                                                    source
+                                                                        .name ||
+                                                                    id ||
+                                                                    "渠道"
+                                                                }`}
+                                                            >
+                                                                <button
+                                                                    type="button"
+                                                                    class="icon-button"
+                                                                    disabled={Boolean(
+                                                                        pendingId,
+                                                                    ) || !id}
+                                                                    aria-label={`${
+                                                                        sourceInstanceEnabled(
+                                                                                source,
+                                                                            )
+                                                                            ? "停用"
+                                                                            : "启用"
+                                                                    } ${
+                                                                        source
+                                                                            .name ||
+                                                                        id
+                                                                    }`}
+                                                                    title={sourceInstanceEnabled(
                                                                             source,
                                                                         )
                                                                         ? "停用"
-                                                                        : "启用"
-                                                                } ${
-                                                                    source
-                                                                        .name ||
-                                                                    id
-                                                                }`}
-                                                                title={sourceInstanceEnabled(
-                                                                        source,
-                                                                    )
-                                                                    ? "停用"
-                                                                    : "启用"}
-                                                                onClick={() =>
-                                                                    void toggle(
-                                                                        source,
-                                                                    )}
-                                                            >
-                                                                <Icon name="power" />
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                class="icon-button"
-                                                                disabled={Boolean(
-                                                                    pendingId,
-                                                                ) || !id}
-                                                                aria-label={`管理 ${
-                                                                    source
-                                                                        .name ||
-                                                                    id
-                                                                }`}
-                                                                title="管理（重命名、优先级、代理、删除）"
-                                                                onClick={() =>
-                                                                    setSelected(
-                                                                        source,
-                                                                    )}
-                                                            >
-                                                                <Icon name="edit" />
-                                                            </button>
-                                                            <button
-                                                                type="button"
-                                                                class="icon-button"
-                                                                disabled={Boolean(
-                                                                    pendingId,
-                                                                ) || !id ||
-                                                                    !canConfigure(
-                                                                        id,
-                                                                    )}
-                                                                aria-label={`配置 ${id}`}
-                                                                title={canConfigure(
-                                                                        id,
-                                                                    )
-                                                                    ? "配置上游连接参数"
-                                                                    : "此渠道尚未声明配置表单"}
-                                                                onClick={() =>
-                                                                    id &&
-                                                                    canConfigure(
-                                                                        id,
-                                                                    ) &&
-                                                                    onConfigure(
-                                                                        id,
-                                                                    )}
-                                                            >
-                                                                <Icon name="settings" />
-                                                            </button>
-                                                        </div>
+                                                                        : "启用"}
+                                                                    onClick={() =>
+                                                                        void toggle(
+                                                                            source,
+                                                                        )}
+                                                                >
+                                                                    <Icon name="power" />
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    class="icon-button"
+                                                                    disabled={Boolean(
+                                                                        pendingId,
+                                                                    ) || !id}
+                                                                    aria-label={`管理 ${
+                                                                        source
+                                                                            .name ||
+                                                                        id
+                                                                    }`}
+                                                                    title="管理（重命名、优先级、代理、删除）"
+                                                                    onClick={() =>
+                                                                        setSelected(
+                                                                            source,
+                                                                        )}
+                                                                >
+                                                                    <Icon name="edit" />
+                                                                </button>
+                                                                <button
+                                                                    type="button"
+                                                                    class="icon-button"
+                                                                    disabled={Boolean(
+                                                                        pendingId,
+                                                                    ) || !id ||
+                                                                        !canConfigure(
+                                                                            id,
+                                                                        )}
+                                                                    aria-label={`配置 ${id}`}
+                                                                    title={canConfigure(
+                                                                            id,
+                                                                        )
+                                                                        ? "配置上游连接参数"
+                                                                        : "此渠道尚未声明配置表单"}
+                                                                    onClick={() =>
+                                                                        id &&
+                                                                        canConfigure(
+                                                                            id,
+                                                                        ) &&
+                                                                        onConfigure(
+                                                                            id,
+                                                                        )}
+                                                                >
+                                                                    <Icon name="settings" />
+                                                                </button>
+                                                            </div>
+                                                        </td>
+                                                    </tr>,
+                                                ];
+                                            })}
+                                            {!visible.length && (
+                                                <tr>
+                                                    <td colSpan={5}>
+                                                        <p class="empty-state">
+                                                            没有符合筛选条件的渠道。
+                                                        </p>
                                                     </td>
                                                 </tr>
-                                            );
-                                        })}
-                                        {!visible.length && (
-                                            <tr>
-                                                <td colSpan={5}>
-                                                    <p class="empty-state">
-                                                        没有符合筛选条件的渠道。
-                                                    </p>
-                                                </td>
-                                            </tr>
-                                        )}
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div class="source-cards mobile-only">
+                                            )}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            )}
+                            <div
+                                class={prefs.viewMode === "cards"
+                                    ? "source-cards channels-cards"
+                                    : "source-cards mobile-only"}
+                            >
                                 {visible.map((source, index) => (
                                     <SourceCard
                                         key={source.id ?? index}
@@ -695,6 +796,7 @@ export function ChannelsPanel(
                                         onToggle={(item) => void toggle(item)}
                                         pending={Boolean(pendingId)}
                                         status={sourceStatus?.(source)}
+                                        statusInline
                                         configurable={Boolean(
                                             source.id &&
                                                 canConfigure(source.id),

@@ -33,7 +33,7 @@ function SchemaBlock({ block, index }: { block: UiBlock; index: number }) {
                 <div class={`slot-metric tone-${block.tone ?? "neutral"}`}>
                     <dt>{block.label}</dt>
                     <dd>
-                        {block.value}
+                        <strong>{block.value}</strong>
                         {block.unit && <small>{block.unit}</small>}
                     </dd>
                 </div>

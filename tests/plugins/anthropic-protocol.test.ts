@@ -222,7 +222,7 @@ Deno.test("Anthropic Messages request maps content blocks and controls into HIP"
     const image = parsed.payload.messages[0]!.parts[1]!;
     assertEquals(image.type, "image");
     if (image.type === "image") {
-        assertEquals(image.source.dataBase64, "aGVsbG8=");
+        assertEquals(image.source.data, new TextEncoder().encode("hello"));
         assertEquals(image.source.mediaType, "image/png");
     }
     const toolResult = parsed.payload.messages[0]!.parts[2]!;

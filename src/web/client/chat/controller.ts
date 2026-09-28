@@ -6,7 +6,15 @@ import type {
     ChatStream,
 } from "../api/chat.ts";
 import { createChatApi } from "./api.ts";
-import { readChatAttachments, validateChatAttachments } from "./attachments.ts";
+import {
+    type ChatDraft as Draft,
+    readStoredDraft,
+    writeStoredDraft,
+} from "./drafts.ts";
+import {
+    uploadChatAttachments,
+    validateChatAttachments,
+} from "./attachments.ts";
 import type {
     ChatController,
     ChatControllerOptions,
@@ -18,10 +26,6 @@ export type {
     ChatState,
 } from "./types.ts";
 
-interface Draft {
-    readonly text: string;
-    readonly attachments: readonly ChatAttachment[];
-}
 interface Run {
     id: string;
     readonly abort: AbortController;
@@ -32,35 +36,7 @@ const emptyDraft = (): Draft => ({ text: "", attachments: [] });
 const describe = (error: unknown) =>
     error instanceof Error ? error.message : String(error);
 
-// Unsent drafts survive reloads, like the original chat: text goes to
-// localStorage per conversation; images stay in memory only (they can exceed
-// the storage quota as base64).
-const DRAFT_KEY_PREFIX = "heimdall.chat.draft.";
 const MODEL_STORE_KEY = "heimdall.chat.models";
-
-function readStoredText(id: string): string {
-    try {
-        const raw = globalThis.localStorage?.getItem(DRAFT_KEY_PREFIX + id);
-        if (!raw) return "";
-        const parsed = JSON.parse(raw) as { text?: unknown };
-        return typeof parsed?.text === "string"
-            ? parsed.text.slice(0, 100_000)
-            : "";
-    } catch {
-        return "";
-    }
-}
-
-function writeStoredText(id: string, text: string): void {
-    try {
-        if (text) {
-            globalThis.localStorage?.setItem(
-                DRAFT_KEY_PREFIX + id,
-                JSON.stringify({ text }),
-            );
-        } else globalThis.localStorage?.removeItem(DRAFT_KEY_PREFIX + id);
-    } catch { /* Storage may be unavailable; drafts stay in memory. */ }
-}
 
 function readStoredModels(): Record<string, string> {
     try {
@@ -95,6 +71,7 @@ export function createChatController(
         messages: initial.messages,
         models: initial.models,
         model: initial.selectedModel ?? initial.models[0] ?? "",
+        tools: initial.tools ?? [],
         draft: "",
         attachments: [],
         loading: false,
@@ -105,17 +82,27 @@ export function createChatController(
         attachmentsBusy: false,
         streamText: "",
         toolCalls: [],
+        streamReasoning: "",
+        streamActivity: [],
+        streamCitations: [],
+        streamQuota: null,
+        suggestions: [],
+        pendingEffort: "medium",
         error: initial.error ?? "",
         authenticated: initial.authenticated,
         available: initial.available,
     };
     const listeners = new Set<(state: ChatState) => void>();
     const drafts = new Map<string, Draft>();
+    // Storage is shared by browser tabs; reading a lease never grants ownership.
+    const ownedLeases = new Set<string>();
+    let restoringDraft: { id: string; ticket: number } | undefined;
     let disposed = false;
     let navigation = 0;
     let attachmentRevision = 0;
     let readAbort: AbortController | undefined;
     let mutationAbort: AbortController | undefined;
+    let uploadAbort: AbortController | undefined;
     let activeRun: Run | undefined;
     const patch = (update: Partial<ChatState>) => {
         if (disposed) return;
@@ -129,14 +116,13 @@ export function createChatController(
     const draftFor = (id = state.selectedId): Draft => {
         const existing = drafts.get(id);
         if (existing) return existing;
-        const text = readStoredText(id);
-        const draft: Draft = { text, attachments: [] };
-        if (text) drafts.set(id, draft);
+        const draft = readStoredDraft(id);
+        drafts.set(id, draft);
         return draft;
     };
     const editDraft = (value: Draft) => {
         drafts.set(state.selectedId, value);
-        writeStoredText(state.selectedId, value.text);
+        writeStoredDraft(state.selectedId, value);
         patch({ draft: value.text, attachments: value.attachments });
     };
     const rememberModel = (id: string, model: string) => {
@@ -162,6 +148,97 @@ export function createChatController(
             ),
         ].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     const currentRun = (run: Run) => !disposed && activeRun === run;
+    const leaseKey = (attachment: ChatAttachment) =>
+        `${attachment.assetId}:${attachment.leaseId}`;
+    const ownsLease = (attachment: ChatAttachment) =>
+        !!attachment.assetId && !!attachment.leaseId &&
+        ownedLeases.has(leaseKey(attachment));
+    function retainDraftImages(attachments: readonly ChatAttachment[]): void {
+        for (const attachment of attachments) {
+            if (attachment.assetId && attachment.leaseId) {
+                ownedLeases.add(leaseKey(attachment));
+            }
+        }
+    }
+    function forgetDraftImages(attachments: readonly ChatAttachment[]): void {
+        for (const attachment of attachments) {
+            ownedLeases.delete(leaseKey(attachment));
+        }
+    }
+    function releaseDraftImages(attachments: readonly ChatAttachment[]): void {
+        for (const attachment of attachments) {
+            if (attachment.assetId && attachment.leaseId) {
+                void api.releaseAttachment(
+                    attachment.assetId,
+                    attachment.leaseId,
+                ).catch(() => {
+                    // Persisted leases expire even if an offline client cannot release them.
+                });
+            }
+        }
+    }
+    function releaseOwnedDraftImages(attachments: readonly ChatAttachment[]) {
+        const owned = attachments.filter(ownsLease);
+        forgetDraftImages(owned);
+        releaseDraftImages(owned);
+    }
+    const needsRestoration = (id: string) =>
+        draftFor(id).attachments.some((attachment) =>
+            attachment.assetId && !ownsLease(attachment)
+        );
+    async function renewRestoredDraft(id: string): Promise<boolean> {
+        if (!allowed() || state.selectedId !== id) return false;
+        if (!needsRestoration(id)) return true;
+        const ticket = ++attachmentRevision;
+        restoringDraft = { id, ticket };
+        const abort = uploadAbort = new AbortController();
+        const saved = draftFor(id);
+        const acquired: ChatAttachment[] = [];
+        patch({ attachmentsBusy: true, error: "" });
+        const results = await Promise.allSettled(
+            saved.attachments.map(async (attachment) => {
+                if (!attachment.assetId || ownsLease(attachment)) {
+                    return attachment;
+                }
+                const renewed = await api.acquireAttachment(
+                    attachment.assetId,
+                    abort.signal,
+                );
+                acquired.push(renewed);
+                return renewed;
+            }),
+        );
+        const attachments = results.flatMap((result) =>
+            result.status === "fulfilled" ? [result.value] : []
+        );
+        const failed = results.find((result) => result.status === "rejected");
+        if (restoringDraft?.ticket === ticket) restoringDraft = undefined;
+        if (
+            disposed || ticket !== attachmentRevision ||
+            state.selectedId !== id || failed
+        ) {
+            releaseDraftImages(acquired);
+            if (!disposed && ticket === attachmentRevision) {
+                patch({
+                    attachmentsBusy: false,
+                    ...(failed?.status === "rejected"
+                        ? {
+                            error: `图片草稿恢复失败，请重试发送或移除图片：${
+                                describe(failed.reason)
+                            }`,
+                        }
+                        : {}),
+                });
+            }
+            return false;
+        }
+        // A stored lease may still belong to another tab. Let it expire;
+        // this controller owns and releases only its freshly acquired leases.
+        retainDraftImages(acquired);
+        editDraft({ ...draftFor(id), attachments });
+        patch({ attachmentsBusy: false });
+        return true;
+    }
     function cancelRun() {
         const run = activeRun;
         activeRun = undefined;
@@ -171,6 +248,8 @@ export function createChatController(
     function beginNavigation() {
         navigation++;
         attachmentRevision++;
+        uploadAbort?.abort();
+        restoringDraft = undefined;
         readAbort?.abort();
         cancelRun();
         patch({
@@ -188,7 +267,8 @@ export function createChatController(
         if (transfer) {
             drafts.set(conversation.id, draftFor(""));
             drafts.delete("");
-            writeStoredText("", "");
+            writeStoredDraft(conversation.id, draftFor(conversation.id));
+            writeStoredDraft("", emptyDraft());
         }
         const draft = draftFor(conversation.id);
         patch({
@@ -201,6 +281,11 @@ export function createChatController(
             model: modelFor(conversation.id),
             streamText: "",
             toolCalls: [],
+            streamReasoning: "",
+            streamActivity: [],
+            streamCitations: [],
+            streamQuota: null,
+            suggestions: [],
         });
         onSelect?.(conversation.id);
     }
@@ -208,7 +293,13 @@ export function createChatController(
         id: string,
         signal: AbortSignal,
         valid: () => boolean,
-        interrupted?: { readonly previousIds: ReadonlySet<string> },
+        interrupted?: {
+            readonly previousIds: ReadonlySet<string>;
+            readonly continuation?: {
+                readonly id: string;
+                readonly text: string;
+            };
+        },
     ): Promise<void> {
         const [list, history] = await Promise.allSettled([
             api.list(signal),
@@ -227,14 +318,25 @@ export function createChatController(
                 // A successful history read does not prove the failed stream
                 // was saved. Retain visible output after storage/transport
                 // failure until the response actually contains that output.
-                const unsavedText = interrupted && state.streamText &&
+                const originalStillSaved = interrupted?.continuation &&
+                    state.streamText === interrupted.continuation.text &&
+                    history.value.messages.some((message) =>
+                        message.id === interrupted.continuation!.id &&
+                        message.text === state.streamText
+                    );
+                const unsavedText =
+                    interrupted && state.streamText && !originalStillSaved &&
                         !savedText.endsWith(state.streamText)
-                    ? state.streamText
-                    : "";
+                        ? state.streamText
+                        : "";
                 patch({
                     ...history.value,
                     streamText: unsavedText,
                     toolCalls: [],
+                    streamReasoning: "",
+                    streamActivity: [],
+                    streamCitations: [],
+                    streamQuota: null,
                 });
             }
         } else errors.push(`消息读取失败：${describe(history.reason)}`);
@@ -256,11 +358,18 @@ export function createChatController(
                 selectedId: id,
                 streamText: "",
                 toolCalls: [],
+                streamReasoning: "",
+                streamActivity: [],
+                streamCitations: [],
+                streamQuota: null,
+                suggestions: [],
                 draft: draft.text,
                 attachments: draft.attachments,
                 model: modelFor(id),
+                loading: false,
             });
             onSelect?.(id);
+            await renewRestoredDraft(id);
         } catch (error) {
             if (!disposed && navigation === ticket) {
                 patch({ error: `消息读取失败：${describe(error)}` });
@@ -270,15 +379,18 @@ export function createChatController(
         }
     }
     async function create() {
-        if (!idle()) return;
+        if (!idle() || state.attachmentsBusy) return;
         const transfer = !state.selectedId;
         const ticket = beginNavigation();
         const abort = readAbort = new AbortController();
         patch({ creating: true, error: "" });
         try {
-            const conversation = await api.create(abort.signal);
+            const created = await applyPendingEffort(
+                await api.create(abort.signal),
+            );
             if (disposed || navigation !== ticket) return;
-            showConversation(conversation, transfer);
+            showConversation(created, transfer);
+            await renewRestoredDraft(created.id);
         } catch (error) {
             if (!disposed && navigation === ticket) {
                 patch({ error: describe(error) });
@@ -288,7 +400,7 @@ export function createChatController(
         }
     }
     async function refresh() {
-        if (!idle()) return;
+        if (!idle() || state.attachmentsBusy) return;
         const ticket = ++navigation;
         readAbort?.abort();
         const abort = readAbort = new AbortController();
@@ -298,15 +410,21 @@ export function createChatController(
             abort.signal,
             () => !disposed && navigation === ticket,
         );
+        if (!disposed && navigation === ticket) {
+            await renewRestoredDraft(state.selectedId);
+        }
         if (!disposed && navigation === ticket) patch({ loading: false });
     }
-    function canManage(id: string): boolean {
+    function canManage(id: string, allowRestoration = false): boolean {
         if (!allowed()) return false;
         if (state.sending) {
             patch({ error: "请先停止生成，再管理会话" });
             return false;
         }
-        if (!idle() || state.attachmentsBusy) return false;
+        if (
+            !idle() || (state.attachmentsBusy &&
+                !(allowRestoration && restoringDraft?.id === id))
+        ) return false;
         if (
             !state.conversations.some((conversation) => conversation.id === id)
         ) {
@@ -340,11 +458,43 @@ export function createChatController(
             patch({ managing: false });
         }
     }
+    /**
+     * The effort menu works before the first message too: with no conversation
+     * to persist onto, the choice is held and applied when the chat is created.
+     */
+    function chooseEffort(effort: "low" | "medium" | "high"): void {
+        if (!allowed()) return;
+        if (state.selectedId && state.conversation) {
+            void updateSettings(state.selectedId, { reasoningEffort: effort });
+            return;
+        }
+        patch({ pendingEffort: effort });
+    }
+
+    /** Fold a held effort choice into a freshly created conversation. */
+    async function applyPendingEffort(
+        conversation: ChatConversation,
+    ): Promise<ChatConversation> {
+        const effort = state.pendingEffort;
+        if (effort === "medium") return conversation;
+        patch({ pendingEffort: "medium" });
+        try {
+            return await api.updateSettings(
+                conversation.id,
+                { reasoningEffort: effort },
+            );
+        } catch {
+            // The send must not fail over a cosmetic setting.
+            return conversation;
+        }
+    }
+
     async function updateSettings(
         id: string,
         patchSettings: {
             readonly systemPrompt?: string;
             readonly reasoningEffort?: "low" | "medium" | "high" | null;
+            readonly disabledTools?: readonly string[];
         },
     ): Promise<boolean> {
         if (!allowed() || !id) return false;
@@ -369,7 +519,7 @@ export function createChatController(
         }
     }
     async function remove(id: string): Promise<boolean> {
-        if (!canManage(id)) return false;
+        if (!canManage(id, true)) return false;
         const abort = mutationAbort = new AbortController();
         patch({ managing: true, error: "" });
         try {
@@ -381,8 +531,9 @@ export function createChatController(
             const conversations = state.conversations.filter((item) =>
                 item.id !== id
             );
+            releaseOwnedDraftImages(draftFor(id).attachments);
             drafts.delete(id);
-            writeStoredText(id, "");
+            writeStoredDraft(id, emptyDraft());
             patch({ conversations });
             if (state.selectedId === id) {
                 beginNavigation();
@@ -393,6 +544,10 @@ export function createChatController(
                     messages: [],
                     streamText: "",
                     toolCalls: [],
+                    streamReasoning: "",
+                    streamActivity: [],
+                    streamCitations: [],
+                    streamQuota: null,
                     draft: draft.text,
                     attachments: draft.attachments,
                 });
@@ -400,6 +555,7 @@ export function createChatController(
                 const next =
                     conversations[Math.min(index, conversations.length - 1)];
                 if (next) await select(next.id, true);
+                else await renewRestoredDraft("");
             }
             return true;
         } catch (error) {
@@ -410,40 +566,191 @@ export function createChatController(
             patch({ managing: false });
         }
     }
-    async function generate(type: "send" | "regenerate") {
-        if (!idle() || state.attachmentsBusy) return;
-        if (!state.model || !state.models.includes(state.model)) {
+    async function removeMessage(
+        conversationId: string,
+        messageId: string,
+    ): Promise<boolean> {
+        if (!canManage(conversationId)) return false;
+        const abort = mutationAbort = new AbortController();
+        patch({ managing: true, error: "" });
+        try {
+            const removed = await api.deleteMessage(
+                conversationId,
+                messageId,
+                abort.signal,
+            );
+            if (disposed) return false;
+            if (state.selectedId === conversationId) {
+                const gone = new Set(removed);
+                patch({
+                    messages: state.messages.filter((message) =>
+                        !gone.has(message.id)
+                    ),
+                });
+                await reload(
+                    conversationId,
+                    abort.signal,
+                    () => !disposed && state.selectedId === conversationId,
+                );
+            }
+            return true;
+        } catch (error) {
+            if (!disposed) patch({ error: `删除失败：${describe(error)}` });
+            return false;
+        } finally {
+            mutationAbort = undefined;
+            patch({ managing: false });
+        }
+    }
+
+    async function changeBranch(
+        action: "switchBranch" | "fork",
+        messageId: string,
+    ): Promise<boolean> {
+        const id = state.selectedId;
+        if (!canManage(id)) return false;
+        const abort = mutationAbort = new AbortController();
+        patch({ managing: true, error: "" });
+        try {
+            const result = await api[action](id, messageId, abort.signal);
+            if (disposed) return false;
+            if (action === "fork") {
+                rememberModel(result.conversation.id, state.model);
+                beginNavigation();
+                showConversation(result.conversation);
+            }
+            patch({
+                ...result,
+                conversations: upsert(result.conversation),
+                streamText: "",
+                toolCalls: [],
+                streamReasoning: "",
+                streamActivity: [],
+                streamCitations: [],
+                streamQuota: null,
+            });
+            return true;
+        } catch (error) {
+            patch({
+                error: `${action === "fork" ? "创建分叉" : "切换分支"}失败：${
+                    describe(error)
+                }`,
+            });
+            return false;
+        } finally {
+            mutationAbort = undefined;
+            patch({ managing: false });
+        }
+    }
+
+    async function generate(
+        type: "send" | "regenerate" | "continue" | "edit",
+        messageId?: string,
+        editedText?: string,
+        onAccepted?: () => void,
+    ): Promise<boolean> {
+        if (!idle() || state.attachmentsBusy) return false;
+        if (type === "send" && needsRestoration(state.selectedId)) {
+            const id = state.selectedId;
+            const ticket = navigation;
+            if (
+                !await renewRestoredDraft(id) || !idle() ||
+                navigation !== ticket || state.selectedId !== id
+            ) {
+                return false;
+            }
+        }
+        const targetIndex = messageId
+            ? state.messages.findIndex((message) => message.id === messageId)
+            : -1;
+        const target = state.messages[targetIndex];
+        const continuation = type === "continue"
+            ? target ??
+                state.messages.findLast((message) =>
+                    message.role === "assistant" && !message.callId
+                )
+            : undefined;
+        if (
+            messageId &&
+            (!target || target.callId ||
+                (target.role !== "user" && target.role !== "assistant"))
+        ) {
+            patch({ error: "找不到可操作的消息，请刷新会话" });
+            return false;
+        }
+        if (
+            (type === "continue" || type === "regenerate") && target &&
+            target.role !== "assistant"
+        ) {
+            patch({ error: "请选择一条助手回复" });
+            return false;
+        }
+        if (
+            (type !== "edit" || target?.role !== "assistant") &&
+            (!state.model || !state.models.includes(state.model))
+        ) {
             patch({ error: "请选择可用模型" });
-            return;
+            return false;
         }
         const draft = draftFor();
         if (type === "send") {
             if (!draft.text.trim()) {
                 patch({ error: "请输入消息内容" });
-                return;
+                return false;
             }
             if (draft.text.trim().length > 100_000) {
                 patch({ error: "消息不能超过 100,000 个字符" });
-                return;
+                return false;
             }
             try {
                 validateChatAttachments(draft.attachments);
             } catch (error) {
                 patch({ error: describe(error) });
-                return;
+                return false;
             }
         } else if (
             !state.conversation ||
             !state.messages.some((message) => message.role === "user")
         ) {
             patch({ error: "当前会话还没有可重新生成的消息" });
-            return;
+            return false;
+        }
+        if (
+            type === "edit" &&
+            (!target || !editedText?.trim() ||
+                editedText.trim().length > 100_000)
+        ) {
+            patch({ error: "消息内容需为 1–100,000 个字符" });
+            return false;
         }
         const model = state.model;
         const previousIds = new Set(
             state.messages.map((message) => message.id),
         );
         let interrupted = false;
+        let accepted = false;
+        const accept = () => {
+            if (accepted) return;
+            accepted = true;
+            if (type === "send") forgetDraftImages(draft.attachments);
+            if (
+                type === "edit" || type === "regenerate" || type === "continue"
+            ) {
+                const lastUser = state.messages.findLastIndex((message) =>
+                    message.role === "user"
+                );
+                const end = targetIndex >= 0
+                    ? targetIndex
+                    : type === "continue"
+                    ? state.messages.length - 1
+                    : lastUser + 1;
+                patch({ messages: state.messages.slice(0, end) });
+                if (type === "edit" && target?.role === "assistant") {
+                    patch({ streamText: editedText!.trim() });
+                }
+            }
+            onAccepted?.();
+        };
         const run: Run = {
             id: state.selectedId,
             abort: new AbortController(),
@@ -456,23 +763,24 @@ export function createChatController(
             error: "",
             streamText: "",
             toolCalls: [],
+            streamReasoning: "",
+            streamActivity: [],
+            streamCitations: [],
+            streamQuota: null,
+            suggestions: [],
         });
         try {
             if (!run.id) {
                 patch({ creating: true });
-                const conversation = await api.create(run.abort.signal);
-                if (!currentRun(run)) return;
-                run.id = conversation.id;
-                showConversation(conversation, true);
+                const created = await applyPendingEffort(
+                    await api.create(run.abort.signal),
+                );
+                if (!currentRun(run)) return false;
+                run.id = created.id;
+                showConversation(created, true);
                 patch({ creating: false });
             }
-            if (run.stopped) return;
-            if (type === "regenerate") {
-                const lastUser = state.messages.findLastIndex((message) =>
-                    message.role === "user"
-                );
-                patch({ messages: state.messages.slice(0, lastUser + 1) });
-            }
+            if (run.stopped) return false;
             const command: ChatCommand = type === "send"
                 ? {
                     type,
@@ -483,9 +791,30 @@ export function createChatController(
                         ? { attachments: [...draft.attachments] }
                         : {}),
                 }
-                : { type, conversationId: run.id, model };
+                : type === "edit"
+                ? {
+                    type,
+                    conversationId: run.id,
+                    model,
+                    messageId: messageId!,
+                    text: editedText!.trim(),
+                }
+                : {
+                    type,
+                    conversationId: run.id,
+                    model,
+                    ...(messageId ? { messageId } : {}),
+                };
             const receive = (event: ChatEvent) => {
                 if (!currentRun(run)) return;
+                if (
+                    (event.type === "user" &&
+                        event.message.conversationId === run.id) ||
+                    event.type === "delta" || event.type === "tool" ||
+                    event.type === "reasoning" || event.type === "activity" ||
+                    event.type === "citations" || event.type === "quota" ||
+                    event.type === "done"
+                ) accept();
                 if (
                     event.type === "user" &&
                     event.message.conversationId === run.id
@@ -497,9 +826,31 @@ export function createChatController(
                     ) {
                         patch({ messages: [...state.messages, event.message] });
                     }
-                    if (drafts.get(run.id) === draft) editDraft(emptyDraft());
+                    if (type === "send" && drafts.get(run.id) === draft) {
+                        editDraft(emptyDraft());
+                    }
                 } else if (event.type === "delta") {
                     patch({ streamText: state.streamText + event.text });
+                } else if (event.type === "reasoning") {
+                    patch({
+                        streamReasoning: state.streamReasoning + event.text,
+                    });
+                } else if (event.type === "activity") {
+                    patch({
+                        streamActivity: [
+                            ...state.streamActivity,
+                            ...event.items,
+                        ],
+                    });
+                } else if (event.type === "citations") {
+                    patch({
+                        streamCitations: [
+                            ...state.streamCitations,
+                            ...event.items,
+                        ],
+                    });
+                } else if (event.type === "quota") {
+                    patch({ streamQuota: event.quota });
                 } else if (event.type === "tool") {
                     const calls = new Map(
                         state.toolCalls.map((call) => [call.callId, call]),
@@ -508,6 +859,8 @@ export function createChatController(
                         calls.set(call.callId, call);
                     }
                     patch({ toolCalls: [...calls.values()] });
+                } else if (event.type === "suggestions") {
+                    patch({ suggestions: event.items });
                 } else if (event.type === "done" && event.conversation) {
                     patch({
                         conversation: event.conversation,
@@ -517,6 +870,7 @@ export function createChatController(
             };
             run.stream = api.open(command, receive);
             interrupted = await run.stream.finished === "stopped";
+            if (!interrupted && currentRun(run)) accept();
         } catch (error) {
             interrupted = true;
             if (currentRun(run)) patch({ error: describe(error) });
@@ -527,7 +881,7 @@ export function createChatController(
                     run.id,
                     run.abort.signal,
                     () => currentRun(run),
-                    interrupted ? { previousIds } : undefined,
+                    interrupted ? { previousIds, continuation } : undefined,
                 );
                 if (currentRun(run)) {
                     activeRun = undefined;
@@ -535,7 +889,15 @@ export function createChatController(
                 }
             }
         }
+        return accepted;
     }
+    const initialDraft = draftFor();
+    state = {
+        ...state,
+        draft: initialDraft.text,
+        attachments: initialDraft.attachments,
+    };
+    void renewRestoredDraft(state.selectedId);
     return {
         getState: () => state,
         subscribe(listener) {
@@ -547,9 +909,18 @@ export function createChatController(
         create,
         rename,
         updateSettings,
+        chooseEffort,
         remove,
+        removeMessage,
         select,
         refresh,
+        switchBranch: (messageId) => changeBranch("switchBranch", messageId),
+        forkMessage: (messageId) => changeBranch("fork", messageId),
+        editMessage: (messageId, text) =>
+            new Promise<boolean>((resolve) => {
+                void generate("edit", messageId, text, () => resolve(true))
+                    .then(resolve);
+            }),
         setDraft(text) {
             if (!disposed) editDraft({ ...draftFor(), text });
         },
@@ -563,10 +934,18 @@ export function createChatController(
             const ticket = ++attachmentRevision;
             const id = state.selectedId;
             const draft = draftFor();
+            const abort = uploadAbort = new AbortController();
+            const uploaded: ChatAttachment[] = [];
+            let retained = false;
             patch({ attachmentsBusy: true, error: "" });
             try {
-                const attachments = await readChatAttachments(
+                const attachments = await uploadChatAttachments(
                     files,
+                    async (file) => {
+                        const attachment = await api.upload(file, abort.signal);
+                        uploaded.push(attachment);
+                        return attachment;
+                    },
                     draft.attachments,
                 );
                 if (
@@ -579,13 +958,63 @@ export function createChatController(
                         ...attachments.slice(draft.attachments.length),
                     ];
                     validateChatAttachments(combined);
+                    retainDraftImages(uploaded);
                     editDraft({ ...current, attachments: combined });
+                    retained = true;
                 }
             } catch (error) {
                 if (!disposed && ticket === attachmentRevision) {
                     patch({ error: describe(error) });
                 }
             } finally {
+                if (!retained) releaseDraftImages(uploaded);
+                if (!disposed && ticket === attachmentRevision) {
+                    patch({ attachmentsBusy: false });
+                }
+            }
+        },
+        async addReference(attachment) {
+            if (!idle() || state.attachmentsBusy || !attachment.assetId) return;
+            const draft = draftFor();
+            if (
+                draft.attachments.some((item) =>
+                    item.assetId === attachment.assetId
+                )
+            ) return;
+            const attachments = [...draft.attachments, attachment];
+            try {
+                validateChatAttachments(attachments);
+            } catch (error) {
+                patch({ error: describe(error) });
+                return;
+            }
+            const ticket = ++attachmentRevision;
+            const id = state.selectedId;
+            const abort = uploadAbort = new AbortController();
+            let acquired: ChatAttachment | undefined;
+            let retained = false;
+            patch({ attachmentsBusy: true, error: "" });
+            try {
+                acquired = await api.acquireAttachment(
+                    attachment.assetId,
+                    abort.signal,
+                );
+                if (
+                    disposed || ticket !== attachmentRevision ||
+                    id !== state.selectedId
+                ) return;
+                const current = draftFor();
+                const combined = [...current.attachments, acquired];
+                validateChatAttachments(combined);
+                retainDraftImages([acquired]);
+                editDraft({ ...current, attachments: combined });
+                retained = true;
+            } catch (error) {
+                if (!disposed && ticket === attachmentRevision) {
+                    patch({ error: describe(error) });
+                }
+            } finally {
+                if (acquired && !retained) releaseDraftImages([acquired]);
                 if (!disposed && ticket === attachmentRevision) {
                     patch({ attachmentsBusy: false });
                 }
@@ -594,6 +1023,10 @@ export function createChatController(
         removeAttachment(index) {
             if (disposed) return;
             attachmentRevision++;
+            uploadAbort?.abort();
+            restoringDraft = undefined;
+            const removed = draftFor().attachments[index];
+            if (removed && !state.sending) releaseOwnedDraftImages([removed]);
             editDraft({
                 ...draftFor(),
                 attachments: draftFor().attachments.filter((_, i) =>
@@ -602,8 +1035,15 @@ export function createChatController(
             });
             patch({ attachmentsBusy: false });
         },
-        send: () => generate("send"),
-        regenerate: () => generate("regenerate"),
+        send: async () => {
+            await generate("send");
+        },
+        regenerate: async (messageId) => {
+            await generate("regenerate", messageId);
+        },
+        continueMessage: async (messageId) => {
+            await generate("continue", messageId);
+        },
         stop() {
             if (!activeRun || activeRun.stopped) return;
             activeRun.stopped = true;
@@ -617,8 +1057,10 @@ export function createChatController(
             attachmentRevision++;
             readAbort?.abort();
             mutationAbort?.abort();
+            uploadAbort?.abort();
             cancelRun();
             drafts.clear();
+            ownedLeases.clear();
             listeners.clear();
         },
     };

@@ -223,6 +223,101 @@ Deno.test("sessionFetch replaces Request headers when init supplies a new header
     });
 });
 
+Deno.test("sessionFetch maps complete journal exports to a tokenless streaming GET", async () => {
+    await withBrowser(async (calls) => {
+        const controller = new AbortController();
+        await sessionFetch("/api/admin/requests/export?id=opaque%3Fid", {
+            headers: {
+                "x-request-id": "download-1",
+                authorization: "Bearer secret",
+                cookie: "private=secret",
+                "if-match": "not-for-download",
+            },
+            credentials: "include",
+            signal: controller.signal,
+        });
+        assertEquals(calls.length, 1);
+        assertEquals(
+            calls[0]!.input,
+            "/admin/ui/requests/export?id=opaque%3Fid",
+        );
+        assertEquals(calls[0]!.init?.method, "GET");
+        assertEquals(calls[0]!.init?.credentials, "same-origin");
+        assertEquals(calls[0]!.init?.body, undefined);
+        assertEquals([...new Headers(calls[0]!.init?.headers)], [
+            ["accept", "application/json"],
+            ["x-request-id", "download-1"],
+        ]);
+        controller.abort("download cancelled");
+        assertEquals(calls[0]!.init?.signal?.reason, "download cancelled");
+    });
+});
+
+Deno.test("sessionFetch also preserves journal download cancellation from Request input", async () => {
+    await withBrowser(async (calls) => {
+        const controller = new AbortController();
+        const request = new Request(
+            `${origin}/api/admin/requests/export?id=one`,
+            {
+                signal: controller.signal,
+                headers: { "x-request-id": "request-download" },
+            },
+        );
+        await sessionFetch(request);
+        assertEquals(calls[0]!.input, "/admin/ui/requests/export?id=one");
+        assertEquals(calls[0]!.init?.method, "GET");
+        assertEquals(
+            new Headers(calls[0]!.init?.headers).get("x-request-id"),
+            "request-download",
+        );
+        controller.abort();
+        assertEquals(calls[0]!.init?.signal?.aborted, true);
+    });
+});
+
+Deno.test("sessionFetch forbids journal download mutations, bodies and direct web paths", async () => {
+    await withBrowser(async (calls) => {
+        for (const method of ["POST", "PUT", "DELETE", "HEAD"]) {
+            await assertRejects(() =>
+                sessionFetch("/api/admin/requests/export?id=one", { method })
+            );
+        }
+        await assertRejects(() =>
+            sessionFetch("/api/admin/requests/export?id=one", { body: "{}" })
+        );
+        for (
+            const path of [
+                "/admin/ui/requests/export?id=one",
+                "https://attacker.example.test/api/admin/requests/export?id=one",
+                "/api/admin/requests/export?id=one#fragment",
+                "/api/chat/requests/export?id=one",
+            ]
+        ) {
+            await assertRejects(() => sessionFetch(path));
+        }
+        assertEquals(calls.length, 0);
+    });
+});
+
+Deno.test("sessionFetch does not give other management paths a direct download bypass", async () => {
+    await withBrowser(async (calls) => {
+        for (
+            const path of [
+                "/api/admin/requests?id=one",
+                "/api/admin/requests/export/extra?id=one",
+                "/api/admin/settings?export=1",
+            ]
+        ) {
+            await sessionFetch(path);
+            assertEquals(envelope(calls.at(-1)!), {
+                path,
+                method: "GET",
+                headers: {},
+            });
+        }
+    });
+});
+
 const contribution: UiContribution = {
     pluginId: "source.example",
     id: "health",

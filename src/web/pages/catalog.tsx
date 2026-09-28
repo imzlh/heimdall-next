@@ -139,6 +139,7 @@ export function ChannelsSnapshot(
                                     source={source}
                                     proxyPool={proxyPool}
                                     editing
+                                    statusInline
                                     status={
                                         <PluginSlots
                                             slot="source.status"

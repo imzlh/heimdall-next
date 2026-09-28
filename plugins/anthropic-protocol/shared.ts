@@ -121,6 +121,9 @@ export function rawExtensions(raw: JsonObject): Extensions | undefined {
 
 export function compactUndefined<T>(value: T): T {
     if (Array.isArray(value)) return value.map(compactUndefined) as T;
+    // Raw binary (`BlobRef.data`) is an opaque leaf; iterating its entries
+    // would rebuild the Uint8Array as a plain `{0:…,1:…}` object.
+    if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return value;
     if (!isObject(value)) return value;
     return Object.fromEntries(
         Object.entries(value)
@@ -149,6 +152,20 @@ export function generationPayload(input: OperationRequest): GenerationRequest {
 export function isPublicReasoning(part: ContentPart): boolean {
     return part.type === "reasoning" &&
         part.visibility === "public";
+}
+
+/**
+ * The pre-rendered one-line summary of a `status` custom part (cloud activity).
+ * Anthropic has no structured status block, so the summary is surfaced as text.
+ */
+export function statusPartSummary(part: ContentPart): string | undefined {
+    if (part.type !== "custom" || part.name !== "status") return undefined;
+    const value = part.value;
+    if (typeof value !== "object" || value === null) return undefined;
+    const summary = (value as { summary?: unknown }).summary;
+    return typeof summary === "string" && summary.trim().length > 0
+        ? summary.trim()
+        : undefined;
 }
 
 export function isAnthropicVisiblePart(part: ContentPart): boolean {

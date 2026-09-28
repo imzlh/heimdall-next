@@ -235,6 +235,7 @@ export const snapshot: ConsoleSnapshot = {
             proxyKeyConfigured: true,
             limitPerMinute: 120,
             probeIntervalMs: 300000,
+            titleModel: "",
         },
         etag: '"preview-settings-v1"',
     },

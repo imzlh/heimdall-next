@@ -2,6 +2,7 @@ import { readRetentionDays } from "./maintenance.ts";
 import { readProbeInterval } from "./probe-loop.ts";
 import type { RuntimeSettings } from "./runtime-settings.ts";
 import { resolveTimeZone } from "../stats/calendar.ts";
+import { chatAssetPublicOrigin } from "../chat/asset-links.ts";
 
 /** Process configuration, parsed before any durable resources are opened. */
 export interface ServerEnvironment {
@@ -10,6 +11,8 @@ export interface ServerEnvironment {
     readonly kvPath?: string;
     readonly requestsPath: string;
     readonly chatPath: string;
+    readonly chatAssetsPath?: string;
+    readonly publicBaseUrl?: string;
     readonly retentionDays: number;
     /** IANA zone whose civil dates are the natural days in usage statistics. */
     readonly timeZone: string;
@@ -17,6 +20,8 @@ export interface ServerEnvironment {
     readonly adminAuthToken?: string;
     readonly adminAssetsRoot?: string;
     readonly adminUiPolicyPath?: string;
+    /** Print a Gin-style line per HTTP request to the console. */
+    readonly httpLog: boolean;
 }
 
 export function readServerEnvironment(
@@ -31,6 +36,11 @@ export function readServerEnvironment(
         requestsPath: optional("HEIMDALL_REQUESTS_PATH") ??
             `${cwd}/data/requests.sqlite`,
         chatPath: optional("HEIMDALL_CHAT_PATH") ?? `${cwd}/data/chat.sqlite`,
+        chatAssetsPath: optional("HEIMDALL_CHAT_ASSETS_PATH") ??
+            `${cwd}/data/chat-assets.sqlite`,
+        publicBaseUrl: chatAssetPublicOrigin(
+            optional("HEIMDALL_PUBLIC_BASE_URL"),
+        ),
         retentionDays: readRetentionDays(
             env("HEIMDALL_REQUEST_RETENTION_DAYS"),
         ),
@@ -41,11 +51,20 @@ export function readServerEnvironment(
             probeIntervalMs: readProbeInterval(
                 env("HEIMDALL_PROBE_INTERVAL_MS"),
             ),
+            titleModel: optional("HEIMDALL_CHAT_TITLE_MODEL") ?? "",
         },
         adminAuthToken: optional("HEIMDALL_ADMIN_TOKEN"),
         adminAssetsRoot: optional("HEIMDALL_ADMIN_ASSETS"),
         adminUiPolicyPath: optional("HEIMDALL_UI_POLICY_PATH"),
+        httpLog: readHttpLog(env("HEIMDALL_HTTP_LOG")),
     };
+}
+
+/** HTTP access logging is on unless explicitly disabled. */
+export function readHttpLog(value: string | undefined): boolean {
+    const normalized = value?.trim().toLowerCase();
+    return !(normalized === "0" || normalized === "false" ||
+        normalized === "off" || normalized === "no");
 }
 
 export function readPort(value: string | undefined): number {

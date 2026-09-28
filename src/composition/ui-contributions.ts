@@ -8,6 +8,7 @@ import {
     type PluginManifestOptions,
     readPluginManifests,
 } from "./plugin-manifests.ts";
+import { log } from "../observability/system-log.ts";
 
 export { MAX_PLUGIN_MANIFEST_BYTES as MAX_UI_MANIFEST_BYTES } from "./plugin-manifests.ts";
 
@@ -17,7 +18,8 @@ export type UiContributionLoaderOptions = PluginManifestOptions;
 export async function loadUiContributions(
     options: UiContributionLoaderOptions = {},
 ): Promise<readonly UiContribution[]> {
-    const warn = options.warn ?? ((message: string) => console.warn(message));
+    const warn = options.warn ??
+        ((message: string) => log.warn("ui", message));
     const contributions: UiContribution[] = [];
     const keys = new Set<string>();
     for await (const { directory, manifest } of readPluginManifests(options)) {

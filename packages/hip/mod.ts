@@ -37,7 +37,9 @@ export interface BlobRef {
     readonly mediaType: string;
     readonly bytes?: number;
     readonly sha256?: string;
-    readonly dataBase64?: string;
+    /** Inline binary payload. The kernel carries raw bytes, never base64;
+     * protocol adapters encode/decode base64 only at their HTTP boundary. */
+    readonly data?: Uint8Array;
     readonly extensions?: Extensions;
 }
 
@@ -127,6 +129,11 @@ export interface CitationPart extends PartBase {
     readonly label?: string;
     readonly url?: string;
     readonly quote?: string;
+    /**
+     * The marker id an inline `cite…` reference points at (e.g.
+     * `turn1search42`), so the answer's badges can link to this exact source.
+     */
+    readonly ref?: string;
 }
 
 export interface CustomPart extends PartBase {
@@ -239,11 +246,19 @@ export type OperationCancelRequest = CancelRequest;
 export type CancellationRequest = CancelRequest;
 
 export interface Usage {
+    /**
+     * Input tokens processed this turn: fresh input plus any written to cache
+     * (`cacheWriteTokens`), but NOT tokens read from cache (`cachedInputTokens`,
+     * surfaced separately and added on top). Sources normalize to this.
+     */
     readonly inputTokens?: number;
     readonly outputTokens?: number;
     readonly reasoningTokens?: number;
+    /** Cache-read (reused) input. Separate from `inputTokens`, not included in it. */
     readonly cachedInputTokens?: number;
+    /** Cache-write input. A subset already counted within `inputTokens`; reported for cost. */
     readonly cacheWriteTokens?: number;
+    /** Billed total: `inputTokens + cachedInputTokens + outputTokens` (+ reasoning). */
     readonly totalTokens?: number;
     /** Decimal string avoids floating point differences between adapters. */
     readonly cost?: string;
@@ -316,6 +331,16 @@ export interface UsageEvent {
     readonly kind: "usage";
     readonly usage: Usage;
 }
+/** Provider-suggested follow-up prompts for the next turn (run-scoped metadata). */
+export interface SuggestionsEvent {
+    readonly kind: "suggestions";
+    readonly suggestions: readonly string[];
+}
+/** Provider-suggested conversation/thread title (run-scoped metadata). */
+export interface TitleEvent {
+    readonly kind: "title";
+    readonly title: string;
+}
 export interface CheckpointEvent {
     readonly kind: "checkpoint";
     readonly stateHash: string;
@@ -355,6 +380,8 @@ export type StreamEvent =
     | ToolCallEvent
     | ToolResultEvent
     | UsageEvent
+    | SuggestionsEvent
+    | TitleEvent
     | CheckpointEvent
     | RunCompletedEvent
     | RunErrorEvent
@@ -410,6 +437,10 @@ export interface HipState {
 export interface ConversationState extends HipState {
     readonly messages: Readonly<Record<string, Message>>;
     readonly usage?: Usage;
+    /** Provider-suggested follow-up prompts, from the latest `suggestions` event. */
+    readonly suggestions?: readonly string[];
+    /** Provider-suggested title, from the latest `title` event. */
+    readonly title?: string;
     readonly error?: CanonicalError;
     readonly finishReason?: string;
     readonly seenEventIds: readonly string[];
@@ -440,6 +471,7 @@ export interface HipCodec<Request = OperationRequest, Frame = StreamFrame> {
 export type GenerateRequest = GenerationRequest;
 
 export { applyFrame, HipProtocolError, initialState } from "./reducer.ts";
+export { base64ToBytes, bytesToBase64, utf8ToBytes } from "./blob.ts";
 export {
     checkpointState,
     computeStateHash,

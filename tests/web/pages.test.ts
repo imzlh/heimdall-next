@@ -159,12 +159,23 @@ Deno.test("island boot retains SSR requests usage settings and the settings ETag
                 limitPerMinute: 42,
                 probeIntervalMs: 60000,
                 proxyKeyConfigured: true,
+                titleModel: "",
             },
             etag: "settings-version",
         },
         proxies: {
             pool: { defaultProxyId: null, entries: [] },
             etag: "proxies-version",
+        },
+        // The boot always ships a stats panel; the stub dispatcher above does
+        // not serve the stats endpoints, so SSR carries the fallback errors.
+        stats: {
+            overview: null,
+            series: null,
+            errors: {
+                overview: "暂时无法读取统计总览。",
+                series: "暂时无法读取统计趋势。",
+            },
         },
         errors: { requests: "", usage: "", settings: "", proxies: "" },
     });

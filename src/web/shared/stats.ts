@@ -2,6 +2,8 @@ import type {
     ModelUsageDto,
     StatsOverviewDto,
     StatsSeriesDto,
+    StatsTrendDto,
+    StatsTrendMode,
     UsageCountersDto,
 } from "@heimdall/admin-contracts";
 
@@ -116,4 +118,64 @@ export function readStatsSeries(
         return { date, ...counters(point) };
     });
     return { timeZone: timeZone(source.timeZone), days: source.days, series };
+}
+
+const TREND_MODES: readonly StatsTrendMode[] = ["day", "hour", "recent"];
+const TREND_BUCKETS = [1440, 60, 30, 15];
+const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
+
+/** Buckets and their labels come from the server so the chart never trusts the browser clock. */
+export function readStatsTrend(value: unknown): StatsTrendDto {
+    const source = record(value);
+    const mode = source.mode;
+    if (
+        typeof mode !== "string" ||
+        !(TREND_MODES as readonly string[]).includes(mode)
+    ) throw new TypeError("趋势模式无效。");
+    if (
+        typeof source.bucketMinutes !== "number" ||
+        !(TREND_BUCKETS as readonly unknown[]).includes(source.bucketMinutes)
+    ) throw new TypeError("趋势粒度无效。");
+    const from = timestamp(source.from);
+    const until = timestamp(source.until);
+    if (until <= from) throw new TypeError("趋势窗口无效。");
+    if (typeof source.fallback !== "boolean") {
+        throw new TypeError("趋势回退标记无效。");
+    }
+    if (!Array.isArray(source.series)) throw new TypeError("用量趋势格式无效。");
+    let previous = "";
+    const series = source.series.map((value) => {
+        const point = record(value);
+        const start = timestamp(point.from);
+        if (start <= previous) throw new TypeError("用量趋势顺序无效。");
+        previous = start;
+        const day = civilDate(point.day);
+        if (
+            typeof point.label !== "string" || !point.label ||
+            point.label.length > 8
+        ) throw new TypeError("趋势标签无效。");
+        return {
+            from: start,
+            day,
+            label: point.label,
+            ...counters(point),
+        };
+    });
+    return {
+        timeZone: timeZone(source.timeZone),
+        mode: mode as StatsTrendMode,
+        bucketMinutes: source.bucketMinutes,
+        from,
+        until,
+        fallback: source.fallback,
+        series,
+    };
+}
+
+function timestamp(value: unknown): string {
+    if (
+        typeof value !== "string" || !ISO_TIMESTAMP.test(value) ||
+        !Number.isFinite(Date.parse(value))
+    ) throw new TypeError("趋势时间无效。");
+    return value;
 }

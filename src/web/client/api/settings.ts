@@ -11,6 +11,7 @@ export async function saveRuntimeSettings(
         proxyKey?: string;
         limitPerMinute?: number;
         probeIntervalMs?: number;
+        titleModel?: string;
     },
     versionstamp = "",
 ): Promise<RuntimeSettingsEnvelope> {
@@ -27,7 +28,11 @@ export async function saveRuntimeSettings(
 function readRuntimeSettings(
     data: unknown,
     etag: string,
-    fallback: { limitPerMinute?: number; probeIntervalMs?: number } = {},
+    fallback: {
+        limitPerMinute?: number;
+        probeIntervalMs?: number;
+        titleModel?: string;
+    } = {},
 ): RuntimeSettingsEnvelope {
     const body = payloadRecord(data);
     const settings = payloadRecord(body?.settings);
@@ -40,6 +45,9 @@ function readRuntimeSettings(
             probeIntervalMs: typeof settings?.probeIntervalMs === "number"
                 ? settings.probeIntervalMs
                 : fallback.probeIntervalMs ?? 300_000,
+            titleModel: typeof settings?.titleModel === "string"
+                ? settings.titleModel
+                : fallback.titleModel ?? "",
         },
         etag,
     };

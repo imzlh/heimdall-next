@@ -2,6 +2,8 @@ import { createServerApp, type ServerAppOptions } from "../http/app.ts";
 import type { ModelsResponse } from "../http/public-routes.ts";
 import { createProtocolRoutes } from "../http/protocol-routes.ts";
 import { createChatRoutes } from "../http/chat-routes.ts";
+import { createChatAssetLinkRoutes } from "../http/chat-asset-routes.ts";
+import type { ChatAssetService } from "../chat/assets.ts";
 import type { ChatStore } from "@heimdall/storage";
 import type { ChatToolProvider } from "../chat/tools/toolset.ts";
 import type { InferenceSource, ProtocolPlugin } from "@heimdall/contracts";
@@ -33,8 +35,11 @@ export interface ServerOptions extends ServerAppOptions {
     /** Chat history. Generation uses the same kernel as `/v1`. */
     readonly chat?: {
         readonly store: ChatStore;
+        readonly assets?: ChatAssetService;
         /** Tool capabilities supplied by the embedding composition. */
         readonly tools?: ChatToolProvider;
+        /** Cheap model id for auto-titling; undefined falls back to the chat model. */
+        readonly titleModel?: () => string | undefined;
     };
 }
 
@@ -73,12 +78,17 @@ export function createServer(options: ServerOptions = {}) {
             protocols: protocolRegistry.list(),
             runtime,
         }),
+        chatAssetLinkRoutes: chat?.assets
+            ? createChatAssetLinkRoutes(chat.assets)
+            : httpOptions.chatAssetLinkRoutes,
         chatRoutes: chat === undefined
             ? httpOptions.chatRoutes
             : createChatRoutes({
                 runtime,
                 store: chat.store,
+                assets: chat.assets,
                 tools: chat.tools,
+                titleModel: chat.titleModel,
             }),
     });
 }

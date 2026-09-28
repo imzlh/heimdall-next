@@ -1,19 +1,25 @@
 import type {
+    ChatAttachment,
     ChatCommand,
     ChatConversation,
     ChatEvent,
     ChatMessage,
+    ChatQuota,
 } from "@heimdall/admin-contracts/chat.ts";
 import { AdminApiError, getAdminToken, request } from "./admin.ts";
 import { payloadRecord } from "./transport.ts";
+import { readChatBranches } from "../../shared/chat-branches.ts";
 
 export type {
+    ChatActivity,
     ChatAttachment,
+    ChatCitation,
     ChatCommand,
     ChatConversation,
     ChatEvent,
     ChatInitial,
     ChatMessage,
+    ChatQuota,
     ChatToolCall,
 } from "@heimdall/admin-contracts/chat.ts";
 
@@ -64,7 +70,48 @@ function readConversation(value: unknown): ChatConversation {
         body.reasoningEffort === "low" || body.reasoningEffort === "medium" ||
         body.reasoningEffort === "high"
     ) conversation.reasoningEffort = body.reasoningEffort;
+    if (body.disabledTools !== undefined) {
+        if (
+            !Array.isArray(body.disabledTools) ||
+            !body.disabledTools.every((item) => typeof item === "string")
+        ) return invalidResponse();
+        conversation.disabledTools = body.disabledTools;
+    }
+    if (body.activeMessageId !== undefined) {
+        conversation.activeMessageId = text(body.activeMessageId);
+    }
+    if (body.branches !== undefined) {
+        const branches = readChatBranches(body.branches);
+        if (!branches) return invalidResponse();
+        conversation.branches = branches;
+    }
     return conversation;
+}
+
+function readAttachment(value: unknown, draft = false): ChatAttachment {
+    const body = record(value);
+    const mediaType = text(body.mediaType);
+    if (body.assetId !== undefined) {
+        const assetId = text(body.assetId);
+        if (!/^[A-Za-z0-9_-]{1,128}$/.test(assetId)) return invalidResponse();
+        if (
+            body.size !== undefined &&
+            (typeof body.size !== "number" ||
+                !Number.isSafeInteger(body.size) || body.size < 1)
+        ) return invalidResponse();
+        return {
+            assetId,
+            mediaType,
+            ...(typeof body.size === "number" ? { size: body.size } : {}),
+            ...(typeof body.name === "string" ? { name: body.name } : {}),
+            ...(draft && typeof body.leaseId === "string" &&
+                    /^[A-Za-z0-9_-]{1,128}$/.test(body.leaseId)
+                ? { leaseId: body.leaseId }
+                : {}),
+            url: `/admin/chat/api/assets/${encodeURIComponent(assetId)}`,
+        };
+    }
+    return { mediaType, dataBase64: text(body.dataBase64) };
 }
 
 function readMessage(value: unknown): ChatMessage {
@@ -83,6 +130,26 @@ function readMessage(value: unknown): ChatMessage {
     };
     if (body.callId !== undefined) message.callId = text(body.callId);
     if (body.name !== undefined) message.name = text(body.name);
+    if (body.parentId !== undefined) {
+        message.parentId = body.parentId === null ? null : text(body.parentId);
+    }
+    if (body.branch !== undefined) {
+        const branch = record(body.branch);
+        if (
+            !Array.isArray(branch.messageIds) ||
+            !Number.isSafeInteger(branch.index) ||
+            !Number.isSafeInteger(branch.count)
+        ) return invalidResponse();
+        const messageIds = branch.messageIds.map(text);
+        const index = branch.index as number;
+        const count = branch.count as number;
+        if (
+            count !== messageIds.length || index < 0 || index >= count ||
+            messageIds[index] !== message.id ||
+            new Set(messageIds).size !== count
+        ) return invalidResponse();
+        message.branch = { index, count, messageIds };
+    }
     if (body.status !== undefined) {
         if (
             body.status !== "completed" && body.status !== "failed" &&
@@ -99,15 +166,65 @@ function readMessage(value: unknown): ChatMessage {
     }
     if (body.attachments !== undefined) {
         if (!Array.isArray(body.attachments)) return invalidResponse();
-        message.attachments = body.attachments.map((item) => {
-            const attachment = record(item);
-            return {
-                mediaType: text(attachment.mediaType),
-                dataBase64: text(attachment.dataBase64),
-            };
-        });
+        message.attachments = body.attachments.map((item) =>
+            readAttachment(item)
+        );
     }
+    if (typeof body.reasoning === "string") message.reasoning = body.reasoning;
+    if (Array.isArray(body.activity)) {
+        message.activity = readActivity(body.activity);
+    }
+    if (Array.isArray(body.citations)) {
+        message.citations = readCitations(body.citations);
+    }
+    const quota = readQuota(body.quota);
+    if (quota) message.quota = quota;
     return message;
+}
+
+/** Cloud-activity status lines attached to a stored assistant message. */
+function readActivity(value: readonly unknown[]): { summary: string }[] {
+    return value
+        .map((item) => record(item))
+        .filter((item) => typeof item.summary === "string")
+        .map((item) => ({ summary: item.summary as string }));
+}
+
+/** Citations attached to a stored assistant message. */
+function readCitations(
+    value: readonly unknown[],
+): { label?: string; url?: string; ref?: string }[] {
+    return value
+        .map((item) => record(item))
+        .map((item) => ({
+            ...(typeof item.label === "string" ? { label: item.label } : {}),
+            ...(typeof item.url === "string" ? { url: item.url } : {}),
+            ...(typeof item.ref === "string" ? { ref: item.ref } : {}),
+        }))
+        .filter((item) => item.label !== undefined || item.url !== undefined);
+}
+
+/** Per-turn account quota snapshot attached to a stored assistant message. */
+function readQuota(value: unknown): ChatQuota | undefined {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) {
+        return undefined;
+    }
+    const meters = (value as { meters?: unknown }).meters;
+    if (!Array.isArray(meters)) return undefined;
+    const parsed = meters
+        .map((item) => record(item))
+        .filter((item) =>
+            typeof item.name === "string" && (item.name as string).length > 0
+        )
+        .map((item) => ({
+            name: item.name as string,
+            ...(typeof item.remaining === "number"
+                ? { remaining: item.remaining }
+                : {}),
+            ...(item.blocked === true ? { blocked: true } : {}),
+            ...(typeof item.error === "string" ? { error: item.error } : {}),
+        }));
+    return parsed.length > 0 ? { meters: parsed } : undefined;
 }
 
 /** Session chat uses its own route, independent of the management API bridge. */
@@ -119,14 +236,20 @@ async function chatRequest(
 ): Promise<unknown> {
     const endpoint = (options.endpoint ?? "/api/chat").replace(/\/+$/, "");
     const url = `${endpoint}/${path}`;
+    const upload = body instanceof File;
     const init = {
         method,
         signal: options.signal,
-        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        ...(body === undefined
+            ? {}
+            : { body: upload ? body : JSON.stringify(body) }),
         headers: {
             Accept: "application/json",
-            ...(body === undefined
-                ? {}
+            ...(body === undefined ? {} : upload
+                ? {
+                    "Content-Type": body.type,
+                    "x-file-name": encodeURIComponent(body.name),
+                }
                 : { "Content-Type": "application/json" }),
         },
     };
@@ -202,10 +325,98 @@ export async function loadChatConversation(
         ),
     );
     if (!Array.isArray(body.messages)) return invalidResponse();
-    return {
-        conversation: readConversation(body.conversation),
-        messages: body.messages.map(readMessage),
-    };
+    const conversation = readConversation(body.conversation);
+    const messages = body.messages.map(readMessage);
+    if (
+        conversation.id !== id ||
+        messages.some((message) => message.conversationId !== id)
+    ) return invalidResponse();
+    return { conversation, messages };
+}
+
+async function changeChatBranch(
+    action: "branch" | "fork",
+    conversationId: string,
+    messageId: string,
+    options: ChatRequestOptions,
+): Promise<{ conversation: ChatConversation; messages: ChatMessage[] }> {
+    const body = record(
+        await chatRequest(action, options, "POST", {
+            conversationId,
+            messageId,
+        }),
+    );
+    if (!Array.isArray(body.messages)) return invalidResponse();
+    const conversation = readConversation(body.conversation);
+    if (action === "branch" && conversation.id !== conversationId) {
+        return invalidResponse();
+    }
+    const messages = body.messages.map(readMessage);
+    if (
+        messages.some((message) => message.conversationId !== conversation.id)
+    ) return invalidResponse();
+    return { conversation, messages };
+}
+
+export function switchChatBranch(
+    conversationId: string,
+    messageId: string,
+    options: ChatRequestOptions = {},
+) {
+    return changeChatBranch("branch", conversationId, messageId, options);
+}
+
+export function forkChatConversation(
+    conversationId: string,
+    messageId: string,
+    options: ChatRequestOptions = {},
+) {
+    return changeChatBranch("fork", conversationId, messageId, options);
+}
+
+export async function uploadChatAttachment(
+    file: File,
+    options: ChatRequestOptions = {},
+): Promise<ChatAttachment> {
+    const body = record(await chatRequest("assets", options, "POST", file));
+    const attachment = readAttachment(body.attachment, true);
+    if (!attachment.assetId) return invalidResponse();
+    return attachment;
+}
+
+export async function acquireChatAttachment(
+    assetId: string,
+    options: ChatRequestOptions = {},
+): Promise<ChatAttachment> {
+    const body = record(
+        await chatRequest(
+            `assets/${encodeURIComponent(assetId)}/lease`,
+            options,
+            "POST",
+        ),
+    );
+    const attachment = readAttachment(body.attachment, true);
+    if (attachment.assetId !== assetId || !attachment.leaseId) {
+        return invalidResponse();
+    }
+    return attachment;
+}
+
+export async function releaseChatAttachment(
+    assetId: string,
+    leaseId: string,
+    options: ChatRequestOptions = {},
+): Promise<void> {
+    const body = record(
+        await chatRequest(
+            `assets/${encodeURIComponent(assetId)}/lease?leaseId=${
+                encodeURIComponent(leaseId)
+            }`,
+            options,
+            "DELETE",
+        ),
+    );
+    if (body.released !== true) return invalidResponse();
 }
 
 export async function renameChatConversation(
@@ -229,6 +440,7 @@ export async function renameChatConversation(
 export interface ChatSettingsPatch {
     readonly systemPrompt?: string;
     readonly reasoningEffort?: "low" | "medium" | "high" | null;
+    readonly disabledTools?: readonly string[];
 }
 
 /** Partial conversation settings update; omitted fields stay untouched. */
@@ -243,6 +455,9 @@ export async function updateChatConversationSettings(
     }
     if (patch.reasoningEffort !== undefined) {
         body.reasoningEffort = patch.reasoningEffort;
+    }
+    if (patch.disabledTools !== undefined) {
+        body.disabledTools = patch.disabledTools;
     }
     const payload = record(
         await chatRequest(
@@ -269,6 +484,27 @@ export async function deleteChatConversation(
         ),
     );
     if (body.deleted !== true || body.id !== id) invalidResponse();
+}
+
+export async function deleteChatMessage(
+    conversationId: string,
+    messageId: string,
+    options: ChatRequestOptions = {},
+): Promise<readonly string[]> {
+    const body = record(
+        await chatRequest(
+            `message?conversationId=${encodeURIComponent(conversationId)}&id=${
+                encodeURIComponent(messageId)
+            }`,
+            options,
+            "DELETE",
+        ),
+    );
+    const ids = Array.isArray(body.ids)
+        ? body.ids.filter((item): item is string => typeof item === "string")
+        : [];
+    if (body.deleted !== true || !ids.includes(messageId)) invalidResponse();
+    return ids;
 }
 
 /** Credentials stay out of URLs and support non-ASCII administration tokens. */
@@ -302,6 +538,19 @@ function readEvent(value: unknown): ChatEvent {
             return { type: "user", message: readMessage(body.message) };
         case "delta":
             return { type: "delta", text: text(body.text) };
+        case "reasoning":
+            return { type: "reasoning", text: text(body.text) };
+        case "activity":
+            if (!Array.isArray(body.items)) return invalidResponse();
+            return { type: "activity", items: readActivity(body.items) };
+        case "citations":
+            if (!Array.isArray(body.items)) return invalidResponse();
+            return { type: "citations", items: readCitations(body.items) };
+        case "quota": {
+            const quota = readQuota(body.quota);
+            if (!quota) return invalidResponse();
+            return { type: "quota", quota };
+        }
         case "tool":
             if (!Array.isArray(body.calls)) return invalidResponse();
             return {
@@ -315,6 +564,12 @@ function readEvent(value: unknown): ChatEvent {
                     };
                 }),
             };
+        case "suggestions":
+            if (
+                !Array.isArray(body.items) ||
+                !body.items.every((item) => typeof item === "string")
+            ) return invalidResponse();
+            return { type: "suggestions", items: body.items };
         case "done":
             return {
                 type: "done",

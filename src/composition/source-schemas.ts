@@ -4,6 +4,7 @@ import {
     type PluginManifestOptions,
     readPluginManifests,
 } from "./plugin-manifests.ts";
+import { log } from "../observability/system-log.ts";
 
 export type SourceSchemaLoaderOptions = PluginManifestOptions;
 
@@ -12,7 +13,8 @@ export async function loadSourceSchemas(
     options: SourceSchemaLoaderOptions = {},
 ): Promise<Readonly<Record<string, SourceConfigSchema>>> {
     const schemas = new Map<string, SourceConfigSchema>();
-    const warn = options.warn ?? ((message: string) => console.warn(message));
+    const warn = options.warn ??
+        ((message: string) => log.warn("sources", message));
     for await (const { directory, manifest } of readPluginManifests(options)) {
         if (
             manifest === null || typeof manifest !== "object" ||

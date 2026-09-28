@@ -11,10 +11,17 @@ import { Icon } from "../shared/icons.tsx";
 import { ChatMarkdown } from "../components/chat-markdown.tsx";
 
 function MessageView({ message }: { message: ChatMessage }) {
+    const branch = !message.callId &&
+            (message.role === "user" || message.role === "assistant") &&
+            message.branch && message.branch.count > 1
+        ? message.branch
+        : undefined;
+    const branchLabel = message.role === "user" ? "提问" : "回复";
     return (
         <article
             class={`chat-message role-${message.role}`}
             data-status={message.status}
+            data-message-id={message.id}
         >
             <div class="chat-message-author">{chatRoleLabel(message)}</div>
             <div class="chat-message-body">
@@ -59,12 +66,29 @@ function MessageView({ message }: { message: ChatMessage }) {
             {message.status === "failed" && message.error?.message && (
                 <p class="chat-notice">{message.error.message}</p>
             )}
-            {message.text && !message.callId && (
+            {(message.text || branch) && !message.callId && (
                 <div class="chat-message-actions">
-                    <button type="button" class="chat-small-button" disabled>
-                        <Icon name="copy" />
-                        复制
-                    </button>
+                    {branch && (
+                        <span
+                            class="chat-branch-counter"
+                            role="status"
+                            aria-label={`第 ${
+                                branch.index + 1
+                            } 个${branchLabel}版本，共 ${branch.count} 个`}
+                        >
+                            版本 {branch.index + 1}/{branch.count}
+                        </span>
+                    )}
+                    {message.text && (
+                        <button
+                            type="button"
+                            class="chat-small-button"
+                            disabled
+                        >
+                            <Icon name="copy" />
+                            复制
+                        </button>
+                    )}
                 </div>
             )}
         </article>
@@ -320,7 +344,7 @@ export function ChatPageView({ initial }: { initial: ChatInitial }) {
                                 type="button"
                                 aria-label="添加图片"
                                 aria-busy="false"
-                                title="添加图片"
+                                title="添加图片，最多 4 张，每张 5 MiB"
                                 disabled
                             >
                                 <span

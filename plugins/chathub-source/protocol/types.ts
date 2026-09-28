@@ -203,12 +203,33 @@ export type ChatHubEventKind =
     | "target"
     | "unknown";
 
+/**
+ * One entry of the terminal StreamItem's `item.result.meteringInformation`.
+ * Unlike the cached `throttling.metering` counters, this is the reliable
+ * soft-reject signal: `hasAccess:false` (often with a `meterError`) means the
+ * turn was denied at the metering service even though the HTTP/WS status is 200
+ * and `result.value` is still "Success" (copilot2api docs 07 §1.1/§1.2).
+ */
+export interface ChatHubMeterError {
+    meterError?: string;
+    hasAccess?: boolean;
+    [key: string]: unknown;
+}
+
 export interface ChatHubEvent {
     kind: ChatHubEventKind;
     frame: SignalRFrame;
     raw: unknown;
     /** Genuine answer text for this frame (reasoning/progress excluded). */
     text?: string;
+    /** Terminal turn state (e.g. "Completed"/"Failed"); StreamItem frame only. */
+    turnState?: string;
+    /** `item.result.value` (e.g. "Success"); StreamItem frame only. */
+    resultValue?: string;
+    /** `item.result.message` authoritative reply text fallback; StreamItem only. */
+    resultMessage?: string;
+    /** Reliable per-capability access/denial signals; StreamItem frame only. */
+    meteringInformation?: ChatHubMeterError[];
     /**
      * Chain-of-thought transcript for this frame, concatenated across the
      * frame's reasoning messages. Kept separate from `text` so the answer never
@@ -221,7 +242,11 @@ export interface ChatHubEvent {
     chatName?: string;
     messages?: ChatMessage[];
     references?: ChatHubReference[];
+    /** Cloud search queries the model ran this frame (surfaced as status). */
+    searchQueries?: string[];
     suggestions?: SuggestedResponse[];
+    /** Generated-image URLs harvested from `contentGenerationProgressList`. */
+    images?: string[];
     error?: unknown;
 }
 
@@ -246,6 +271,20 @@ export interface ChatHubResult {
     throttling?: ChatHubThrottling;
     /** Server-suggested conversation title (`item.defaultChatName`), ~the first prompt. */
     chatName?: string;
+    /** Terminal turn state from the StreamItem frame (e.g. "Completed"/"Failed"). */
+    turnState?: string;
+    /** `item.result.value` (e.g. "Success") from the terminal StreamItem frame. */
+    resultValue?: string;
+    /** Authoritative reply text from `item.result.message`, when messages carried none. */
+    resultMessage?: string;
+    /**
+     * Reliable per-capability access/denial signals from the terminal
+     * StreamItem's `item.result.meteringInformation`. A `hasAccess:false` entry
+     * marks a soft-reject the cached `throttling` counters do not reflect.
+     */
+    meteringInformation?: ChatHubMeterError[];
+    /** Generated-image URLs harvested across the turn's progress frames. */
+    images?: string[];
 }
 
 /** One capability's remaining allowance in the metering table. */

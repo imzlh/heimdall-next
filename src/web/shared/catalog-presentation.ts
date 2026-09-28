@@ -34,6 +34,11 @@ export function sourceInstanceEnabled(source: ListedSource): boolean {
     return source.instanceEnabled ?? source.enabled ?? false;
 }
 
+/** Long UUIDs read as noise in dense lists; keep a copyable prefix instead. */
+export function shortSourceId(id: string): string {
+    return id.length > 12 ? `${id.slice(0, 8)}…` : id;
+}
+
 export function sourceAvailabilityText(source: ListedSource): string {
     if (source.pluginEnabled === false) {
         return "源插件已停用，此渠道暂不可用。";

@@ -373,7 +373,7 @@ Deno.test("chat answers current_time locally and keeps image attachments", async
     }
 });
 
-Deno.test("chat regenerate drops the previous reply", async () => {
+Deno.test("chat regenerate selects a new reply while preserving the previous variant", async () => {
     const directory = await Deno.makeTempDir({
         prefix: "heimdall-chat-regen-",
     });

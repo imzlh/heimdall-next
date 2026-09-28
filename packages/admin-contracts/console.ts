@@ -83,6 +83,12 @@ export interface JournalRequest {
     operation?: string;
     status?: string;
     receivedAt?: string;
+    completedAt?: string;
+    /** When the first content frame arrived; TTFT is the gap from `receivedAt`. */
+    firstTokenAt?: string;
+    /** True when the turn streamed (SSE); a single duration is shown otherwise. */
+    streaming?: boolean;
+    usage?: import("./mod.ts").UsageDto | null;
 }
 
 export interface UsageSnapshot {
@@ -106,6 +112,8 @@ export interface RuntimeSettingsView {
     proxyKeyConfigured: boolean;
     limitPerMinute: number;
     probeIntervalMs: number;
+    /** Cheap model id for chat auto-titling; "" means disabled. */
+    titleModel: string;
 }
 
 export interface RuntimeSettingsEnvelope {
@@ -116,9 +124,12 @@ export interface RuntimeSettingsEnvelope {
 export interface ConsoleSnapshot {
     dashboard: DashboardData;
     requests: JournalRequest[];
+    journal?: JournalSnapshot;
     usage: UsageResponse;
     settings: RuntimeSettingsEnvelope | null;
     proxies?: { pool: ProxyPoolView; etag: string } | null;
+    /** The log page's system-log tab; absent unless that page is rendered. */
+    systemLog?: SystemLogSnapshot;
     stats?: {
         overview: StatsOverviewDto | null;
         series: StatsSeriesDto | null;
@@ -130,4 +141,27 @@ export interface ConsoleSnapshot {
         settings: string;
         proxies?: string;
     };
+}
+
+/** The log page's SSR data; request bodies are fetched only for a selected row. */
+export interface JournalSnapshot {
+    requests: readonly import("./mod.ts").RequestSummaryDto[];
+    nextCursor: string | null;
+    error: string;
+    q?: string;
+    status?: import("./mod.ts").RequestStatusDto;
+    cursor?: string | null;
+    selectedId?: string;
+    detail?: import("./journal.ts").RequestJournalDetailResponse;
+    detailError?: string;
+}
+
+/** The log page's system-log tab data, mirrored to the browser island. */
+export interface SystemLogSnapshot {
+    entries: readonly import("./system-log.ts").SystemLogEntryDto[];
+    nextAfterSeq: number;
+    dropped: number;
+    capacity: number;
+    error: string;
+    level?: import("./system-log.ts").SystemLogLevel;
 }

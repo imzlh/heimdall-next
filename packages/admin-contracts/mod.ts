@@ -4,6 +4,7 @@
  */
 
 import type { SourceProxySelection, SourceProxySummary } from "./proxies.ts";
+export type * from "./journal.ts";
 
 export type {
     ProxyEntryView,
@@ -166,8 +167,14 @@ export interface RequestSummaryDto {
     readonly operation?: string;
     readonly model?: string;
     readonly completedAt?: string;
+    /** When the first content frame arrived; TTFT is the gap from `receivedAt`. */
+    readonly firstTokenAt?: string;
+    /** True when the turn streamed (SSE); a single duration is shown otherwise. */
+    readonly streaming?: boolean;
     readonly protocolPluginId?: string;
     readonly upstreamPluginId?: string;
+    /** Token counts for the row, when recorded. Aggregate figures, not a body. */
+    readonly usage?: UsageDto | null;
 }
 
 export interface UsageDto {
@@ -181,6 +188,7 @@ export interface UsageDto {
     readonly totalTokens?: number;
     readonly cost?: string;
     readonly currency?: string;
+    readonly extensions?: unknown;
 }
 
 export interface RequestDetailDto extends RequestSummaryDto {
@@ -188,6 +196,7 @@ export interface RequestDetailDto extends RequestSummaryDto {
     readonly response?: unknown;
     readonly error?: unknown;
     readonly usage?: UsageDto | null;
+    readonly metadata?: unknown;
 }
 
 export interface FrameDto {
@@ -199,6 +208,7 @@ export interface FrameDto {
     readonly timestamp: string;
     readonly event: unknown;
     readonly causationId?: string;
+    readonly extensions?: unknown;
 }
 
 export interface UsageTotalsDto {
@@ -258,6 +268,32 @@ export interface StatsSeriesDto {
     readonly timeZone: string;
     readonly days: number;
     readonly series: readonly UsageSeriesPointDto[];
+}
+
+/** Which window the trend chart draws: natural days, wall-clock hours, or the adaptive recent window. */
+export type StatsTrendMode = "day" | "hour" | "recent";
+
+export interface StatsTrendPointDto extends UsageCountersDto {
+    /** Bucket start, ISO-8601 UTC. Buckets are `[from, from + bucketMinutes)`. */
+    readonly from: string;
+    /** Civil date of the bucket start in the response's `timeZone`. */
+    readonly day: string;
+    /** Wall-clock label: `MM-DD` for day buckets, `HH:mm` for hour and finer. */
+    readonly label: string;
+}
+
+/** `GET /stats/trend?mode=…`: one bucket per point, oldest first, ending in the present bucket. */
+export interface StatsTrendDto {
+    readonly timeZone: string;
+    readonly mode: StatsTrendMode;
+    /** Bucket width in minutes: 1440, 60, 30, or 15. */
+    readonly bucketMinutes: number;
+    /** Window start (inclusive) and end (exclusive), ISO-8601 UTC. */
+    readonly from: string;
+    readonly until: string;
+    /** `recent` found no usage today and fell back to the trailing day. */
+    readonly fallback: boolean;
+    readonly series: readonly StatsTrendPointDto[];
 }
 
 /** `GET /stats/models?date=YYYY-MM-DD`: one natural day, busiest model first. */

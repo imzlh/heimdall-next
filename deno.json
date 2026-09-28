@@ -33,6 +33,8 @@
         "@hono/hono": "jsr:@hono/hono@4.12.16",
         "@heimdall/hip": "./packages/hip/mod.ts",
         "@heimdall/hip/": "./packages/hip/",
+        "@heimdall/tokens": "./packages/tokens/mod.ts",
+        "@heimdall/tokens/": "./packages/tokens/",
         "@heimdall/contracts": "./packages/contracts/mod.ts",
         "@heimdall/contracts/": "./packages/contracts/",
         "@heimdall/source-sdk": "./packages/source-sdk/mod.ts",

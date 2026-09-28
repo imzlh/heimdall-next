@@ -209,3 +209,83 @@ export function parseChatMarkdown(text: string): MarkdownBlock[] {
         return [paragraph(text)];
     }
 }
+
+export interface ChatCitationItem {
+    readonly verb: string;
+    readonly index: string;
+    /** Full marker id (e.g. `turn1search42`) tying the badge to its source. */
+    readonly id: string;
+}
+
+export type ChatCitationPart =
+    | { readonly kind: "text"; readonly text: string }
+    | { readonly kind: "cites"; readonly items: readonly ChatCitationItem[] };
+
+/**
+ * One citation run: a single `cite` prefix followed by one or more
+ * `turn<round><verb><index>` entries, e.g. `citeturn1search1turn1search6`.
+ */
+const CITATION_RUN = /cite(?:turn(\d+)([a-z]+)(\d+))+/g;
+const CITATION_ENTRY = /turn(\d+)([a-z]+)(\d+)/g;
+
+const CITATION_VERBS: Record<string, string> = {
+    search: "检索",
+    browser: "浏览",
+    fetch: "抓取",
+    files: "文件",
+};
+
+function chatCitationVerb(verb: string): string {
+    return CITATION_VERBS[verb] ?? verb;
+}
+
+/** "检索 1 · 6" for one verb, "检索 1 · 浏览 2" when the run mixes verbs. */
+export function chatCitationLabel(items: readonly ChatCitationItem[]): string {
+    const verbs = new Set(items.map((item) => item.verb));
+    if (verbs.size === 1) {
+        const verb = items[0]?.verb ?? "";
+        return `${chatCitationVerb(verb)} ${
+            items.map((item) => item.index).join(" · ")
+        }`;
+    }
+    return items.map((item) => `${chatCitationVerb(item.verb)} ${item.index}`)
+        .join(" · ");
+}
+
+export function chatCitationAria(items: readonly ChatCitationItem[]): string {
+    return `引用${
+        items.map((item) => `${chatCitationVerb(item.verb)}结果 ${item.index}`)
+            .join("、")
+    }`;
+}
+
+/**
+ * Upstream citation markers arrive as plain text. Split each `cite…` run into
+ * a renderable badge; surrounding whitespace belongs to the prose, never the
+ * badge.
+ */
+export function splitChatCitations(
+    text: string,
+): readonly ChatCitationPart[] {
+    if (!text.includes("cite")) return [{ kind: "text", text }];
+    const parts: ChatCitationPart[] = [];
+    const pushText = (value: string) => {
+        if (value) parts.push({ kind: "text", text: value });
+    };
+    let cursor = 0;
+    for (const run of text.matchAll(CITATION_RUN)) {
+        const start = run.index ?? 0;
+        pushText(text.slice(cursor, start).replace(/\s+$/, ""));
+        parts.push({
+            kind: "cites",
+            items: [...run[0].matchAll(CITATION_ENTRY)].map((entry) => ({
+                verb: entry[2] ?? "",
+                index: entry[3] ?? "",
+                id: entry[0],
+            })),
+        });
+        cursor = start + run[0].length;
+    }
+    pushText(text.slice(cursor));
+    return parts;
+}

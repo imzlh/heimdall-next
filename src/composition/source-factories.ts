@@ -48,38 +48,44 @@ export function withSourcePersistence(
         create(config, options) {
             return factory.create(config, {
                 ...options,
-                async onConfigUpdate(updated, previous) {
-                    if (!record(previous) || typeof previous.id !== "string") {
-                        return;
-                    }
-                    const current = await sources.get<Record<string, unknown>>([
-                        previous.id,
-                    ]);
-                    if (
-                        !current ||
-                        current.value.sourcePluginId !== factory.manifest.id ||
-                        stableJson(current.value.config) !==
-                            stableJson(previous)
-                    ) return;
-                    const next = factory.validate(updated);
-                    if (!record(next) || next.id !== previous.id) {
-                        throw new TypeError(
-                            "source refresh must preserve its identity",
-                        );
-                    }
-                    try {
-                        await sources.set([previous.id], {
-                            ...current.value,
-                            config: next,
-                        }, {
-                            expectedVersionstamp: current.versionstamp,
-                        });
-                    } catch (error) {
-                        if (!(error instanceof StorageConflictError)) {
-                            throw error;
+                onConfigUpdate: options?.onConfigUpdate ??
+                    (async (updated, previous) => {
+                        if (
+                            !record(previous) || typeof previous.id !== "string"
+                        ) {
+                            return;
                         }
-                    }
-                },
+                        const current = await sources.get<
+                            Record<string, unknown>
+                        >([
+                            previous.id,
+                        ]);
+                        if (
+                            !current ||
+                            current.value.sourcePluginId !==
+                                factory.manifest.id ||
+                            stableJson(current.value.config) !==
+                                stableJson(previous)
+                        ) return;
+                        const next = factory.validate(updated);
+                        if (!record(next) || next.id !== previous.id) {
+                            throw new TypeError(
+                                "source refresh must preserve its identity",
+                            );
+                        }
+                        try {
+                            await sources.set([previous.id], {
+                                ...current.value,
+                                config: next,
+                            }, {
+                                expectedVersionstamp: current.versionstamp,
+                            });
+                        } catch (error) {
+                            if (!(error instanceof StorageConflictError)) {
+                                throw error;
+                            }
+                        }
+                    }),
             });
         },
     };

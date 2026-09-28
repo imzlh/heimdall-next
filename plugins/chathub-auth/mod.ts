@@ -8,7 +8,7 @@ import manifest from "./manifest.json" with { type: "json" };
 import {
     SourceProxyError,
     SourceTransport,
-} from "../../packages/source-sdk/mod.ts";
+} from "@heimdall/source-sdk/mod.ts";
 
 /** Mounted only under the host's authenticated management API. */
 export function createChatHubAuthPlugin(

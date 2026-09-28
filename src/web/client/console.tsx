@@ -5,9 +5,14 @@ import { uiContributionKey } from "@heimdall/admin-contracts/ui.ts";
 import { useEffect, useRef, useState } from "hono/jsx/dom";
 import { syncPluginNavigation } from "./plugin-navigation.ts";
 import { ActivityPanel } from "./activity.tsx";
+import { SystemLogPage } from "./system-log/page.tsx";
+import { RequestJournalPage } from "./journal/page.tsx";
 import { SourceCreateDialog } from "./source-create-dialog.tsx";
-import { AuthPanel } from "./auth.tsx";
-import { ChannelsPanel, OverviewPanel } from "./dashboard.tsx";
+import {
+    ChannelsPanel,
+    ChannelViewToggle,
+    OverviewPanel,
+} from "./dashboard.tsx";
 import { ClientSlots } from "./extensions/slots.tsx";
 import { SourceConfigPanel } from "./forms/source-config-panel.tsx";
 import { RuntimeSettingsPanel } from "./settings.tsx";
@@ -26,6 +31,8 @@ import { ToastStack, useToasts } from "./toasts.tsx";
 const CONSOLE_PAGES: readonly ConsolePage[] = [
     "overview",
     "channels",
+    "logs",
+    "requests",
     "settings",
     "plugin",
 ];
@@ -64,10 +71,7 @@ export function Console(
         loading,
         refreshError,
         revision,
-        authOpen,
-        setAuthOpen,
         authBusy,
-        authError,
         connected,
         source,
         setSource,
@@ -76,7 +80,6 @@ export function Console(
         theme,
         setTheme,
         refresh,
-        connect,
         logout,
     } = useConsoleState({
         initial,
@@ -102,6 +105,9 @@ export function Console(
     );
     const refreshRef = useRef(refresh);
     refreshRef.current = refresh;
+    // The system-log page teleports its level filter into the header row,
+    // left of the shared refresh button.
+    const logFilterSlot = useRef<HTMLDivElement | null>(null);
 
     useEffect(() => {
         const onClick = (event: MouseEvent) => {
@@ -149,7 +155,7 @@ export function Console(
     useEffect(() => {
         const key = activePage === "plugin"
             ? activeTab ?? "plugin"
-            : activePage;
+            : activePage === "requests" ? "overview" : activePage;
         for (const link of document.querySelectorAll("a")) {
             const classes = (link.getAttribute("class") ?? "")
                 .split(/\s+/)
@@ -296,17 +302,6 @@ export function Console(
                     >
                         <Icon name={theme === "dark" ? "sun" : "moon"} />
                     </button>
-                    <button
-                        type="button"
-                        class="icon-button"
-                        disabled={authBusy}
-                        aria-label="管理令牌"
-                        title="管理令牌"
-                        aria-expanded={authOpen || dashboard.authRequired}
-                        onClick={() => setAuthOpen((value) => !value)}
-                    >
-                        <Icon name="key" />
-                    </button>
                     {connected && (
                         <button
                             type="button"
@@ -333,16 +328,22 @@ export function Console(
                         </p>
                     </div>
                     <div class="config-actions">
+                        {activePage === "logs" && !dashboard.authRequired && (
+                            <div ref={logFilterSlot} class="system-log-slot" />
+                        )}
                         {activePage === "channels" && !dashboard.authRequired &&
                             (
-                                <button
-                                    type="button"
-                                    class="primary-button"
-                                    onClick={() => setAdding(true)}
-                                >
-                                    <Icon name="plus" />
-                                    添加渠道
-                                </button>
+                                <>
+                                    <ChannelViewToggle />
+                                    <button
+                                        type="button"
+                                        class="primary-button"
+                                        onClick={() => setAdding(true)}
+                                    >
+                                        <Icon name="plus" />
+                                        添加渠道
+                                    </button>
+                                </>
                             )}
                         <button
                             type="button"
@@ -356,15 +357,24 @@ export function Console(
                         </button>
                     </div>
                 </div>
-                {(authOpen || dashboard.authRequired) && (
-                    <AuthPanel
-                        busy={authBusy}
-                        error={authError}
-                        onConnect={connect}
-                        onClose={dashboard.authRequired
-                            ? undefined
-                            : () => setAuthOpen(false)}
-                    />
+                {dashboard.authRequired && (
+                    <section class="panel auth-panel">
+                        <h2>连接管理工作区</h2>
+                        <p>输入管理令牌，查看渠道、用量和运行设置。</p>
+                        <form method="post" action="/admin/session">
+                            <label for="admin-token">管理令牌</label>
+                            <input
+                                id="admin-token"
+                                name="token"
+                                type="password"
+                                required
+                                autocomplete="current-password"
+                            />
+                            <button type="submit" class="primary-button">
+                                登录
+                            </button>
+                        </form>
+                    </section>
                 )}
                 {refreshError && (
                     <p class="form-error" role="alert">{refreshError}</p>
@@ -377,7 +387,7 @@ export function Console(
                         <OverviewPanel
                             dashboard={dashboard}
                             revision={revision}
-                            initialActivity={initialPanels}
+                            initialActivity={page === "overview" ? initialPanels : undefined}
                             proxyPool={proxyPool}
                             onRefresh={refresh}
                             widgets={
@@ -393,10 +403,20 @@ export function Console(
                         {!dashboard.authRequired && (
                             <ActivityPanel
                                 revision={revision}
-                                initial={initialPanels}
+                                initial={page === "overview" ? initialPanels : undefined}
                             />
                         )}
                     </>
+                )}
+                {activePage === "logs" && !dashboard.authRequired && (
+                    <SystemLogPage
+                        revision={revision}
+                        initial={initialPanels?.systemLog}
+                        filterSlot={logFilterSlot}
+                    />
+                )}
+                {activePage === "requests" && !dashboard.authRequired && (
+                    <RequestJournalPage revision={revision} initial={initialPanels?.journal} />
                 )}
                 {activePage === "channels" && !dashboard.authRequired && (
                     <>
@@ -409,6 +429,9 @@ export function Console(
                                 presetSchemas={schemas}
                                 presetId={source.presetId}
                                 presets={dashboard.status.presets}
+                                title={dashboard.status.sources.find(
+                                    (item) => item.id === source.id,
+                                )?.name}
                                 onClose={() => setSource(null)}
                                 onSaved={refresh}
                             />

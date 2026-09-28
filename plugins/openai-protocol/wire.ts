@@ -23,6 +23,21 @@ export function isPublicReasoning(
         part.visibility === "public";
 }
 
+/**
+ * The pre-rendered one-line summary of a `status` custom part (cloud activity
+ * such as a search). Compatible clients have no structured status field, so the
+ * summary is surfaced to them as ordinary text.
+ */
+export function statusPartSummary(part: ContentPart): string | undefined {
+    if (part.type !== "custom" || part.name !== "status") return undefined;
+    const value = part.value;
+    if (typeof value !== "object" || value === null) return undefined;
+    const summary = (value as { summary?: unknown }).summary;
+    return typeof summary === "string" && summary.trim().length > 0
+        ? summary.trim()
+        : undefined;
+}
+
 export function openAIStreamError(error: unknown): {
     code: string;
     message: string;

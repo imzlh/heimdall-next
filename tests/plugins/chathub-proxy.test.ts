@@ -13,7 +13,6 @@ import authPlugin, {
 import { CHATHUB_TOKEN_URL } from "../../plugins/chathub-source/auth.ts";
 import { encodeRecord } from "../../plugins/chathub-source/protocol/codec.ts";
 import { RECORD_SEPARATOR } from "../../plugins/chathub-source/protocol/constants.ts";
-import { MEMORY_OFF_DIRECTIVE } from "../../plugins/chathub-source/tools.ts";
 import type { WebSocketLike } from "../../plugins/chathub-source/protocol/types.ts";
 
 const direct: ResolvedSourceProxy = { mode: "direct", selectedBy: "source" };
@@ -58,12 +57,23 @@ async function run(
     signal = new AbortController().signal,
     request = input,
 ): Promise<StreamEvent[]> {
+    // The kernel resolves one conversation identity and hands it to the source
+    // on the context; stand in for that here from any explicit id on the
+    // request, so session-reuse tests exercise the same path as production.
+    const metadata = request.payload.metadata as
+        | Record<string, unknown>
+        | undefined;
+    const conversationId = metadata?.conversationId ??
+        metadata?.conversation_id;
     const events: StreamEvent[] = [];
     for await (
         const frame of source.execute(request, {
             requestId: request.requestId,
             signal,
             metadata: {},
+            conversationId: typeof conversationId === "string"
+                ? conversationId
+                : undefined,
         })
     ) events.push(frame.event);
     return events;
@@ -638,7 +648,7 @@ Deno.test("ChatHub proxied WebSocket sends CONNECT through the selected proxy an
     }
 });
 
-Deno.test("ChatHub disables memory per turn and instructs the model to ignore it", async () => {
+Deno.test("ChatHub disables memory per turn on the connection URL", async () => {
     let chatUrl: URL | undefined;
     let chatText: string | undefined;
     const source = createChatHubSource(config, {
@@ -702,7 +712,188 @@ Deno.test("ChatHub disables memory per turn and instructs the model to ignore it
     assertEquals(events.at(-1)?.kind, "run.completed");
     // Session-level memory block rides the connection URL.
     assertEquals(chatUrl?.searchParams.get("disableMemory"), "1");
-    // The turn text leads with the memory-off directive.
+    // The turn text is the user's message only: no injected system directive
+    // (Copilot's content filter blocks the turn when one is prepended).
     assert(chatText !== undefined, "chat frame carried no user text");
-    assertStringIncludes(chatText, MEMORY_OFF_DIRECTIVE);
+    assertEquals(chatText, "[user]\n你好");
+});
+
+Deno.test("ChatHub surfaces a content-policy refusal as a content_filter error", async () => {
+    let sends = 0;
+    const source = createChatHubSource(config, {
+        getProxy: () => direct,
+        webSocketFactory() {
+            return new class extends EventTarget implements WebSocketLike {
+                readyState = 0;
+                constructor() {
+                    super();
+                    queueMicrotask(() => {
+                        this.readyState = 1;
+                        this.dispatchEvent(new Event("open"));
+                    });
+                }
+                send() {
+                    const data = ++sends === 1
+                        ? encodeRecord({})
+                        : encodeRecord({
+                            type: 2,
+                            item: {
+                                messages: [{
+                                    author: "bot",
+                                    text:
+                                        "Hmm...it looks like I can't chat about this. Let's try a different topic.",
+                                }],
+                            },
+                        }) + encodeRecord({ type: 3 });
+                    queueMicrotask(() => {
+                        if (this.readyState === 1) {
+                            this.dispatchEvent(
+                                new MessageEvent("message", { data }),
+                            );
+                        }
+                    });
+                }
+                close() {
+                    this.readyState = 3;
+                }
+            }();
+        },
+    });
+    const events = await run(source);
+    const last = events.at(-1);
+    assertEquals(last?.kind, "run.error");
+    assertEquals(
+        last?.kind === "run.error" ? last.error.code : undefined,
+        "content_filter",
+    );
+    // The refusal text must never leak to the caller as streamed content.
+    for (const event of events) {
+        assert(
+            event.kind !== "part.delta" ||
+                typeof event.delta !== "string" ||
+                !event.delta.includes("different topic"),
+            "content-policy refusal leaked as a streamed delta",
+        );
+    }
+});
+
+Deno.test("ChatHub estimates token usage and bills reused context as cached", async () => {
+    const source = createChatHubSource(config, {
+        getProxy: () => direct,
+        webSocketFactory: () => new ScriptedSocket(),
+    });
+    const conversation = {
+        ...input,
+        payload: {
+            ...input.payload,
+            metadata: { conversationId: "usage-session" },
+        },
+    };
+    const firstUsage = (await run(source, undefined, conversation))
+        .find((event) => event.kind === "usage");
+    assert(firstUsage?.kind === "usage");
+    // A fresh session sends the whole prompt; nothing is cached yet.
+    assert((firstUsage.usage.inputTokens ?? 0) > 0);
+    assert((firstUsage.usage.outputTokens ?? 0) > 0);
+    assertEquals(firstUsage.usage.cachedInputTokens, undefined);
+    assertEquals(firstUsage.usage.extensions?.estimated, true);
+
+    const followup: OperationRequest<GenerationRequest> = {
+        ...conversation,
+        payload: {
+            ...conversation.payload,
+            messages: [
+                ...conversation.payload.messages,
+                {
+                    id: "assistant-1",
+                    role: "assistant",
+                    parts: [{ id: "answer-1", type: "text", text: "你好" }],
+                },
+                {
+                    id: "user-2",
+                    role: "user",
+                    parts: [{ id: "text-2", type: "text", text: "继续" }],
+                },
+            ],
+        },
+    };
+    const secondUsage = (await run(source, undefined, followup))
+        .find((event) => event.kind === "usage");
+    assert(secondUsage?.kind === "usage");
+    // The reused session keeps the earlier turns server-side, so they count as
+    // cached input while only the new message is billed as fresh input.
+    assert((secondUsage.usage.cachedInputTokens ?? 0) > 0);
+    assert(
+        (secondUsage.usage.inputTokens ?? 0) <
+            (firstUsage.usage.inputTokens ?? 0) +
+                (secondUsage.usage.cachedInputTokens ?? 0),
+    );
+});
+
+Deno.test("ChatHub emits title and suggestions before completing the message", async () => {
+    let sends = 0;
+    const source = createChatHubSource(config, {
+        getProxy: () => direct,
+        webSocketFactory() {
+            return new class extends EventTarget implements WebSocketLike {
+                readyState = 0;
+                constructor() {
+                    super();
+                    queueMicrotask(() => {
+                        this.readyState = 1;
+                        this.dispatchEvent(new Event("open"));
+                    });
+                }
+                send() {
+                    const data = ++sends === 1
+                        ? encodeRecord({})
+                        : encodeRecord({
+                            type: 2,
+                            item: {
+                                defaultChatName: "关于猫的对话",
+                                messages: [{
+                                    author: "bot",
+                                    text: "你好",
+                                    suggestedResponses: [
+                                        {
+                                            text: "讲个笑话",
+                                            commandText: "讲个笑话",
+                                        },
+                                        { text: "再来一个" },
+                                    ],
+                                }],
+                            },
+                        }) + encodeRecord({ type: 3 });
+                    queueMicrotask(() => {
+                        if (this.readyState === 1) {
+                            this.dispatchEvent(
+                                new MessageEvent("message", { data }),
+                            );
+                        }
+                    });
+                }
+                close() {
+                    this.readyState = 3;
+                }
+            }();
+        },
+    });
+    const events = await run(source);
+    const kinds = events.map((event) => event.kind);
+    const title = events.find((event) => event.kind === "title");
+    const suggestions = events.find((event) => event.kind === "suggestions");
+    assertEquals(
+        title?.kind === "title" ? title.title : undefined,
+        "关于猫的对话",
+    );
+    assertEquals(
+        suggestions?.kind === "suggestions"
+            ? suggestions.suggestions
+            : undefined,
+        ["讲个笑话", "再来一个"],
+    );
+    // Metadata rides ahead of the terminal message/run events.
+    assert(kinds.indexOf("title") < kinds.indexOf("message.completed"));
+    assert(kinds.indexOf("suggestions") < kinds.indexOf("message.completed"));
+    assertEquals(events.at(-1)?.kind, "run.completed");
 });

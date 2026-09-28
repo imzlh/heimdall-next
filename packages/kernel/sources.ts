@@ -60,6 +60,14 @@ export interface SourceRegistryOptions {
     readonly cooldownMs?: number;
     /** Cooldown after an upstream 401 or 403. Defaults to 5 minutes. */
     readonly authCooldownMs?: number;
+    /**
+     * How long a conversation prefers the source that last served it, so a
+     * source's own context cache (e.g. ChatHub sessions) can be reused. Best
+     * effort: the preference only breaks ties among ready, equal-priority
+     * peers and is dropped when that source is cooling. Defaults to 1 hour;
+     * 0 disables affinity.
+     */
+    readonly conversationAffinityMs?: number;
 }
 
 /**
@@ -80,11 +88,14 @@ export class SourceRegistry implements SourceRouter {
         message: string;
     }>();
     #discovered = new Map<string, readonly string[]>();
+    /** conversationId → the source that last served it, with an expiry. */
+    #affinity = new Map<string, { sourceId: string; expiresAt: number }>();
     readonly #now: () => Date;
     readonly #maxAttempts: number;
     readonly #sameSourceAttempts: number;
     readonly #cooldownMs: number;
     readonly #authCooldownMs: number;
+    readonly #affinityMs: number;
 
     constructor(options: SourceRegistryOptions = {}) {
         if (
@@ -102,11 +113,21 @@ export class SourceRegistry implements SourceRouter {
                 "sameSourceAttempts must be a positive integer",
             );
         }
+        if (
+            options.conversationAffinityMs !== undefined &&
+            (!Number.isFinite(options.conversationAffinityMs) ||
+                options.conversationAffinityMs < 0)
+        ) {
+            throw new TypeError(
+                "conversationAffinityMs must be a non-negative number",
+            );
+        }
         this.#now = options.now ?? (() => new Date());
         this.#maxAttempts = options.maxAttempts ?? 3;
         this.#sameSourceAttempts = options.sameSourceAttempts ?? 3;
         this.#cooldownMs = options.cooldownMs ?? 30_000;
         this.#authCooldownMs = options.authCooldownMs ?? 300_000;
+        this.#affinityMs = options.conversationAffinityMs ?? 3_600_000;
     }
 
     register(source: InferenceSource): void {
@@ -226,11 +247,56 @@ export class SourceRegistry implements SourceRouter {
         const peers = pool.filter((source) =>
             capabilityPriority(source, request.operation) === bestPriority
         );
+        const sticky = this.#affinitySource(request, peers);
+        if (sticky) return sticky;
         const cursorKey = selectionKey(request);
         const cursor = this.#cursor.get(cursorKey) ?? 0;
         const selected = peers[cursor % peers.length]!;
         this.#cursor.set(cursorKey, (cursor + 1) % peers.length);
         return selected;
+    }
+
+    /**
+     * The source this conversation last committed to, when it is still one of
+     * the ready, equal-priority `peers`. Affinity only breaks ties this way, so
+     * it never routes to a worse-priority or cooling source; a stale or expired
+     * hint is dropped. Returns undefined when affinity is off or misses.
+     */
+    #affinitySource(
+        request: OperationRequest,
+        peers: readonly InferenceSource[],
+    ): InferenceSource | undefined {
+        if (this.#affinityMs === 0) return undefined;
+        const conversation = conversationIdentity(request);
+        if (conversation === undefined) return undefined;
+        const remembered = this.#affinity.get(conversation);
+        if (remembered === undefined) return undefined;
+        if (remembered.expiresAt <= this.#now().getTime()) {
+            this.#affinity.delete(conversation);
+            return undefined;
+        }
+        return peers.find((source) => source.id === remembered.sourceId);
+    }
+
+    /**
+     * Remember the source that served a conversation so its next turn prefers
+     * the same source (and thus the same warm upstream session). Bounded and
+     * time-boxed; only conversations that carry an id are tracked.
+     */
+    #rememberAffinity(
+        request: OperationRequest,
+        source: InferenceSource,
+    ): void {
+        if (this.#affinityMs === 0) return;
+        const conversation = conversationIdentity(request);
+        if (conversation === undefined) return;
+        if (this.#affinity.size >= 4096 && !this.#affinity.has(conversation)) {
+            this.#affinity.delete(this.#affinity.keys().next().value!);
+        }
+        this.#affinity.set(conversation, {
+            sourceId: source.id,
+            expiresAt: this.#now().getTime() + this.#affinityMs,
+        });
     }
 
     run(
@@ -247,6 +313,13 @@ export class SourceRegistry implements SourceRouter {
     ): AsyncIterable<StreamFrame> {
         context.signal.throwIfAborted();
         const attempts = this.#attempts(request);
+        // Resolve the conversation identity once and hand it to every source
+        // attempt, so a stateful source keys its warm session on the same value
+        // the kernel uses for routing affinity instead of deriving its own.
+        const conversation = conversationIdentity(request);
+        const sourceContext: SourceContext = conversation === undefined
+            ? context
+            : { ...context, conversationId: conversation };
         let lastError: CanonicalError | undefined;
         for (const source of attempts) {
             for (
@@ -262,7 +335,7 @@ export class SourceRegistry implements SourceRouter {
                 try {
                     const outcome = yield* attemptSource(
                         validateFrames(
-                            source.execute(request, context),
+                            source.execute(request, sourceContext),
                             request.requestId,
                             { signal: context.signal },
                         ),
@@ -281,6 +354,7 @@ export class SourceRegistry implements SourceRouter {
                         break;
                     }
                     if (outcome.kind === "stop") {
+                        if (committed) this.#rememberAffinity(request, source);
                         if (outcome.cooldown === "auth") {
                             this.#recordAttemptHealth(
                                 source,
@@ -290,6 +364,7 @@ export class SourceRegistry implements SourceRouter {
                         return;
                     }
                     this.#recordAttemptHealth(source);
+                    if (committed) this.#rememberAffinity(request, source);
                     return;
                 } catch (error) {
                     context.signal.throwIfAborted();
@@ -592,6 +667,86 @@ function capabilityPriority(
 
 function selectionKey(request: OperationRequest): string {
     return `${request.operation}\0${request.traits.model ?? ""}`;
+}
+
+/**
+ * A stable identifier for the conversation a request belongs to, used both for
+ * routing affinity and to let a stateful source reuse a warm upstream session.
+ *
+ * An explicit id from request metadata wins. Otherwise, for a generation
+ * request, one is derived from the conversation's opening — the value stays
+ * constant as later turns are appended, so every turn of one conversation
+ * resolves to the same identity. Stateless protocols (OpenAI, Anthropic) carry
+ * no id, so without this their turns would scatter across sources and never
+ * reuse a cached session.
+ */
+function conversationIdentity(request: OperationRequest): string | undefined {
+    const explicit = explicitConversationId(request);
+    if (explicit !== undefined) return `id:${explicit}`;
+    const anchor = conversationAnchor(request);
+    return anchor === undefined ? undefined : `anchor:${anchor}`;
+}
+
+/** An id the protocol supplied, from the request envelope or its payload. */
+function explicitConversationId(request: OperationRequest): string | undefined {
+    const payload = request.payload as { metadata?: unknown };
+    for (const source of [request.metadata, payload.metadata]) {
+        const metadata = source as Record<string, unknown> | undefined;
+        const value = metadata?.conversationId ?? metadata?.conversation_id;
+        if (
+            typeof value === "string" && value.trim().length > 0 &&
+            value.length <= 256
+        ) {
+            return value;
+        }
+    }
+    return undefined;
+}
+
+/**
+ * A digest of a generation request's opening: its instructions and the text of
+ * the first message. These are the only parts guaranteed present in every turn
+ * (later turns only append), so they anchor a conversation without an explicit
+ * id. A weak collision costs at most a cache miss — a source verifies the full
+ * message prefix before it reuses a session — never a wrong reuse.
+ */
+function conversationAnchor(request: OperationRequest): string | undefined {
+    const payload = request.payload as {
+        messages?: unknown;
+        instructions?: unknown;
+    };
+    if (!Array.isArray(payload.messages) || payload.messages.length === 0) {
+        return undefined;
+    }
+    const opening: string[] = [];
+    if (typeof payload.instructions === "string") {
+        opening.push(payload.instructions);
+    }
+    const parts = (payload.messages[0] as { parts?: unknown }).parts;
+    if (Array.isArray(parts)) {
+        for (const part of parts) {
+            const text = (part as { text?: unknown }).text;
+            if (typeof text === "string") opening.push(text);
+        }
+    }
+    return opening.length === 0 ? undefined : hashText(opening.join("\u0000"));
+}
+
+/**
+ * A fast, non-cryptographic digest of a string. Two 32-bit FNV-1a lanes give a
+ * wide-enough key for conversation anchoring; it guards nothing, so a weak hash
+ * is fine and keeps this off the request's hot path.
+ */
+function hashText(text: string): string {
+    let low = 0x811c9dc5;
+    let high = 0x811c9dc5 ^ 0x9e3779b9;
+    for (let index = 0; index < text.length; index++) {
+        const code = text.charCodeAt(index);
+        low = Math.imul(low ^ (code & 0xff), 0x01000193);
+        high = Math.imul(high ^ (code >>> 8), 0x01000193);
+    }
+    return (low >>> 0).toString(16).padStart(8, "0") +
+        (high >>> 0).toString(16).padStart(8, "0");
 }
 
 function validateSource(source: InferenceSource): void {

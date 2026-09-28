@@ -313,7 +313,7 @@ Deno.test("UI SSR renders useful escaped fallback and disabled actions for every
     />).toString();
     assertStringIncludes(html, "额度 &lt;script&gt;");
     assertStringIncludes(html, "热上下文");
-    assertStringIncludes(html, "<dd>12</dd>");
+    assertStringIncludes(html, "<dd><strong>12</strong></dd>");
     assertStringIncludes(html, "&lt;img src=x onerror=alert(1)&gt;");
     assertStringIncludes(html, 'data-ui-mode="sandbox"');
     assertStringIncludes(html, "disabled");

@@ -9,6 +9,7 @@ import type {
     UsageResponse,
 } from "@heimdall/admin-contracts/console.ts";
 import { projectListedPlugins } from "@heimdall/admin-contracts/plugin-catalog.ts";
+import type { UsageDto } from "@heimdall/admin-contracts";
 import type {
     SourceProxySelection,
     SourceProxySummary,
@@ -25,6 +26,8 @@ export interface ConsoleSnapshotOptions {
     readonly authorized: boolean;
     readonly adminAuthToken?: string;
     readonly origin?: string;
+    /** Only the overview needs recent requests, usage and chart data. */
+    readonly includeActivity?: boolean;
 }
 
 interface Resource {
@@ -94,6 +97,8 @@ export async function loadConsoleSnapshot(
     };
     const protectedRead = (path: string): Promise<Resource> =>
         options.authorized ? read(path) : Promise.resolve(EMPTY);
+    const activityRead = (path: string): Promise<Resource> =>
+        options.includeActivity === false ? Promise.resolve(EMPTY) : protectedRead(path);
     const [
         health,
         models,
@@ -109,15 +114,36 @@ export async function loadConsoleSnapshot(
             read("/health"),
             protectedRead("/api/admin/models"),
             protectedRead("/api/admin/status"),
-            protectedRead("/api/admin/requests?limit=20"),
-            protectedRead("/api/admin/usage"),
+            activityRead("/api/admin/requests?limit=20"),
+            activityRead("/api/admin/usage"),
             protectedRead("/api/admin/settings"),
             protectedRead("/api/admin/proxies"),
-            protectedRead("/api/admin/stats"),
-            protectedRead("/api/admin/stats/series?days=7"),
+            activityRead("/api/admin/stats"),
+            activityRead("/api/admin/stats/series?days=7"),
         ]);
     const text = (value: unknown): string | undefined =>
         typeof value === "string" ? redact(value) : undefined;
+    // Keep the row's token counts through the snapshot so the overview table
+    // shows the same input/output figures the log page does.
+    const journalUsage = (value: unknown): UsageDto | undefined => {
+        const usage = record(value);
+        if (usage === undefined) return undefined;
+        const num = (input: unknown): number | undefined =>
+            typeof input === "number" && Number.isFinite(input)
+                ? input
+                : undefined;
+        return {
+            requestId: text(usage.requestId) ?? "",
+            updatedAt: text(usage.updatedAt) ?? "",
+            inputTokens: num(usage.inputTokens),
+            outputTokens: num(usage.outputTokens),
+            reasoningTokens: num(usage.reasoningTokens),
+            cachedInputTokens: num(usage.cachedInputTokens),
+            cacheWriteTokens: num(usage.cacheWriteTokens),
+            totalTokens: num(usage.totalTokens),
+            extensions: record(usage.extensions),
+        };
+    };
     const dashboard: DashboardData = {
         health: { status: text(health.data.status) ?? "unavailable" },
         models: records(models.data.data).map((model): ListedModel => ({
@@ -201,6 +227,10 @@ export async function loadConsoleSnapshot(
             operation: text(entry.operation),
             status: text(entry.status),
             receivedAt: text(entry.receivedAt),
+            completedAt: text(entry.completedAt),
+            firstTokenAt: text(entry.firstTokenAt),
+            streaming: bool(entry.streaming),
+            usage: journalUsage(entry.usage),
         }));
     const totals = record(usage.data.usage);
     const usageData: UsageResponse = {
@@ -232,6 +262,9 @@ export async function loadConsoleSnapshot(
                     publicSettings.probeIntervalMs,
                     300_000,
                 ),
+                titleModel: typeof publicSettings.titleModel === "string"
+                    ? publicSettings.titleModel
+                    : "",
             },
             etag: settings.etag,
         };

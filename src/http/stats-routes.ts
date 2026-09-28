@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
+import type { StatsTrendMode } from "@heimdall/admin-contracts";
 import type { ServerApp, ServerEnv } from "./app.ts";
 import { isCivilDate } from "../stats/calendar.ts";
 import {
@@ -9,11 +10,13 @@ import {
     type StatsReader,
     statsSeries,
     statsToday,
+    statsTrend,
 } from "../stats/report.ts";
 
 const REQUEST_ID = "x-heimdall-request-id";
 const DEFAULT_SERIES_DAYS = 7;
 const MAX_SERIES_DAYS = 90;
+const TREND_MODES: readonly StatsTrendMode[] = ["day", "hour", "recent"];
 /** The journal cannot hold data from before this date. */
 const MIN_DATE = "2020-01-01";
 
@@ -38,6 +41,12 @@ export function createStatsRoutes(
             json(context, statsSeries(reader, clock, queryDays(context))),
     );
 
+    app.get(
+        "/stats/trend",
+        (context) =>
+            json(context, statsTrend(reader, clock, queryTrendMode(context))),
+    );
+
     app.get("/stats/models", (context) =>
         json(
             context,
@@ -57,6 +66,15 @@ function queryDays(context: Context<ServerEnv>): number {
         );
     }
     return days;
+}
+
+function queryTrendMode(context: Context<ServerEnv>): StatsTrendMode {
+    const raw = context.req.query("mode")?.trim();
+    if (raw === undefined || raw.length === 0) return "day";
+    if (!(TREND_MODES as readonly string[]).includes(raw)) {
+        throw new StatsRouteError("mode must be one of day, hour, recent");
+    }
+    return raw as StatsTrendMode;
 }
 
 function queryDate(context: Context<ServerEnv>, clock: StatsClock): string {

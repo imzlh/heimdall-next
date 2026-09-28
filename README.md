@@ -120,6 +120,41 @@ behind the session and same-origin checks. The management bridge at
 JavaScript, the Chat page supports signing in, navigating saved conversations,
 and reading the server snapshot.
 
+Chat images upload once as raw PNG, JPEG, GIF, or WebP bytes (up to 5 MiB each,
+four per message). History and drafts retain asset IDs and authenticated
+`/admin/chat/api/assets/:id` URLs, so reusing a reference image does not upload
+its bytes again. The asset SQLite database deduplicates identical content;
+each upload or reference pick receives an independent 24-hour draft lease.
+Drafts retain that lease alongside the asset ID. Saving the user message consumes
+only its submitted leases; deleting another conversation cannot invalidate a
+live draft of the same image. Removing a draft releases its lease. Expired or
+released uploads without saved references are reclaimed in small batches on
+startup and image writes, including uploads that were never sent. Saved history
+contains no lease IDs.
+
+The asset API accepts `POST /api/chat/assets` for a raw image upload,
+`POST /api/chat/assets/:id/lease` for a new draft reference without uploading bytes,
+and `DELETE /api/chat/assets/:id/lease?leaseId=...` for releasing that reference.
+Browsers use the corresponding `/admin/chat/api/*` routes with their web session;
+direct API clients use the management Bearer token. Lease operations never
+authorize the separately signed public image route.
+
+Startup migrates legacy inline images from every conversation branch in bounded
+batches, clearing their old base64 columns after the new asset has been saved.
+Unreadable legacy attachments move to `legacy_attachment_quarantine` in the
+Chat database with their original bytes and failure reason, so a damaged image
+does not prevent startup. Deleting messages or conversations reclaims their
+images only after checking all remaining branches, forked conversations, and
+live draft leases. Back up the Chat and asset databases together.
+
+Set `HEIMDALL_PUBLIC_BASE_URL` to the gateway's upstream-reachable HTTP(S)
+origin (for example, `https://gateway.example`) to send images to providers by
+ten-minute signed links. The configured URL must have no path, query, fragment,
+or credentials. These links authorize only one asset and expire on restart;
+the next request creates fresh links. Without a public origin, the server reads
+the asset locally and adds its bytes only to the upstream request, preserving
+offline/private deployments. Neither mode accepts arbitrary remote image URLs.
+
 The Chat core owns conversation history, generation, and cancellation.
 Additional capabilities enter through plugin contracts: tool definitions and
 execution come from `ToolPlugin`, with no search, webpage-fetching, clock, or
@@ -143,6 +178,8 @@ persistent stores belong to the executable composition.
 | `HEIMDALL_KV_PATH`                                     | Control-plane configuration database                                            |
 | `HEIMDALL_REQUESTS_PATH`                               | Request, frame, and usage SQLite database; defaults to `./data/requests.sqlite` |
 | `HEIMDALL_CHAT_PATH`                                   | Chat SQLite database; defaults to `./data/chat.sqlite`                          |
+| `HEIMDALL_CHAT_ASSETS_PATH`                            | Image asset SQLite database; defaults to `./data/chat-assets.sqlite`             |
+| `HEIMDALL_PUBLIC_BASE_URL`                             | Explicit HTTP(S) origin for signed upstream image links; unset keeps local mode |
 | `HEIMDALL_ADMIN_TOKEN`                                 | Bearer token protecting management and chat data                                |
 | `HEIMDALL_OPENAI_BASE_URL` / `HEIMDALL_OPENAI_API_KEY` | Initial OpenAI-compatible source configuration                                  |
 | `HEIMDALL_PROXY_KEY`                                   | Required bearer token or `x-api-key` for `/v1`                                  |

@@ -270,3 +270,64 @@ Deno.test("toolset caps web searches per run", async () => {
     assert(outcomes[3]?.text.includes("budget"));
     assertEquals(calls.length, 3);
 });
+
+Deno.test("conversation can disable a tool plugin so upstream stops offering it", async () => {
+    const directory = await Deno.makeTempDir({ prefix: "heimdall-mute-tool-" });
+    const store = openSqliteChatStore(`${directory}/chat.sqlite`);
+    try {
+        const { source, requests } = scriptedSource([{
+            text: "no tools here",
+        }]);
+        const app = createServer({
+            sources: [source],
+            chat: {
+                store,
+                tools: [createWebToolPlugin({
+                    fetch: () => Promise.resolve(new Response("x")),
+                    tavilyApiKey: "test-key",
+                })],
+            },
+        });
+        const conversationId = await newConversation(app);
+        const patch = await app.request(
+            `http://localhost/api/chat/conversation?id=${conversationId}`,
+            {
+                method: "PATCH",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ disabledTools: ["heimdall.tool.web"] }),
+            },
+        );
+        assertEquals(patch.status, 200);
+        const patched = await patch.json();
+        assertEquals(patched.conversation.disabledTools, ["heimdall.tool.web"]);
+
+        const { status, body } = await sendMessage(
+            app,
+            conversationId,
+            "look it up",
+        );
+        assertEquals(status, 200);
+        const firstTools =
+            (requests[0]?.payload as { tools?: { name: string }[] }).tools ??
+                [];
+        assertEquals(
+            firstTools.some((tool) => tool.name === "web_search"),
+            false,
+        );
+        const messages = body.messages as { role: string; text: string }[];
+        assertEquals(messages.at(-1)?.text, "no tools here");
+
+        const invalid = await app.request(
+            `http://localhost/api/chat/conversation?id=${conversationId}`,
+            {
+                method: "PATCH",
+                headers: { "content-type": "application/json" },
+                body: JSON.stringify({ disabledTools: "web" }),
+            },
+        );
+        assertEquals(invalid.status, 400);
+    } finally {
+        store.close();
+        await Deno.remove(directory, { recursive: true });
+    }
+});

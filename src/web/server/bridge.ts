@@ -32,13 +32,16 @@ const ROUTES: Readonly<Record<string, readonly string[]>> = {
     "/api/admin/plugin-state": ["POST"],
     "/api/admin/plugin": ["DELETE"],
     "/api/admin/source-probe": ["POST"],
+    "/api/admin/source-draft-probe": ["POST"],
     "/api/admin/settings": ["GET", "PUT"],
     "/api/admin/proxies": ["GET", "PUT"],
     "/api/admin/requests": ["GET"],
     "/api/admin/usage": ["GET"],
     "/api/admin/stats": ["GET"],
     "/api/admin/stats/series": ["GET"],
+    "/api/admin/stats/trend": ["GET"],
     "/api/admin/stats/models": ["GET"],
+    "/api/admin/system-logs": ["GET"],
 };
 
 /** A cookie-authenticated adapter for exact host-owned management operations. */
@@ -113,6 +116,9 @@ export function createUiBridge(options: UiBridgeOptions) {
                     "后台不能执行此管理请求。",
                 );
             }
+            // Surface the resolved target in the access log; the bridge path
+            // itself (`POST /admin/ui/request`) says nothing about the op.
+            context.set("accessLogTarget", `${method} ${url.pathname}`);
             if (method === "GET" && input.body !== undefined) {
                 throw new WebRequestError(
                     400,

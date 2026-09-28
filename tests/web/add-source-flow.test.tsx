@@ -65,10 +65,11 @@ function deferred() {
 }
 
 /** Load the actual plugin through its public JSON bridge, without network import. */
-function PluginFixture({ draft, controls, lifecycle }: {
+function PluginFixture({ draft, controls, lifecycle, onProbe }: {
     draft: SourceSetupDraft;
     controls: PresetFlowControls;
     lifecycle: { mounts: number; cleanups: number };
+    onProbe?: AddSourceFlowProps["onProbe"];
 }) {
     const root = useRef<HTMLDivElement | null>(null);
     useEffect(() => {
@@ -88,6 +89,12 @@ function PluginFixture({ draft, controls, lifecycle }: {
             {
                 onSubmit: controls.onSave,
                 onPreview: () => Promise.resolve(),
+                ...(onProbe
+                    ? {
+                        onProbe: (config, signal) =>
+                            onProbe({ draft, sourcePluginId, config }, signal),
+                    }
+                    : {}),
             },
             () => {},
             () => {
@@ -105,6 +112,7 @@ function PluginFixture({ draft, controls, lifecycle }: {
 async function setup(
     options: {
         onSave?: AddSourceFlowProps["onSave"];
+        onProbe?: AddSourceFlowProps["onProbe"];
         reducedMotion?: boolean;
     } = {},
 ) {
@@ -128,6 +136,7 @@ async function setup(
                     <AddSourceFlow
                         sources={sources}
                         presets={presets}
+                        onProbe={options.onProbe}
                         onSave={async (value) => {
                             saved.push(value);
                             await options.onSave?.(value);
@@ -142,6 +151,7 @@ async function setup(
                                 draft={draft}
                                 controls={controls}
                                 lifecycle={lifecycle}
+                                onProbe={options.onProbe}
                             />
                         )}
                     />
@@ -214,7 +224,7 @@ Deno.test("source creation keeps one dialog while switching preset JSX and custo
         await test.act(() => button(test.dialog, "自定义配置").click());
         assertStrictEquals(find(test.root, "dialog"), test.dialog);
         assertEquals(find(test.dialog, 'input[name="apiKey"]').value, "");
-        assert(find(test.dialog, "select"));
+        assert(find(test.dialog, 'button[data-dropdown="source-type"]'));
         assertEquals(test.dialog.showModalCalls, 1);
         assertEquals(test.navigation, []);
         assertEquals(test.storageWrites, []);
@@ -272,10 +282,18 @@ Deno.test("custom configuration creates a new source and closes the dialog after
     const test = await setup();
     try {
         await test.act(() => {
-            const select = find(test.dialog, 'select[name="source-proxy"]');
-            select.value = "direct";
-            select.dispatchEvent(new Event("input"));
+            const trigger = find(
+                test.dialog,
+                'button[data-dropdown="source-proxy"]',
+            );
+            trigger.click();
         });
+        await test.act(() =>
+            find(
+                test.dialog,
+                'button[role="option"][data-value="direct"]',
+            ).click()
+        );
         await test.details();
         await test.act(() => button(test.dialog, "自定义配置").click());
         await test.act(() =>
@@ -486,6 +504,166 @@ Deno.test("dialog waits for its own closing animation before unmounting preset J
         assertEquals(test.root.querySelector("dialog"), null);
         assertEquals(test.closes, 1);
         assertEquals(test.lifecycle.cleanups, 1);
+    } finally {
+        await test.dispose();
+    }
+});
+
+Deno.test("custom draft tests current input, retries in place and saves selected models", async () => {
+    const received: SourceSetupSaveInput[] = [];
+    const test = await setup({
+        onProbe: (value) => {
+            received.push(value);
+            return Promise.resolve({
+                ok: received.length > 1,
+                message: received.length > 1 ? "连接正常" : "连接失败，请重试",
+                checkedAt: new Date().toISOString(),
+                models: received.length > 1
+                    ? ["model-a", "model-b"]
+                    : undefined,
+            });
+        },
+    });
+    try {
+        await test.details();
+        await test.act(() => button(test.dialog, "自定义配置").click());
+        await test.act(() => button(test.dialog, "测试连接").click());
+        assertEquals(received.length, 0);
+        await test.act(() =>
+            input(
+                find(test.dialog, 'input[name="baseUrl"]'),
+                "https://provider.example/v1",
+            )
+        );
+        await test.act(() =>
+            input(find(test.dialog, 'input[name="apiKey"]'), "draft-secret")
+        );
+        await test.act(() => button(test.dialog, "测试连接").click());
+        assert(test.dialog.textContent.includes("连接失败"));
+        assertEquals(test.saved, []);
+        assertEquals(received[0]?.config.apiKey, "draft-secret");
+        await test.act(() => button(test.dialog, "重新测试连接").click());
+        assertEquals(received.length, 2);
+        await test.act(() => button(test.dialog, "model-a").click());
+        assertEquals(
+            button(test.dialog, "model-a").getAttribute("aria-pressed"),
+            "true",
+        );
+        assertEquals(
+            JSON.parse(find(test.dialog, 'textarea[name="modelMap"]').value),
+            { "model-a": "model-a" },
+        );
+        assertStrictEquals(find(test.root, "dialog"), test.dialog);
+        await test.act(() => button(test.dialog, "保存渠道").click());
+        assertEquals(test.saved[0]?.config.modelMap, { "model-a": "model-a" });
+        assertEquals(test.navigation, []);
+        assertEquals(test.storageWrites, []);
+    } finally {
+        await test.dispose();
+    }
+});
+
+Deno.test("editing and returning from draft configuration cancels probes and ignores late models", async () => {
+    type ProbeResult = {
+        ok: boolean;
+        message: string;
+        checkedAt: string;
+        models: string[];
+    };
+    const calls: {
+        signal: AbortSignal;
+        resolve: (result: ProbeResult) => void;
+    }[] = [];
+    const test = await setup({
+        onProbe: (_value, signal) =>
+            new Promise((resolve) => calls.push({ signal, resolve })),
+    });
+    try {
+        await test.details();
+        await test.act(() => button(test.dialog, "自定义配置").click());
+        const url = find(test.dialog, 'input[name="baseUrl"]');
+        await test.act(() => input(url, "https://old.example/v1"));
+        await test.act(() => button(test.dialog, "测试连接").click());
+        assert(button(test.dialog, "保存渠道").disabled);
+        await test.act(() => input(url, "https://new.example/v1"));
+        assertEquals(calls[0]?.signal.aborted, true);
+        await test.act(() => button(test.dialog, "测试连接").click());
+        calls[1]!.resolve({
+            ok: true,
+            message: "新连接",
+            checkedAt: new Date().toISOString(),
+            models: ["new-model"],
+        });
+        await test.act();
+        calls[0]!.resolve({
+            ok: true,
+            message: "过期连接",
+            checkedAt: new Date().toISOString(),
+            models: ["old-model"],
+        });
+        await test.act();
+        assert(test.dialog.textContent.includes("new-model"));
+        assert(!test.dialog.textContent.includes("old-model"));
+        await test.act(() => button(test.dialog, "测试连接").click());
+        await test.act(() => button(test.dialog, "上一步").click());
+        assertEquals(calls[2]?.signal.aborted, true);
+        calls[2]!.resolve({
+            ok: true,
+            message: "已退出",
+            checkedAt: new Date().toISOString(),
+            models: ["detached-model"],
+        });
+        await test.act();
+        assert(!test.dialog.textContent.includes("detached-model"));
+        assertEquals(test.saved, []);
+        assertEquals(test.navigation, []);
+    } finally {
+        await test.dispose();
+    }
+});
+
+Deno.test("NewAPI preset JSX tests and selects models through host JSON actions in the same dialog", async () => {
+    const received: SourceSetupSaveInput[] = [];
+    const test = await setup({
+        onProbe: (value) => {
+            received.push(value);
+            return Promise.resolve({
+                ok: true,
+                message: "连接正常",
+                checkedAt: new Date().toISOString(),
+                models: ["preset-model"],
+            });
+        },
+    });
+    try {
+        await test.details();
+        await test.act(() => button(test.dialog, "NewAPI").click());
+        await test.act(() =>
+            input(
+                find(test.dialog, 'input[name="baseUrl"]'),
+                "https://preset.example/v1",
+            )
+        );
+        await test.act(() =>
+            input(find(test.dialog, 'input[name="apiKey"]'), "preset-secret")
+        );
+        await test.act(() => button(test.dialog, "测试连接").click());
+        assertEquals(received[0]?.draft.presetId, presetId);
+        assertEquals(received[0]?.config.apiKey, "preset-secret");
+        assertEquals(test.saved, []);
+        await test.act(() => button(test.dialog, "preset-model").click());
+        assertEquals(
+            button(test.dialog, "preset-model").getAttribute("aria-pressed"),
+            "true",
+        );
+        assertStrictEquals(find(test.root, "dialog"), test.dialog);
+        await test.act(() => button(test.dialog, "保存渠道").click());
+        assertEquals(test.saved[0]?.config.modelMap, {
+            "preset-model": "preset-model",
+        });
+        assertEquals(test.closes, 1);
+        assertEquals(test.navigation, []);
+        assertEquals(test.storageWrites, []);
     } finally {
         await test.dispose();
     }

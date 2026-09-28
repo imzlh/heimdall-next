@@ -53,6 +53,14 @@ export function PresetEditor(props: PresetEditorProps) {
                                 handlers.current!.onPreview!(config),
                         }
                         : {}),
+                    ...(props.onProbe
+                        ? {
+                            onProbe: (
+                                config: PresetJsonObject,
+                                signal: AbortSignal,
+                            ) => handlers.current!.onProbe!(config, signal),
+                        }
+                        : {}),
                 },
                 () => setStatus("ready"),
                 () => setStatus("error"),
@@ -73,6 +81,7 @@ export function PresetEditor(props: PresetEditorProps) {
         context.draft.priority,
         sourceProxyValue(context.proxy),
         !!props.onPreview,
+        !!props.onProbe,
     ]);
     return (
         <div

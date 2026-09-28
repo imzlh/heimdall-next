@@ -166,3 +166,108 @@ export function ConversationDialog(
         </dialog>
     );
 }
+
+/** Confirm deleting one message; the server removes its whole Q&A turn. */
+export function MessageDeleteDialog(
+    { pending, error, onSubmit, onDismiss }: {
+        pending: boolean;
+        error: string;
+        onSubmit: () => Promise<boolean>;
+        onDismiss: () => void;
+    },
+) {
+    const dialog = useRef<HTMLDialogElement | null>(null);
+    const cancel = useRef<HTMLButtonElement | null>(null);
+    const [submitting, setSubmitting] = useState(false);
+    const locked = pending || submitting;
+
+    useEffect(() => {
+        const trigger = document.activeElement as HTMLElement | null;
+        const element = dialog.current;
+        element?.showModal();
+        cancel.current?.focus();
+        return () => {
+            element?.close();
+            if (trigger?.isConnected && !trigger.hasAttribute("disabled")) {
+                trigger.focus();
+            }
+        };
+    }, []);
+
+    return (
+        <dialog
+            ref={dialog}
+            class="chat-conversation-dialog"
+            aria-labelledby="message-delete-title"
+            aria-describedby="message-delete-description"
+            aria-busy={locked ? "true" : "false"}
+            onCancel={(event: Event) => {
+                event.preventDefault();
+                if (!locked) onDismiss();
+            }}
+            onClick={(event) => {
+                const element = dialog.current;
+                if (locked || !element || event.target !== element) return;
+                const rect = element.getBoundingClientRect();
+                if (
+                    event.clientX < rect.left || event.clientX > rect.right ||
+                    event.clientY < rect.top || event.clientY > rect.bottom
+                ) {
+                    onDismiss();
+                }
+            }}
+        >
+            <form
+                onSubmit={async (event) => {
+                    event.preventDefault();
+                    if (locked) return;
+                    setSubmitting(true);
+                    const deleted = await onSubmit();
+                    setSubmitting(false);
+                    if (deleted) onDismiss();
+                }}
+            >
+                <header class="chat-conversation-dialog-heading">
+                    <h2 id="message-delete-title">删除这条消息？</h2>
+                    <button
+                        type="button"
+                        class="chat-icon-button"
+                        aria-label="关闭"
+                        disabled={locked}
+                        onClick={onDismiss}
+                    >
+                        <Icon name="close" />
+                    </button>
+                </header>
+                <p
+                    id="message-delete-description"
+                    class="chat-conversation-description"
+                >
+                    它所在的一问一答将一并删除，无法恢复。
+                </p>
+                {error && !locked && (
+                    <p class="chat-conversation-dialog-error" role="alert">
+                        {error}
+                    </p>
+                )}
+                <footer class="chat-conversation-dialog-actions">
+                    <button
+                        ref={cancel}
+                        type="button"
+                        disabled={locked}
+                        onClick={onDismiss}
+                    >
+                        取消
+                    </button>
+                    <button
+                        type="submit"
+                        class="chat-delete-confirm"
+                        disabled={locked}
+                    >
+                        {locked ? "正在删除…" : "删除"}
+                    </button>
+                </footer>
+            </form>
+        </dialog>
+    );
+}

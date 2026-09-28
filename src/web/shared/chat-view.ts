@@ -29,7 +29,7 @@ export function chatMessageStatus(
     return "";
 }
 
-/** Only bounded raster data is embedded; attachments never choose a remote URL. */
+/** Images use the authenticated local asset route; legacy inline previews still work. */
 export function chatAttachmentUrl(
     attachment: ChatAttachment,
 ): string | undefined {
@@ -38,6 +38,13 @@ export function chatAttachmentUrl(
             attachment.mediaType,
         )
     ) return;
+    if (attachment.assetId !== undefined) {
+        if (
+            !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/
+                .test(attachment.assetId)
+        ) return;
+        return `/admin/chat/api/assets/${attachment.assetId}`;
+    }
     if (
         !attachment.dataBase64 || attachment.dataBase64.length > 1_400_000 ||
         !/^[A-Za-z0-9+/]+={0,2}$/.test(attachment.dataBase64)

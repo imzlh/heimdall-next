@@ -15,6 +15,7 @@ import {
     pluginManagementText,
     pluginState,
     pluginTrustLabel,
+    shortSourceId,
     sourceAvailabilityText,
     sourceInstanceEnabled,
     sourceState,
@@ -25,12 +26,16 @@ import {
     sourceProxySummaryLabel,
 } from "../shared/proxy-presentation.ts";
 
-export function SourceCard({ source, status, editing = false, proxyPool }: {
-    source: ListedSource;
-    status?: Child;
-    editing?: boolean;
-    proxyPool?: ProxyPoolView | null;
-}) {
+export function SourceCard(
+    { source, status, statusInline = false, editing = false, proxyPool }: {
+        source: ListedSource;
+        status?: Child;
+        /** Render plugin channel info directly; no fold-out. */
+        statusInline?: boolean;
+        editing?: boolean;
+        proxyPool?: ProxyPoolView | null;
+    },
+) {
     const state = sourceState(source);
     const proxyLabel = !proxyPool && source.proxySummary
         ? sourceProxySummaryLabel(source.proxySummary)
@@ -42,7 +47,11 @@ export function SourceCard({ source, status, editing = false, proxyPool }: {
                     <h3 title={source.name || source.id}>
                         {source.name || source.id || "未命名渠道"}
                     </h3>
-                    {source.name && <code title={source.id}>{source.id}</code>}
+                    {source.id && (
+                        <code title={source.id}>
+                            {shortSourceId(source.id)}
+                        </code>
+                    )}
                 </div>
                 <span class={`status-chip chip-${state.tone}`}>
                     {state.label}
@@ -70,14 +79,16 @@ export function SourceCard({ source, status, editing = false, proxyPool }: {
             <p class="source-proxy-summary" title={PROXY_IMPLEMENTATION_NOTE}>
                 代理：{proxyLabel}
             </p>
-            {status && (
-                <details class="source-status-slot">
-                    <summary>
-                        渠道详情 <Icon name="chevron-down" size={14} />
-                    </summary>
-                    <div class="source-status-content">{status}</div>
-                </details>
-            )}
+            {status && (statusInline
+                ? <div class="source-status-content is-open">{status}</div>
+                : (
+                    <details class="source-status-slot">
+                        <summary>
+                            渠道详情 <Icon name="chevron-down" size={14} />
+                        </summary>
+                        <div class="source-status-content">{status}</div>
+                    </details>
+                ))}
             <footer class="source-card-actions">
                 {editing
                     ? (

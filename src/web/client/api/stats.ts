@@ -1,8 +1,14 @@
 import type {
     StatsOverviewDto,
     StatsSeriesDto,
+    StatsTrendDto,
+    StatsTrendMode,
 } from "@heimdall/admin-contracts";
-import { readStatsOverview, readStatsSeries } from "../../shared/stats.ts";
+import {
+    readStatsOverview,
+    readStatsSeries,
+    readStatsTrend,
+} from "../../shared/stats.ts";
 import { AdminApiError, request } from "./transport.ts";
 
 export async function loadStatsOverview(): Promise<StatsOverviewDto> {
@@ -25,6 +31,24 @@ export async function loadStatsSeries(days = 7): Promise<StatsSeriesDto> {
         const series = readStatsSeries(data);
         if (series.days !== days) throw new TypeError("Unexpected date window");
         return series;
+    } catch {
+        throw new AdminApiError("用量趋势响应格式无效。", {
+            code: "invalid_response",
+        });
+    }
+}
+
+export async function loadStatsTrend(
+    mode: StatsTrendMode,
+): Promise<StatsTrendDto> {
+    if (mode !== "day" && mode !== "hour" && mode !== "recent") {
+        throw new RangeError("趋势模式必须是 day、hour 或 recent。");
+    }
+    const data = await request(`/api/admin/stats/trend?mode=${mode}`);
+    try {
+        const trend = readStatsTrend(data);
+        if (trend.mode !== mode) throw new TypeError("Unexpected trend mode");
+        return trend;
     } catch {
         throw new AdminApiError("用量趋势响应格式无效。", {
             code: "invalid_response",

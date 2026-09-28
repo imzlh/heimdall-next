@@ -9,33 +9,42 @@ import type {
     StreamEvent,
     StreamFrame,
 } from "@heimdall/contracts";
+import type { JsonValue } from "@heimdall/hip";
 import {
     type ChatHubSourceConfig,
     type ChatHubSourceOptions,
     validateChatHubSourceConfig,
 } from "./config.ts";
 import { decodeJwtClaims, refreshAccessToken } from "./auth.ts";
-import {
-    SourceProxyError,
-    SourceTransport,
-} from "../../packages/source-sdk/mod.ts";
+import { SourceProxyError, SourceTransport } from "@heimdall/source-sdk/mod.ts";
+import { estimateTokens } from "@heimdall/tokens";
 import {
     ChatHubClient,
     type ChatHubEvent,
+    type ChatHubMeterError,
+    type ChatHubReference,
     type ChatHubSessionIds,
     ChatHubTextAccumulator,
+    type ChatHubThrottling,
     ChatHubTimeoutError,
     type ChatHubUrlOptions,
     createSessionIds,
+    type MessageAnnotation,
     nextChatSessionId,
 } from "./protocol/mod.ts";
 import { conversationMessages, generationPayload } from "./request.ts";
 import {
+    collectImages,
+    downloadGeneratedImages,
+    uploadImages,
+} from "./images.ts";
+import {
+    ChatHubContentFilterError,
     flattenConversation,
+    isContentPolicyBlock,
     modelToolRouterPrompt,
     parseModelToolDecision,
     toneForModel,
-    withMemoryOff,
 } from "./tools.ts";
 
 interface Session {
@@ -62,7 +71,7 @@ export class ChatHubSource implements InferenceSource {
             operation: "generation.create",
             models: this.#config.models,
             streaming: true,
-            features: ["tools"],
+            features: ["tools", "image.input"],
         }];
     }
 
@@ -172,7 +181,8 @@ export class ChatHubSource implements InferenceSource {
             const config = await this.#credentials(signal, transport.selection);
             const messages = conversationMessages(request);
             const fullText = flattenConversation(messages);
-            if (!fullText) {
+            const images = collectImages(request);
+            if (!fullText && !images.length) {
                 throw new TypeError(
                     "ChatHub requires a non-empty text conversation",
                 );
@@ -220,8 +230,12 @@ export class ChatHubSource implements InferenceSource {
                     upstream(modelToolRouterPrompt(fullText, tools, choice)),
                     { signal },
                 );
+                const routerText = result.finalText ?? result.text;
+                if (isContentPolicyBlock(routerText)) {
+                    throw new ChatHubContentFilterError();
+                }
                 const decision = parseModelToolDecision(
-                    result.finalText ?? result.text,
+                    routerText,
                     tools,
                     choice,
                 );
@@ -283,7 +297,7 @@ export class ChatHubSource implements InferenceSource {
                     return;
                 }
             }
-            const key = sessionKey(request);
+            const key = sessionKey(request, context);
             for (const [id, session] of this.#sessions) {
                 if (session.expiresAt <= Date.now()) this.#sessions.delete(id);
             }
@@ -300,6 +314,29 @@ export class ChatHubSource implements InferenceSource {
             const prompt = flattenConversation(
                 selected ? messages.slice(selected.length) : messages,
             );
+            // On a reused session ChatHub keeps the prior turns server-side, so
+            // only `prompt` is sent fresh; the reused prefix is cached context.
+            const cachedInputText = selected
+                ? flattenConversation(messages.slice(0, selected.length))
+                : "";
+            // Upload any images for this turn now that the conversation id is
+            // fixed; the returned annotations reference them on the chat frame.
+            // Done here (past the tool-router early return) so a router-only
+            // turn never uploads.
+            let imageAnnotations: MessageAnnotation[] = [];
+            if (images.length) {
+                imageAnnotations = await uploadImages(
+                    transport.fetch,
+                    {
+                        accessToken: config.accessToken,
+                        conversationId: ids.conversationId,
+                        scenario: config.scenario,
+                        endpoint: config.endpoint,
+                    },
+                    images,
+                    signal,
+                );
+            }
             yield emit({
                 kind: "message.started",
                 message: {
@@ -317,9 +354,29 @@ export class ChatHubSource implements InferenceSource {
             let settled = false;
             let failure: unknown;
             let answer = "";
+            let title = "";
+            let reasoningText = "";
+            let suggestions: string[] = [];
+            let generatedImageUrls: string[] = [];
+            let references: ChatHubReference[] = [];
+            // Per-turn account quota snapshot (message/image allowances) plus any
+            // reliable soft-reject signal; shown as an info card and stored for
+            // the account probe. See buildQuota / copilot2api docs 07 §1.
+            let quota: ChatQuota | undefined;
+            let turnState = "";
+            let resultValue = "";
+            // Cloud search activity, surfaced live as status parts before the
+            // first answer token so the wait is explained rather than blank.
+            const searchSeen = new Set<string>();
+            let statusCount = 0;
             const run = client.chat(
                 makeConnection(ids),
-                upstream(withMemoryOff(prompt)),
+                imageAnnotations.length
+                    ? {
+                        ...upstream(prompt),
+                        messageAnnotations: imageAnnotations,
+                    }
+                    : upstream(prompt),
                 {
                     signal,
                     onEvent(event) {
@@ -329,6 +386,33 @@ export class ChatHubSource implements InferenceSource {
                 },
             ).then((result) => {
                 answer = result.finalText ?? result.text;
+                // The authoritative reply can arrive only on `item.result.message`
+                // (no messages[] answer entry); fall back to it before treating
+                // the turn as empty.
+                if (!answer.trim() && result.resultMessage) {
+                    answer = result.resultMessage;
+                }
+                title = result.chatName?.trim() ?? "";
+                reasoningText = result.reasoning ?? "";
+                generatedImageUrls = result.images ?? [];
+                references = result.references ?? [];
+                turnState = result.turnState ?? "";
+                resultValue = result.resultValue ?? "";
+                quota = buildQuota(
+                    result.throttling,
+                    result.meteringInformation,
+                );
+                // Each suggestion's clickable prompt is its commandText (the text
+                // sent when tapped), falling back to the displayed text.
+                suggestions = [
+                    ...new Set(
+                        (result.suggestions ?? [])
+                            .map((item) =>
+                                (item.commandText ?? item.text ?? "").trim()
+                            )
+                            .filter((value) => value.length > 0),
+                    ),
+                ];
                 queue.push({
                     kind: "completion",
                     frame: {},
@@ -359,6 +443,17 @@ export class ChatHubSource implements InferenceSource {
                             ], ["text", text.update(event.text)]] as const
                         ) {
                             if (!delta) continue;
+                            // A content-policy refusal arrives as the whole
+                            // answer in one shot. Catch it before any text is
+                            // streamed so it surfaces as an error rather than a
+                            // relayed reply; once real text has streamed, later
+                            // text is a genuine answer, not a block.
+                            if (
+                                kind === "text" && !started.has("text") &&
+                                isContentPolicyBlock(text.text)
+                            ) {
+                                throw new ChatHubContentFilterError();
+                            }
                             const partId = messageId + ":" + kind;
                             if (!started.has(kind)) {
                                 started.add(kind);
@@ -371,7 +466,7 @@ export class ChatHubSource implements InferenceSource {
                                             id: partId,
                                             type: "reasoning",
                                             text: "",
-                                            visibility: "private",
+                                            visibility: "public",
                                         },
                                 });
                             }
@@ -382,6 +477,35 @@ export class ChatHubSource implements InferenceSource {
                                 delta,
                             });
                         }
+                        // Surface each new cloud search as a one-line status
+                        // part. `summary` is the pre-rendered text so consumers
+                        // that don't special-case status still show something;
+                        // the structured value stays for richer clients.
+                        for (const query of event.searchQueries ?? []) {
+                            if (searchSeen.has(query)) continue;
+                            searchSeen.add(query);
+                            const partId =
+                                `${messageId}:status:${statusCount++}`;
+                            yield emit({
+                                kind: "part.started",
+                                messageId,
+                                part: {
+                                    id: partId,
+                                    type: "custom",
+                                    name: "status",
+                                    value: {
+                                        summary: `🔍 搜索：${query}`,
+                                        kind: "search",
+                                        query,
+                                    },
+                                },
+                            });
+                            yield emit({
+                                kind: "part.completed",
+                                messageId,
+                                partId,
+                            });
+                        }
                     }
                 }
                 if (failure) throw failure;
@@ -389,6 +513,34 @@ export class ChatHubSource implements InferenceSource {
             } finally {
                 if (!settled) abort.abort();
                 await run;
+            }
+            // ChatHub reports failures in-band: the WS/HTTP status stays 200 and
+            // a clean Completion arrives even when the turn produced nothing —
+            // turnState="Failed", result.value!="Success", or a
+            // meteringInformation soft-reject. Without answer text, images or
+            // reasoning that is a silent blank reply, so surface it as an error
+            // (a degraded turn that still returned text is a success, kept as-is).
+            if (
+                !answer.trim() && !generatedImageUrls.length &&
+                !reasoningText.trim()
+            ) {
+                const denied = quota?.meters.find((meter) => meter.error);
+                if (denied) {
+                    throw new Error(
+                        `ChatHub denied the request (${denied.error}); the account's quota for this capability may be throttled or exhausted`,
+                    );
+                }
+                if (turnState && turnState !== "Completed") {
+                    throw new Error(
+                        `ChatHub turn did not complete (turnState=${turnState})`,
+                    );
+                }
+                if (resultValue && resultValue !== "Success") {
+                    throw new Error(
+                        `ChatHub turn failed (result=${resultValue})`,
+                    );
+                }
+                throw new Error("ChatHub returned an empty response");
             }
             for (const kind of started) {
                 yield emit({
@@ -413,6 +565,110 @@ export class ChatHubSource implements InferenceSource {
                     busy: false,
                 });
             }
+            // ChatHub reports no upstream token counts, so estimate them here
+            // where the cache split is known: a reused session sends only the
+            // incremental prompt, leaving the earlier turns as cached input.
+            const inputTokens = estimateTokens(prompt);
+            const cachedInputTokens = estimateTokens(cachedInputText);
+            const outputTokens = estimateTokens(answer);
+            const reasoningTokens = estimateTokens(reasoningText);
+            const totalTokens = inputTokens + cachedInputTokens +
+                outputTokens + reasoningTokens;
+            if (totalTokens > 0) {
+                yield emit({
+                    kind: "usage",
+                    usage: {
+                        inputTokens,
+                        outputTokens,
+                        ...(reasoningTokens > 0 ? { reasoningTokens } : {}),
+                        ...(cachedInputTokens > 0 ? { cachedInputTokens } : {}),
+                        totalTokens,
+                        extensions: {
+                            estimated: true,
+                            ...(quota
+                                ? { quota: quota as unknown as JsonValue }
+                                : {}),
+                        },
+                    },
+                });
+            }
+            if (title) {
+                yield emit({ kind: "title", title });
+            }
+            if (suggestions.length) {
+                yield emit({ kind: "suggestions", suggestions });
+            }
+            // Copilot generates images inside the chat turn and returns their
+            // URLs (not inline). Download to bytes here so the kernel receives a
+            // buffer, then emit them as image parts on this assistant message.
+            if (generatedImageUrls.length) {
+                const generated = await downloadGeneratedImages(
+                    transport.fetch,
+                    generatedImageUrls,
+                    signal,
+                );
+                for (const [index, image] of generated.entries()) {
+                    const partId = `${messageId}:image:${index}`;
+                    yield emit({
+                        kind: "part.started",
+                        messageId,
+                        part: {
+                            id: partId,
+                            type: "image",
+                            source: {
+                                mediaType: image.mediaType,
+                                bytes: image.data.byteLength,
+                                data: image.data,
+                            },
+                        },
+                    });
+                    yield emit({ kind: "part.completed", messageId, partId });
+                }
+            }
+            // Citations backing the answer. The inline `cite` markers name the
+            // references the text actually uses, so resolve those in order and
+            // emit one citation each — deduped — instead of dumping every
+            // reference. When the answer carries no markers, fall back to the
+            // collected references so a citation-free answer still keeps them.
+            const referencesById = new Map<string, ChatHubReference>();
+            for (const reference of references) {
+                if (typeof reference.id === "string") {
+                    referencesById.set(reference.id, reference);
+                }
+            }
+            const citedIds = citedReferenceIds(answer);
+            const cited = citedIds.length > 0
+                ? citedIds
+                    .map((id) => referencesById.get(id))
+                    .filter((reference): reference is ChatHubReference =>
+                        reference !== undefined
+                    )
+                : references;
+            let citationIndex = 0;
+            const emittedCitations = new Set<string>();
+            for (const reference of cited) {
+                const citation = citationOf(reference);
+                if (citation === undefined) continue;
+                const dedupe = citation.url ?? citation.label ?? "";
+                if (dedupe === "" || emittedCitations.has(dedupe)) continue;
+                emittedCitations.add(dedupe);
+                const partId = `${messageId}:citation:${citationIndex++}`;
+                yield emit({
+                    kind: "part.started",
+                    messageId,
+                    part: {
+                        id: partId,
+                        type: "citation",
+                        ...citation,
+                        // The reference id is the marker the inline `cite`
+                        // badges point at, so the answer can link to it.
+                        ...(typeof reference.id === "string"
+                            ? { ref: reference.id }
+                            : {}),
+                    },
+                });
+                yield emit({ kind: "part.completed", messageId, partId });
+            }
             yield emit({
                 kind: "message.completed",
                 messageId,
@@ -421,8 +677,9 @@ export class ChatHubSource implements InferenceSource {
             yield emit({ kind: "run.completed", finishReason: "stop" });
         } catch (error) {
             if (
-                signal.aborted ||
-                (error instanceof Error && error.name === "AbortError")
+                !(error instanceof ChatHubContentFilterError) &&
+                (signal.aborted ||
+                    (error instanceof Error && error.name === "AbortError"))
             ) {
                 yield emit({
                     kind: "run.cancelled",
@@ -449,12 +706,134 @@ export function createChatHubSource(
     return new ChatHubSource(config, options);
 }
 
-function sessionKey(request: GenerationRequest): string | undefined {
-    const key = request.metadata?.conversationId ??
-        request.metadata?.conversation_id;
-    return typeof key === "string" && key.length <= 256 && key.trim()
-        ? key
+/**
+ * The reference ids the answer cites, in first-appearance order and deduped.
+ * Inline markers are `cite` followed by one or more `turn<round><verb><index>`
+ * tokens (see the normalization in protocol/events.ts); each token is a key in
+ * the reference dictionary.
+ */
+function citedReferenceIds(text: string): string[] {
+    const ids: string[] = [];
+    const seen = new Set<string>();
+    for (const run of text.matchAll(/cite((?:turn\d+[a-z]+\d+)+)/g)) {
+        for (const entry of run[1]!.matchAll(/turn\d+[a-z]+\d+/g)) {
+            const id = entry[0];
+            if (!seen.has(id)) {
+                seen.add(id);
+                ids.push(id);
+            }
+        }
+    }
+    return ids;
+}
+
+/**
+ * Map a ChatHub reference onto a HIP citation. The label is the reference
+ * title, falling back to the `Title` inside the double-encoded `displayData`
+ * content; the url prefers `url` then `targetLink`. Returns undefined when the
+ * reference carries neither a link nor a label worth showing.
+ */
+function citationOf(
+    reference: ChatHubReference,
+): { label?: string; url?: string } | undefined {
+    const url = typeof reference.url === "string" && reference.url.trim()
+        ? reference.url
+        : typeof reference.targetLink === "string" &&
+                reference.targetLink.trim()
+        ? reference.targetLink
         : undefined;
+    let label = typeof reference.title === "string" && reference.title.trim()
+        ? reference.title.trim()
+        : undefined;
+    if (label === undefined) {
+        const content = reference.displayData?.content;
+        if (typeof content === "string") {
+            try {
+                const parsed = JSON.parse(content) as Record<string, unknown>;
+                const title = parsed.Title ?? parsed.title;
+                if (typeof title === "string" && title.trim()) {
+                    label = title.trim();
+                }
+            } catch {
+                // A non-JSON content string just leaves the label empty.
+            }
+        }
+    }
+    if (url === undefined && label === undefined) return undefined;
+    return {
+        ...(label !== undefined ? { label } : {}),
+        ...(url !== undefined ? { url } : {}),
+    };
+}
+
+/** One capability's remaining allowance, as shown in the account quota card. */
+interface ChatQuotaMeter {
+    name: string;
+    remaining?: number;
+    blocked?: boolean;
+    error?: string;
+}
+
+/** Per-turn account quota snapshot surfaced in the chat info card. */
+interface ChatQuota {
+    meters: ChatQuotaMeter[];
+}
+
+/**
+ * Build the quota card data from the terminal frame. Only the two
+ * consumer-facing meters (message = LLMOnly, image = ImageGeneration) are shown
+ * — the rest of the metering table is unauthorized-capability noise. The cached
+ * `throttling.metering` allowance is an unreliable snapshot (copilot2api docs 07
+ * §1.2: it can read 100 while the turn is throttled), so a `meterError` /
+ * `hasAccess:false` from `meteringInformation` is added as the authoritative
+ * blocked signal on top of the raw numbers.
+ */
+function buildQuota(
+    throttling: ChatHubThrottling | undefined,
+    meteringInformation: ChatHubMeterError[] | undefined,
+): ChatQuota | undefined {
+    const meters: ChatQuotaMeter[] = [];
+    const metering = throttling?.metering;
+    for (const name of ["LLMOnly", "ImageGeneration"] as const) {
+        const remaining = metering?.[name]?.remainingAllowance;
+        if (typeof remaining === "number") {
+            meters.push({
+                name,
+                remaining,
+                ...(remaining === 0 ? { blocked: true } : {}),
+            });
+        }
+    }
+    for (const info of meteringInformation ?? []) {
+        if (info.hasAccess === false || typeof info.meterError === "string") {
+            meters.push({
+                name: info.meterError ?? "access",
+                blocked: true,
+                ...(typeof info.meterError === "string"
+                    ? { error: info.meterError }
+                    : {}),
+            });
+        }
+    }
+    return meters.length > 0 ? { meters } : undefined;
+}
+
+function sessionKey(
+    request: GenerationRequest,
+    context: SourceContext,
+): string | undefined {
+    // A title is a separate prompt, not a continuation. It must not replace
+    // the warm conversation cached for the user's next turn.
+    if (
+        (context.metadata.purpose ?? request.metadata?.purpose) === "chat.title"
+    ) return undefined;
+    // The kernel resolves one conversation identity for both routing affinity
+    // and session reuse: an explicit id when the protocol carries one (from the
+    // request envelope or payload, so ChatHub's conversation extension still
+    // works), otherwise a value derived from the conversation's opening so a
+    // stateless API's turns (OpenAI, Anthropic) still reuse a warm session.
+    // Trust it here rather than re-deriving a key of our own.
+    return context.conversationId;
 }
 
 function canonicalError(
@@ -468,6 +847,16 @@ function canonicalError(
             message: error.message,
             retryable: false,
             status: 503,
+        };
+    }
+    if (error instanceof ChatHubContentFilterError) {
+        // The same input trips the same filter, so retrying this account is
+        // pointless; a different account may still answer.
+        return {
+            code: "content_filter",
+            message: error.message,
+            retryable: false,
+            status: 422,
         };
     }
     let message = error instanceof Error

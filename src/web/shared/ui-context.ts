@@ -2,7 +2,7 @@ import type {
     DashboardData,
     ListedSource,
 } from "@heimdall/admin-contracts/console.ts";
-import type { UiContext } from "@heimdall/admin-contracts/ui.ts";
+import type { UiContext, UiTone } from "@heimdall/admin-contracts/ui.ts";
 import { sourceState } from "./catalog-presentation.ts";
 
 /** Deliberate projection: plugins receive counts, never entire API responses. */
@@ -37,11 +37,19 @@ export function dashboardUiContext(
 }
 
 /** A source slot sees only its own source's public status, not other sources. */
+const SOURCE_TONE_TO_UI: Record<string, UiTone> = {
+    green: "success",
+    amber: "warning",
+    red: "danger",
+    muted: "neutral",
+};
+
 export function sourceUiContext(
     context: UiContext,
     source: ListedSource,
     sourcePluginId: string | undefined = source.sourcePluginId,
 ): UiContext {
+    const state = sourceState(source);
     return {
         locale: "zh",
         theme: context.theme,
@@ -50,7 +58,8 @@ export function sourceUiContext(
         data: {
             source: {
                 enabled: source.enabled === true,
-                state: sourceState(source).label,
+                state: state.label,
+                stateTone: SOURCE_TONE_TO_UI[state.tone] ?? "neutral",
                 priority: Number.isSafeInteger(source.priority)
                     ? source.priority!
                     : 0,

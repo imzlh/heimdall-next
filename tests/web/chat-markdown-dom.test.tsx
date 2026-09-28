@@ -115,6 +115,44 @@ Deno.test("chat code copy failure leaves selectable code and displays inline fee
     }
 });
 
+Deno.test("chat citation markers link to a resolved source and stay plain otherwise", async () => {
+    const dom = installTestDom();
+    try {
+        await dom.act(() =>
+            render(
+                <ChatMarkdown
+                    text="见 citeturn1search1 与 citeturn1search9。"
+                    citations={[
+                        {
+                            label: "示例站点",
+                            url: "https://example.com/a",
+                            ref: "turn1search1",
+                        },
+                    ]}
+                />,
+                dom.root as unknown as HTMLElement,
+            )
+        );
+        const links = dom.root.querySelectorAll("a");
+        assertEquals(links.length, 1, "resolved marker should render one link");
+        const link = links[0];
+        assert(link);
+        assert(
+            (link.getAttribute("class") ?? "").includes("chat-cite-link"),
+            "link carries the citation-link class",
+        );
+        assertEquals(link.getAttribute("href"), "https://example.com/a");
+        assertEquals(link.getAttribute("title"), "示例站点");
+        assertEquals(link.getAttribute("target"), "_blank");
+        // The unresolved marker keeps the plain, non-linked badge (a span).
+        const badges = dom.root.querySelectorAll('span[role="img"]');
+        assertEquals(badges.length, 1);
+    } finally {
+        await dom.act(() => render(null, dom.root as unknown as HTMLElement));
+        dom.restore();
+    }
+});
+
 Deno.test("chat message island formats assistant history and stream while whole-message copy retains Markdown", async () => {
     const dom = installTestDom();
     const copied: string[] = [];
@@ -128,6 +166,7 @@ Deno.test("chat message island formats assistant history and stream while whole-
         selectedId: "demo",
         models: ["example"],
         model: "example",
+        tools: [],
         draft: "",
         attachments: [],
         loading: false,
@@ -138,6 +177,12 @@ Deno.test("chat message island formats assistant history and stream while whole-
         attachmentsBusy: false,
         streamText: "**流式**",
         toolCalls: [],
+        streamReasoning: "",
+        streamActivity: [],
+        streamCitations: [],
+        streamQuota: null,
+        suggestions: [],
+        pendingEffort: "medium",
         error: "",
         available: true,
         authenticated: true,

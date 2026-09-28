@@ -4,6 +4,7 @@ import type {
     Message,
     OperationRequest,
 } from "@heimdall/contracts";
+import { bytesToBase64 } from "@heimdall/contracts";
 import {
     type OpenAICompatibleSourceConfig,
     SAFE_FORWARD_FIELDS,
@@ -199,11 +200,11 @@ function samplingWireKey(key: string): string | undefined {
 }
 
 function blobUrl(
-    blob: { uri?: string; mediaType: string; dataBase64?: string },
+    blob: { uri?: string; mediaType: string; data?: Uint8Array },
 ): string {
     if (blob.uri !== undefined) return blob.uri;
-    if (blob.dataBase64 !== undefined) {
-        return `data:${blob.mediaType};base64,${blob.dataBase64}`;
+    if (blob.data !== undefined) {
+        return `data:${blob.mediaType};base64,${bytesToBase64(blob.data)}`;
     }
     throw new OpenAIUpstreamError({
         code: "unsupported_input",

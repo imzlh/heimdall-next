@@ -734,3 +734,40 @@ Deno.test("server bridge validation, authentication and upstream failures return
     );
     assertEquals((await invalid.json()).error.request_id, "upstream-trace");
 });
+
+Deno.test("draft probes use the authenticated same-origin UI bridge and preserve the JSON draft", async () => {
+    const forwarded: Request[] = [];
+    const app = createHarness({ adminAuthToken: adminToken }, (request) => {
+        forwarded.push(request);
+        return Response.json({ probe: { ok: true, models: ["a"] } });
+    });
+    const body = {
+        id: "e3ea7f49-9726-41a4-97c2-c6f00f51bb75",
+        name: "草稿",
+        priority: 0,
+        sourcePluginId: "heimdall.source.openai-compatible",
+        proxy: { mode: "direct" },
+        config: { apiKey: "draft-secret" },
+    };
+    const envelope = {
+        path: "/api/admin/source-draft-probe",
+        method: "POST",
+        body,
+    };
+    assertEquals((await bridgeRequest(app, envelope)).status, 401);
+    const cookie = await loginCookie(app);
+    for (const headers of blockedOriginHeaders) {
+        assertEquals(
+            (await bridgeRequest(app, envelope, cookie, headers)).status,
+            403,
+        );
+    }
+    assertEquals(forwarded.length, 0);
+    assertEquals((await bridgeRequest(app, envelope, cookie)).status, 200);
+    assertEquals(forwarded.length, 1);
+    assertEquals(
+        forwarded[0]?.headers.get("authorization"),
+        `Bearer ${adminToken}`,
+    );
+    assertEquals(await forwarded[0]?.json(), body);
+});

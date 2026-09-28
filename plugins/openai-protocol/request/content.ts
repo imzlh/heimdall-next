@@ -1,4 +1,4 @@
-import { type ContentPart, type JsonValue } from "@heimdall/contracts";
+import { base64ToBytes, type ContentPart, type JsonValue } from "@heimdall/contracts";
 import { ProtocolError } from "@heimdall/contracts";
 import {
     asObject,
@@ -101,7 +101,10 @@ export function parseContentPart(
         return {
             id,
             type: "audio",
-            source: { dataBase64: data, mediaType: audioMediaType(format) },
+            source: {
+                data: base64ToBytes(data),
+                mediaType: audioMediaType(format),
+            },
             extensions: { raw: wire },
         };
     }
@@ -126,7 +129,9 @@ export function parseContentPart(
             type: "document",
             source: {
                 uri,
-                dataBase64,
+                ...(dataBase64 === undefined
+                    ? {}
+                    : { data: base64ToBytes(dataBase64) }),
                 mediaType: typeof file.media_type === "string"
                     ? file.media_type
                     : dataMediaType(

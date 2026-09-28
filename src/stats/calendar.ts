@@ -16,6 +16,7 @@ const SEARCH_WINDOW_MS = 16 * 3_600_000;
 const CIVIL_DATE = /^([0-9]{4})-([0-9]{2})-([0-9]{2})$/;
 
 const formatters = new Map<string, Intl.DateTimeFormat>();
+const clockFormatters = new Map<string, Intl.DateTimeFormat>();
 
 export interface NaturalDay {
     /** Civil date, YYYY-MM-DD. */
@@ -64,6 +65,21 @@ export function civilDate(instant: number, timeZone: string): string {
         else if (part.type === "day") day = part.value;
     }
     return `${year.padStart(4, "0")}-${month}-${day}`;
+}
+
+/** Wall clock "HH:mm" of `instant` (epoch ms) in `timeZone`, midnight as 00:00. */
+export function civilClock(instant: number, timeZone: string): string {
+    let cached = clockFormatters.get(timeZone);
+    if (cached === undefined) {
+        cached = new Intl.DateTimeFormat("en-GB", {
+            timeZone,
+            hour: "2-digit",
+            minute: "2-digit",
+            hourCycle: "h23",
+        });
+        clockFormatters.set(timeZone, cached);
+    }
+    return cached.format(instant);
 }
 
 /** First instant (epoch ms) whose civil date in `timeZone` is `date`. */

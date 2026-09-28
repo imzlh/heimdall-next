@@ -409,3 +409,69 @@ Deno.test("preset page manifest metadata is detached, frozen and restricted to p
         );
     }
 });
+
+Deno.test("preset probe results are bounded JSON and cancellation releases a pending plugin action", async () => {
+    const result = {
+        ok: true,
+        message: "连接正常",
+        checkedAt: new Date().toISOString(),
+        models: ["a", "b"],
+    };
+    assertEquals(
+        parsePresetUiAction({ kind: "probe", config: { apiKey: "secret" } })
+            .kind,
+        "probe",
+    );
+    assertEquals(
+        parsePresetUiFeedback({
+            kind: "probe",
+            status: "success",
+            probe: result,
+        }).probe,
+        result,
+    );
+    for (
+        const probe of [{ ...result, config: { apiKey: "secret" } }, {
+            ...result,
+            checkedAt: "invalid",
+        }, { ...result, models: Array(257).fill("a") }]
+    ) {
+        assertThrows(
+            () =>
+                parsePresetUiFeedback({
+                    kind: "probe",
+                    status: "success",
+                    probe,
+                }),
+            TypeError,
+        );
+    }
+    const target = element();
+    const ready = deferred<void>();
+    const pending = deferred<typeof result>();
+    let signal: AbortSignal | undefined;
+    let feedbackCount = 0;
+    target.addEventListener(PRESET_UI_FEEDBACK_EVENT, () => feedbackCount++);
+    const dispose = mountPresetEditor(
+        target,
+        context,
+        () => Promise.resolve({ mount() {} }),
+        {
+            onSubmit: () => Promise.resolve(),
+            onProbe: (_config, operationSignal) => {
+                signal = operationSignal;
+                return pending.promise;
+            },
+        },
+        () => ready.resolve(),
+        () => {},
+    );
+    await ready.promise;
+    send(target, { kind: "probe", config: {} });
+    assertEquals(feedbackCount, 1);
+    await dispose();
+    assertEquals(signal?.aborted, true);
+    pending.resolve(result);
+    await pending.promise;
+    assertEquals(feedbackCount, 1);
+});

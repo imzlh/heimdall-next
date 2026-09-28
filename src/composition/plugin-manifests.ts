@@ -1,3 +1,5 @@
+import { log } from "../observability/system-log.ts";
+
 export const MAX_PLUGIN_MANIFEST_BYTES = 1_048_576;
 
 export interface PluginManifestOptions {
@@ -16,7 +18,8 @@ export async function* readPluginManifests(
 ): AsyncIterable<PluginManifestEntry> {
     const root = options.pluginRoot ??
         new URL("../../plugins/", import.meta.url);
-    const warn = options.warn ?? ((message: string) => console.warn(message));
+    const warn = options.warn ??
+        ((message: string) => log.warn("plugins", message));
     const directories: string[] = [];
     try {
         for await (const entry of Deno.readDir(root)) {

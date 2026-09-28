@@ -3,9 +3,12 @@ import type {
     ChatConversation,
     ChatInitial,
     ChatMessage,
+    ChatToolInfo,
 } from "@heimdall/admin-contracts/chat.ts";
 import type { AdminDispatch } from "./bridge.ts";
 import { readBoundedBody } from "./request.ts";
+import { chatAttachmentUrl } from "../shared/chat-view.ts";
+import { readChatBranches } from "../shared/chat-branches.ts";
 
 export interface ChatSnapshotOptions {
     readonly dispatch: AdminDispatch;
@@ -54,14 +57,34 @@ export async function loadChatSnapshot(
     const conversation = (value: unknown): ChatConversation | null => {
         const input = record(value);
         if (!input || typeof input.id !== "string") return null;
+        const branches = readChatBranches(input.branches);
         return {
             id: string(input.id),
             title: string(input.title) || "新对话",
             createdAt: string(input.createdAt),
             updatedAt: string(input.updatedAt),
+            ...(typeof input.activeMessageId === "string"
+                ? { activeMessageId: string(input.activeMessageId) }
+                : {}),
+            ...(branches
+                ? {
+                    branches: branches.map((branch) => ({
+                        messageId: string(branch.messageId),
+                        label: string(branch.label),
+                        selected: branch.selected,
+                    })),
+                }
+                : {}),
             ...(typeof input.systemPrompt === "string" &&
                     input.systemPrompt.length > 0
                 ? { systemPrompt: input.systemPrompt }
+                : {}),
+            ...(Array.isArray(input.disabledTools)
+                ? {
+                    disabledTools: input.disabledTools.filter((
+                        item,
+                    ) => typeof item === "string"),
+                }
                 : {}),
             ...(input.reasoningEffort === "low" ||
                     input.reasoningEffort === "medium" ||
@@ -84,6 +107,32 @@ export async function loadChatSnapshot(
             for (const value of input.attachments.slice(0, 4)) {
                 const image = record(value);
                 if (
+                    image && typeof image.assetId === "string" &&
+                    typeof image.mediaType === "string"
+                ) {
+                    const attachment: ChatAttachment = {
+                        assetId: image.assetId,
+                        mediaType: image.mediaType,
+                    };
+                    const url = chatAttachmentUrl(attachment);
+                    if (url) {
+                        attachments.push({
+                            ...attachment,
+                            url,
+                            ...(typeof image.size === "number" &&
+                                    Number.isSafeInteger(image.size) &&
+                                    image.size > 0 &&
+                                    image.size <= 5 * 1024 * 1024
+                                ? { size: image.size }
+                                : {}),
+                            ...(typeof image.name === "string"
+                                ? { name: string(image.name, 240) }
+                                : {}),
+                        });
+                    }
+                    continue;
+                }
+                if (
                     image && typeof image.mediaType === "string" &&
                     /^image\/[a-z0-9.+-]+$/.test(image.mediaType) &&
                     typeof image.dataBase64 === "string" &&
@@ -97,12 +146,111 @@ export async function loadChatSnapshot(
                 }
             }
         }
+        const activity: { summary: string }[] = [];
+        if (Array.isArray(input.activity)) {
+            for (const value of input.activity.slice(0, 20)) {
+                const item = record(value);
+                if (item && typeof item.summary === "string" && item.summary) {
+                    activity.push({ summary: string(item.summary, 400) });
+                }
+            }
+        }
+        const citations: { label?: string; url?: string; ref?: string }[] = [];
+        if (Array.isArray(input.citations)) {
+            for (const value of input.citations.slice(0, 50)) {
+                const item = record(value);
+                if (!item) continue;
+                const citation: { label?: string; url?: string; ref?: string } =
+                    {
+                        ...(typeof item.label === "string" && item.label
+                            ? { label: string(item.label, 400) }
+                            : {}),
+                        ...(typeof item.url === "string" && item.url
+                            ? { url: string(item.url, 2048) }
+                            : {}),
+                        ...(typeof item.ref === "string" && item.ref
+                            ? { ref: string(item.ref, 256) }
+                            : {}),
+                    };
+                if (
+                    citation.label !== undefined || citation.url !== undefined
+                ) {
+                    citations.push(citation);
+                }
+            }
+        }
+        const quota = ((): {
+            meters: {
+                name: string;
+                remaining?: number;
+                blocked?: boolean;
+                error?: string;
+            }[];
+        } | undefined => {
+            const q = record(input.quota);
+            if (!q || !Array.isArray(q.meters)) return undefined;
+            const meters: {
+                name: string;
+                remaining?: number;
+                blocked?: boolean;
+                error?: string;
+            }[] = [];
+            for (const value of q.meters.slice(0, 12)) {
+                const item = record(value);
+                if (!item || typeof item.name !== "string" || !item.name) {
+                    continue;
+                }
+                meters.push({
+                    name: string(item.name, 120),
+                    ...(typeof item.remaining === "number" &&
+                            Number.isFinite(item.remaining)
+                        ? { remaining: item.remaining }
+                        : {}),
+                    ...(item.blocked === true ? { blocked: true } : {}),
+                    ...(typeof item.error === "string" && item.error
+                        ? { error: string(item.error, 200) }
+                        : {}),
+                });
+            }
+            return meters.length ? { meters } : undefined;
+        })();
+        const branch = record(input.branch);
+        const branchIds = Array.isArray(branch?.messageIds) &&
+                branch.messageIds.length <= 10_000 &&
+                branch.messageIds.every((id) =>
+                    typeof id === "string" && id.length > 0 && id.length <= 512
+                )
+            ? branch.messageIds as string[]
+            : undefined;
+        const validBranch = branch && branchIds &&
+            typeof branch.index === "number" &&
+            Number.isInteger(branch.index) && branch.index >= 0 &&
+            branch.index < branchIds.length &&
+            branch.count === branchIds.length &&
+            new Set(branchIds).size === branchIds.length &&
+            branchIds[branch.index] === input.id;
         return {
             id: string(input.id),
             conversationId: string(input.conversationId),
             role: input.role as ChatMessage["role"],
             text: string(input.text, MAX_TEXT),
             createdAt: string(input.createdAt),
+            ...(input.parentId === null || typeof input.parentId === "string"
+                ? {
+                    parentId: input.parentId === null
+                        ? null
+                        : string(input.parentId),
+                }
+                : {}),
+            ...(validBranch
+                ? {
+                    branch: {
+                        index: branch.index as number,
+                        count: branchIds.length,
+                        messageIds: branchIds.map((id) => string(id)),
+                    },
+                }
+                : {}),
             ...(input.status === "completed" || input.status === "failed" ||
                     input.status === "stopped"
                 ? { status: input.status }
@@ -122,6 +270,12 @@ export async function loadChatSnapshot(
                 ? { name: string(input.name) }
                 : {}),
             ...(attachments.length ? { attachments } : {}),
+            ...(typeof input.reasoning === "string" && input.reasoning
+                ? { reasoning: string(input.reasoning, MAX_TEXT) }
+                : {}),
+            ...(activity.length ? { activity } : {}),
+            ...(citations.length ? { citations } : {}),
+            ...(quota ? { quota } : {}),
         };
     };
     const read = async (
@@ -163,7 +317,7 @@ export async function loadChatSnapshot(
             return {};
         }
     };
-    const [history, models, selected] = await Promise.all([
+    const [history, models, selected, plugins] = await Promise.all([
         read("/api/chat/conversations", "无法读取会话列表。"),
         read("/admin/models", "无法读取模型列表。"),
         options.conversationId
@@ -174,6 +328,7 @@ export async function loadChatSnapshot(
                 "无法读取此对话，请从历史记录中重新选择。",
             )
             : undefined,
+        read("/admin/plugins", "无法读取插件列表。"),
     ]);
     if (!initial.authenticated) return initial;
     if (Array.isArray(history.conversations)) {
@@ -193,6 +348,28 @@ export async function loadChatSnapshot(
                 ).filter(Boolean),
             ),
         ];
+    }
+    const pluginDtos = Array.isArray(plugins.data)
+        ? plugins.data
+        : Array.isArray(plugins.plugins)
+        ? plugins.plugins
+        : [];
+    if (pluginDtos.length) {
+        initial.tools = pluginDtos.slice(0, 32).map((value) => {
+            const dto = record(value);
+            if (!dto || dto.kind !== "tool" || dto.enabled !== true) return;
+            const id = string(dto.id, 128);
+            if (!id) return;
+            const tool: ChatToolInfo = {
+                id,
+                name: string(dto.name, 128) || id,
+                ...(typeof dto.description === "string" &&
+                        dto.description.length > 0
+                    ? { description: string(dto.description, 512) }
+                    : {}),
+            };
+            return tool;
+        }).filter((value): value is ChatToolInfo => value !== undefined);
     }
     initial.selectedModel =
         options.selectedModel && initial.models.includes(options.selectedModel)

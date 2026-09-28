@@ -32,14 +32,14 @@ import type {
 } from "../http/admin-routes.ts";
 import { type MiddlewareRegistry, SourceRegistry } from "@heimdall/kernel";
 import {
-    createPluginHost,
     type PluginHost,
     PluginLifecycleError,
     validatePluginManifest,
 } from "@heimdall/plugin-host";
-import { ConfigPluginRecordStore } from "../storage/plugin-records.ts";
+import { createManagedPlugins } from "./managed-plugins.ts";
 import { createChatToolset } from "../chat/tools/toolset.ts";
 import { probeSource } from "./probe-loop.ts";
+import { probeSourceDraft } from "./source-draft-probe.ts";
 import { createProxyPool } from "./proxy-pool.ts";
 import { SourceProxyBindings } from "./source-proxy.ts";
 import { BuiltinMiddlewarePlugins } from "./middleware-plugins.ts";
@@ -130,10 +130,10 @@ export async function loadBuiltinComposition(
     const manifests = new Map<string, PluginManifest>();
     const pluginErrors = new Map<string, string>();
     const pluginStates = new Map<string, boolean>();
-    const pluginHost = options.pluginHost ?? createPluginHost({
-        store: new ConfigPluginRecordStore(store),
-        requireRuntimeOnEnable: true,
-    });
+    const managedPlugins = options.pluginHost === undefined
+        ? createManagedPlugins(store, () => [...toolPlugins.values()], () => [...manifests.keys()])
+        : undefined;
+    const pluginHost = options.pluginHost ?? managedPlugins!.host;
 
     if (await directoryExists(root)) {
         const entries = [...(await collectDirectories(root))].sort();
@@ -247,6 +247,7 @@ export async function loadBuiltinComposition(
 
     await restorePluginStates(store, pluginStates);
     middlewarePlugins.restore(pluginStates);
+    await pluginHost.restore?.();
     await restoreSources(store, sourceFactories, sources, env, pluginStates);
     if (options.runtimeSettings !== undefined) {
         await hydrateRuntimeSettings(store, options.runtimeSettings);
@@ -282,16 +283,19 @@ export async function loadBuiltinComposition(
         protocols,
         apis,
         toolPlugins: () =>
-            [...toolPlugins.values()].filter((plugin) =>
+            [...toolPlugins.values(), ...(managedPlugins?.tools() ?? [])].filter((plugin) =>
                 pluginStates.get(plugin.manifest.id) !== false
             ),
         sources,
         middleware: middlewarePlugins.registry,
         sourcePluginIds: () => readSourcePluginIds(store, sourceFactories),
         catalog,
-        management,
+        management: {
+            ...management,
+            ...(managedPlugins === undefined ? {} : { installPlugin: (_context: AdminRouteContext, input: unknown) => managedPlugins.install(input) }),
+        },
         pluginHost,
-        close: () => Promise.resolve(),
+        close: () => pluginHost.close?.() ?? Promise.resolve(),
     };
 }
 
@@ -1018,6 +1022,12 @@ function createManagement(
                 "built-in plugins cannot be uninstalled",
             );
         },
+        probeSourceDraft: (context, input) => probeSourceDraft(input, context.request.signal, {
+            factories: sourceFactories,
+            presets,
+            enabled: (id) => pluginStates.get(id) !== false,
+            proxies: proxyBindings.pool,
+        }),
         probeSource: async (context, sourceId) => {
             const source = sources.get(sourceId);
             if (source === undefined || source.probe === undefined) {

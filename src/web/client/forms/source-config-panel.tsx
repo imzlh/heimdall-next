@@ -1,26 +1,46 @@
 /** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
+import { useEffect, useRef } from "hono/jsx/dom";
 import { SchemaForm } from "./schema-form.tsx";
+import { Dropdown } from "./dropdown.tsx";
 import { formControls } from "@heimdall/admin-contracts/forms.ts";
-import { controlValue } from "../dom.ts";
 import { Icon } from "../../shared/icons.tsx";
 import {
     type SourceConfigPanelProps,
     useSourceConfig,
 } from "./source-config-state.ts";
 
+/** Channel configuration opens as a modal, never as an inline page section. */
 export function SourceConfigPanel(props: SourceConfigPanelProps) {
     const state = useSourceConfig(props);
+    const dialog = useRef<HTMLDialogElement | null>(null);
+    useEffect(() => {
+        const element = dialog.current;
+        if (element && !element.open) element.showModal();
+        return () => {
+            if (element?.open) element.close();
+        };
+    }, []);
     const disabled = state.busy || !state.loaded || state.conflict;
+    const close = () => {
+        if (!state.busy) props.onClose();
+    };
     return (
-        <section
-            class="panel config-panel"
+        <dialog
+            ref={dialog}
+            class="source-dialog source-config-dialog"
             aria-labelledby="source-config-title"
             aria-busy={state.busy ? "true" : "false"}
+            onCancel={(event: Event) => {
+                event.preventDefault();
+                close();
+            }}
         >
             <div class="panel-heading">
                 <div>
-                    <h2 id="source-config-title">配置渠道</h2>
-                    <p>{props.sourceId}</p>
+                    <p class="eyebrow">渠道配置</p>
+                    <h2 id="source-config-title">
+                        {props.title || props.sourceId}
+                    </h2>
                 </div>
                 <button
                     type="button"
@@ -28,11 +48,14 @@ export function SourceConfigPanel(props: SourceConfigPanelProps) {
                     aria-label="关闭"
                     title="关闭渠道配置"
                     disabled={state.busy}
-                    onClick={props.onClose}
+                    onClick={close}
                 >
                     <Icon name="close" />
                 </button>
             </div>
+            <p class="source-management-id">
+                <code>{props.sourceId}</code>
+            </p>
             {state.loading && <p role="status">正在读取渠道配置…</p>}
             {!state.hasSchema
                 ? <p class="notice">此渠道未提供受支持的配置表单。</p>
@@ -43,21 +66,21 @@ export function SourceConfigPanel(props: SourceConfigPanelProps) {
                             void state.run("save");
                         }}
                     >
-                        <label class="config-mode">
-                            配置方式<select
+                        <div class="config-mode">
+                            <span class="config-mode-label">配置方式</span>
+                            <Dropdown
                                 value={state.mode}
                                 disabled={disabled}
-                                onChange={(event) =>
-                                    state.selectMode(controlValue(event))}
-                            >
-                                <option value="">自定义配置</option>
-                                {state.availablePresets.map((preset) => (
-                                    <option value={preset.id} key={preset.id}>
-                                        {preset.name || preset.id}
-                                    </option>
-                                ))}
-                            </select>
-                        </label>
+                                options={[
+                                    { value: "", label: "自定义配置" },
+                                    ...state.availablePresets.map((preset) => ({
+                                        value: preset.id,
+                                        label: preset.name || preset.id,
+                                    })),
+                                ]}
+                                onChange={(mode) => state.selectMode(mode)}
+                            />
+                        </div>
                         {state.mode && (
                             <p class="field-help preset-help">
                                 填写预设需要的信息。切换到自定义配置可查看底层参数。
@@ -150,6 +173,6 @@ export function SourceConfigPanel(props: SourceConfigPanelProps) {
             {state.message && (
                 <p class="form-success" role="status">{state.message}</p>
             )}
-        </section>
+        </dialog>
     );
 }

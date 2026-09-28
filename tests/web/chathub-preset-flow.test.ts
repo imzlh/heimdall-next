@@ -9,6 +9,7 @@ import {
 import { mount } from "../../plugins/chathub-preset/ui.tsx";
 import { mountPresetEditor } from "../../src/web/client/forms/preset-bridge.ts";
 import { installTestDom, type TestElement } from "./helpers/jsx-dom.ts";
+import type { SourceDraftProbeResult } from "@heimdall/admin-contracts/source-probe.ts";
 
 const context: PresetUiContext = {
     draft: {
@@ -56,6 +57,7 @@ function deferred<T>() {
 async function fixture(options: {
     fetch?: typeof fetch;
     save?: (config: PresetJsonObject) => Promise<void>;
+    probe?: (config: PresetJsonObject) => Promise<SourceDraftProbeResult>;
 } = {}) {
     const dom = installTestDom();
     const originalFetch = globalThis.fetch;
@@ -85,6 +87,7 @@ async function fixture(options: {
                 previews.push(config);
                 return Promise.resolve({ accessToken: "must-not-echo" });
             },
+            onProbe: options.probe,
         },
         () => ready.resolve(),
         () => {
@@ -297,5 +300,35 @@ Deno.test("ChatHub preset rejects a different source and releases immediate feed
         assertEquals(dom.root.textContent, "");
     } finally {
         dom.restore();
+    }
+});
+
+Deno.test("ChatHub tests its authorized draft and includes selected discovered models when saving", async () => {
+    const probes: PresetJsonObject[] = [];
+    const test = await fixture({
+        probe: (config) => {
+            probes.push(config);
+            return Promise.resolve({
+                ok: true,
+                message: "连接正常",
+                checkedAt: new Date().toISOString(),
+                models: ["chat-model"],
+            });
+        },
+    });
+    try {
+        assert(button(test.root, "测试连接").disabled);
+        await test.authorize();
+        await test.settle(() => button(test.root, "测试连接").click());
+        assertEquals(probes[0]?.accessToken, tokens.accessToken);
+        assertEquals(test.saves, []);
+        assert(!test.root.textContent.includes("private-access-token"));
+        await test.settle(() => button(test.root, "chat-model").click());
+        await test.settle(() => button(test.root, "保存渠道").click());
+        assertEquals(test.saves[0]?.models, ["chat-model"]);
+        assertEquals(test.navigation, []);
+        assertEquals(test.storageWrites, []);
+    } finally {
+        await test.close();
     }
 });

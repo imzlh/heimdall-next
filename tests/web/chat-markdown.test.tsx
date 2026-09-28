@@ -7,8 +7,10 @@ import {
 import { ChatMarkdown } from "@heimdall/core/web/components/chat-markdown.tsx";
 import { ChatPageView } from "@heimdall/core/web/pages/chat.tsx";
 import {
+    chatCitationLabel,
     markdownLink,
     parseChatMarkdown,
+    splitChatCitations,
 } from "@heimdall/core/web/shared/chat-markdown.ts";
 import type { ChatInitial } from "@heimdall/admin-contracts/chat.ts";
 
@@ -214,4 +216,50 @@ Deno.test("chat SSR formats assistant messages while preserving literal user inp
     assertStringIncludes(output, "<strong>回复</strong>");
     assertFalse(output.includes("<strong>原样</strong>"));
     assert(output.includes("chat-markdown"));
+});
+
+Deno.test("chat Markdown renders citation markers as badges without links", () => {
+    const output = html("结论如下。citeturn1search1turn1search6");
+    assertStringIncludes(output, 'class="chat-cite"');
+    assertStringIncludes(output, "检索 1 · 6");
+    assertFalse(output.includes("citeturn"));
+    assertFalse(output.includes("<a "));
+});
+
+Deno.test("citation splitting keeps prose gaps separate and verbs distinct", () => {
+    assertEquals(splitChatCitations("普通文本"), [
+        { kind: "text", text: "普通文本" },
+    ]);
+    assertEquals(
+        splitChatCitations("来源 citeturn1search1，以及 citeturn2browser4。"),
+        [
+            { kind: "text", text: "来源" },
+            {
+                kind: "cites",
+                items: [{ verb: "search", index: "1", id: "turn1search1" }],
+            },
+            { kind: "text", text: "，以及" },
+            {
+                kind: "cites",
+                items: [{ verb: "browser", index: "4", id: "turn2browser4" }],
+            },
+            { kind: "text", text: "。" },
+        ],
+    );
+    assertEquals(
+        chatCitationLabel([{ verb: "search", index: "1", id: "turn1search1" }, {
+            verb: "search",
+            index: "6",
+            id: "turn1search6",
+        }]),
+        "检索 1 · 6",
+    );
+    assertEquals(
+        chatCitationLabel([{ verb: "search", index: "1", id: "turn1search1" }, {
+            verb: "browser",
+            index: "4",
+            id: "turn1browser4",
+        }]),
+        "检索 1 · 浏览 4",
+    );
 });

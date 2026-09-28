@@ -43,6 +43,131 @@ const userMessage: ChatMessage = {
     attachments: [attachment],
 };
 
+Deno.test("chat conversation clients preserve all leaf choices and project only public branch fields", async () => {
+    const originalFetch = globalThis.fetch;
+    const branches = [
+        { messageId: "user-leaf", label: "提问版本", selected: false },
+        { messageId: "assistant-leaf", label: "回复版本", selected: true },
+        { messageId: "tool-leaf", label: "插件结果", selected: false },
+    ];
+    const expected = {
+        ...conversation,
+        activeMessageId: "assistant-leaf",
+        branches,
+    };
+    const payload = {
+        ...expected,
+        private: "private-conversation-data",
+        branches: branches.map((branch, index) => ({
+            ...branch,
+            role: ["user", "assistant", "tool"][index],
+            private: { token: "private-branch-data" },
+        })),
+    };
+    globalThis.fetch = () =>
+        Promise.resolve(Response.json({
+            conversations: [payload, conversation],
+            conversation: payload,
+            messages: [userMessage],
+        }));
+    try {
+        assertEquals(await listChatConversations(), [expected, conversation]);
+        assertEquals(await loadChatConversation(conversation.id), {
+            conversation: expected,
+            messages: [userMessage],
+        });
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+Deno.test("chat conversation branch parser accepts complete bounded leaf lists with no selected leaf", async () => {
+    const originalFetch = globalThis.fetch;
+    const branches = Array.from({ length: 10_000 }, (_, index) => ({
+        messageId: index === 0 ? "m".repeat(512) : `leaf-${index}`,
+        label: index === 0 ? "标".repeat(512) : `分支 ${index}`,
+        selected: false,
+    }));
+    const expected = { ...conversation, branches };
+    globalThis.fetch = () =>
+        Promise.resolve(
+            Response.json({ conversation: expected, messages: [] }),
+        );
+    try {
+        const result = await loadChatConversation(conversation.id);
+        assertEquals(result.conversation.branches?.length, branches.length);
+        for (let index = 0; index < branches.length; index++) {
+            assertEquals(
+                result.conversation.branches?.[index],
+                branches[index],
+            );
+        }
+        assertEquals(result.messages, []);
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
+Deno.test("chat conversation clients reject malformed branch choices instead of accepting unsafe navigation data", async (t) => {
+    const originalFetch = globalThis.fetch;
+    const branch = { messageId: "leaf", label: "分支", selected: false };
+    const invalid: [string, unknown][] = [
+        ["not an array", {}],
+        ["null list", null],
+        ["non-object leaf", [null]],
+        ["missing message ID", [{ label: "分支", selected: false }]],
+        ["empty message ID", [{ ...branch, messageId: "" }]],
+        ["overlong message ID", [{ ...branch, messageId: "m".repeat(513) }]],
+        ["non-string message ID", [{ ...branch, messageId: 12 }]],
+        ["missing label", [{ messageId: "leaf", selected: false }]],
+        ["non-string label", [{ ...branch, label: 12 }]],
+        ["overlong label", [{ ...branch, label: "标".repeat(513) }]],
+        ["missing selected flag", [{ messageId: "leaf", label: "分支" }]],
+        ["non-boolean selected flag", [{ ...branch, selected: "true" }]],
+        ["mixed valid and invalid leaves", [
+            branch,
+            { ...branch, messageId: "other-leaf", selected: 1 },
+        ]],
+        ["duplicate IDs", [branch, { ...branch, label: "另一个分支" }]],
+        ["multiple selected leaves", [
+            { ...branch, selected: true },
+            { ...branch, messageId: "other-leaf", selected: true },
+        ]],
+        [
+            "too many leaves",
+            Array.from({ length: 10_001 }, (_, index) => ({
+                ...branch,
+                messageId: `leaf-${index}`,
+            })),
+        ],
+    ];
+    try {
+        for (const [name, branches] of invalid) {
+            await t.step(name, async () => {
+                const malformed = { ...conversation, branches };
+                globalThis.fetch = () =>
+                    Promise.resolve(Response.json({
+                        conversations: [conversation, malformed],
+                        conversation: malformed,
+                        messages: [userMessage],
+                    }));
+                const listError = await assertRejects(
+                    () => listChatConversations(),
+                    AdminApiError,
+                );
+                assertEquals(listError.code, "invalid_response");
+                const loadError = await assertRejects(
+                    () => loadChatConversation(conversation.id),
+                    AdminApiError,
+                );
+                assertEquals(loadError.code, "invalid_response");
+            });
+        }
+    } finally {
+        globalThis.fetch = originalFetch;
+    }
+});
+
 Deno.test("chat management uses authenticated JSON requests and validates deletion acknowledgement", async () => {
     const originalFetch = globalThis.fetch;
     const calls: { input: RequestInfo | URL; init?: RequestInit }[] = [];
@@ -165,10 +290,17 @@ Deno.test("chat HTTP client authenticates requests and preserves message metadat
             name: "weather",
         },
     ];
+    const loaded = {
+        conversation: { ...conversation, id: "room /?&" },
+        messages: messages.map((message) => ({
+            ...message,
+            conversationId: "room /?&",
+        })),
+    };
     globalThis.fetch = (input, init) => {
         calls.push({ input, init });
         if (String(input).startsWith("/api/chat/conversation?")) {
-            return Promise.resolve(Response.json({ conversation, messages }));
+            return Promise.resolve(Response.json(loaded));
         }
         if (init?.method === "POST") {
             return Promise.resolve(Response.json({ conversation }, {
@@ -182,10 +314,7 @@ Deno.test("chat HTTP client authenticates requests and preserves message metadat
     setAdminToken("chat-admin-token");
     try {
         assertEquals(await listChatConversations(), [conversation]);
-        assertEquals(await loadChatConversation("room /?&"), {
-            conversation,
-            messages,
-        });
+        assertEquals(await loadChatConversation("room /?&"), loaded);
         assertEquals(await createConversation(), conversation);
         assertEquals(calls.length, 3);
         assertEquals(String(calls[0]!.input), "/api/chat/conversations");
@@ -223,13 +352,14 @@ Deno.test("session chat HTTP requests use cookies, exclude bearer tokens, and by
         session: true,
         signal: controller.signal,
     };
+    const loaded = {
+        conversation: { ...conversation, id: "room /?&" },
+        messages: [{ ...userMessage, conversationId: "room /?&" }],
+    };
     globalThis.fetch = (input, init) => {
         calls.push({ input, init });
         if (String(input).startsWith("/admin/chat/api/conversation?")) {
-            return Promise.resolve(Response.json({
-                conversation,
-                messages: [userMessage],
-            }));
+            return Promise.resolve(Response.json(loaded));
         }
         if (init?.method === "POST") {
             return Promise.resolve(Response.json({ conversation }, {
@@ -247,10 +377,7 @@ Deno.test("session chat HTTP requests use cookies, exclude bearer tokens, and by
     setAdminToken("stored-admin-token");
     try {
         assertEquals(await listChatConversations(options), [conversation]);
-        assertEquals(await loadChatConversation("room /?&", options), {
-            conversation,
-            messages: [userMessage],
-        });
+        assertEquals(await loadChatConversation("room /?&", options), loaded);
         assertEquals(await createConversation(options), conversation);
         assertEquals(bridgeCalls, 0);
         assertEquals(calls.length, 3);

@@ -51,6 +51,7 @@ const panels: NonNullable<ConsoleProps["initialPanels"]> = {
             proxyKeyConfigured: false,
             limitPerMinute: 0,
             probeIntervalMs: 0,
+            titleModel: "",
         },
         etag: '"settings-1"',
     },
@@ -75,6 +76,24 @@ function button(root: TestElement, label: string): TestElement {
 function input(element: TestElement, value: string) {
     element.value = value;
     element.dispatchEvent(new Event("input"));
+}
+async function openProxyMenu(
+    test: Awaited<ReturnType<typeof setup>>,
+    root: TestElement,
+) {
+    await test.act(() =>
+        find(root, 'button[data-dropdown="source-proxy"]').click()
+    );
+}
+async function pickProxy(
+    test: Awaited<ReturnType<typeof setup>>,
+    root: TestElement,
+    value: string,
+) {
+    await openProxyMenu(test, root);
+    await test.act(() =>
+        find(root, `button[role="option"][data-value="${value}"]`).click()
+    );
 }
 
 async function setup(page: ConsoleProps["page"], initialPanels = panels) {
@@ -186,22 +205,25 @@ Deno.test("channel console supplies the same pool to create and management dialo
         assertEquals(test.calls, []);
         await test.act(() => button(test.root, "管理 主力渠道").click());
         const management = find(test.root, "dialog");
-        const options = find(management, 'select[name="source-proxy"]')
-            .querySelectorAll("option").map((option) =>
-                option.getAttribute("value")
-            );
+        await openProxyMenu(test, management);
+        const options = management.querySelectorAll('button[role="option"]')
+            .map((option) => option.getAttribute("data-value"));
         assertEquals(options, ["inherit", "direct", "proxy:office"]);
         await test.act(() => button(management, "取消").click());
         await test.act(() => button(test.root, "添加渠道").click());
         const creation = find(test.root, "dialog");
+        await openProxyMenu(test, creation);
         assertEquals(
-            find(creation, 'select[name="source-proxy"]').querySelectorAll(
-                "option",
-            ).map((option) => option.getAttribute("value")),
+            creation.querySelectorAll('button[role="option"]').map((option) =>
+                option.getAttribute("data-value")
+            ),
             options,
         );
         await test.act(() =>
-            input(find(creation, 'select[name="source-proxy"]'), "proxy:office")
+            find(
+                creation,
+                'button[role="option"][data-value="proxy:office"]',
+            ).click()
         );
         await test.act(() =>
             input(creation.querySelectorAll("input")[0]!, "新渠道")
@@ -222,9 +244,7 @@ Deno.test("channel refresh updates available proxies and inherited summaries wit
     try {
         await test.act(() => button(test.root, "管理 主力渠道").click());
         const dialog = find(test.root, "dialog");
-        await test.act(() =>
-            input(find(dialog, 'select[name="source-proxy"]'), "direct")
-        );
+        await pickProxy(test, dialog, "direct");
         test.setPool({
             defaultProxyId: "edge",
             entries: [{ ...pool.entries[0]!, enabled: false }, {
@@ -242,12 +262,20 @@ Deno.test("channel refresh updates available proxies and inherited summaries wit
         );
         assert(test.root.textContent.includes("代理：继承全局 · 新默认代理"));
         assertEquals(
-            find(dialog, 'select[name="source-proxy"]').value,
+            find(dialog, 'button[data-dropdown="source-proxy"]')
+                .getAttribute("data-value"),
             "direct",
         );
-        assert(find(dialog, 'option[value="proxy:office"]').disabled);
+        await openProxyMenu(test, dialog);
+        assert(
+            find(
+                dialog,
+                'button[role="option"][data-value="proxy:office"]',
+            ).getAttribute("disabled") !== null,
+        );
         assertEquals(
-            find(dialog, 'option[value="proxy:edge"]').textContent,
+            find(dialog, 'button[role="option"][data-value="proxy:edge"]')
+                .textContent,
             "新默认代理",
         );
     } finally {

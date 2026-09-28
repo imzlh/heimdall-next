@@ -4,10 +4,9 @@ import {
     type JsonValue,
     type Message,
 } from "@heimdall/contracts";
-import { ProtocolError } from "@heimdall/contracts";
+import { base64ToBytes, ProtocolError, utf8ToBytes } from "@heimdall/contracts";
 import {
     asObject,
-    encodeUtf8,
     isJsonValue,
     nonEmptyOrBlankString,
     nonEmptyString,
@@ -173,10 +172,10 @@ function parseImage(wire: JsonObject, id: string): ContentPart {
             id,
             type: "image",
             source: {
-                dataBase64: nonEmptyString(
+                data: base64ToBytes(nonEmptyString(
                     source.data,
                     "image source data is required",
-                ),
+                )),
                 mediaType: nonEmptyString(
                     source.media_type,
                     "image media_type is required",
@@ -216,7 +215,7 @@ function parseDocument(wire: JsonObject, id: string): ContentPart {
         return {
             id,
             type: "document",
-            source: { dataBase64: source.data, mediaType },
+            source: { data: base64ToBytes(source.data), mediaType },
             title: optionalString(wire.title, "title"),
             extensions: { raw: sanitizeJson(wire) as JsonObject },
         };
@@ -235,7 +234,7 @@ function parseDocument(wire: JsonObject, id: string): ContentPart {
             id,
             type: "document",
             source: {
-                dataBase64: encodeUtf8(source.data),
+                data: utf8ToBytes(source.data),
                 mediaType: "text/plain",
             },
             title: optionalString(wire.title, "title"),

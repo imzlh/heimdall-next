@@ -1,4 +1,5 @@
 import {
+    bytesToBase64,
     type GenerationRequest,
     type OperationRequest,
     type RequestContext,
@@ -23,6 +24,7 @@ import {
     generationPayload,
     isPublicReasoning,
     isTerminalStatus,
+    statusPartSummary,
 } from "./shared.ts";
 import { ProtocolError } from "@heimdall/contracts";
 
@@ -176,11 +178,11 @@ function anthropicStreamEvents(
                 ),
                 content_block: {
                     type: "image",
-                    source: part.source.dataBase64 !== undefined
+                    source: part.source.data !== undefined
                         ? {
                             type: "base64",
                             media_type: part.source.mediaType,
-                            data: part.source.dataBase64,
+                            data: bytesToBase64(part.source.data),
                         }
                         : { type: "url", url: part.source.uri ?? "" },
                 },
@@ -194,14 +196,34 @@ function anthropicStreamEvents(
                 ),
                 content_block: {
                     type: "document",
-                    source: part.source.dataBase64 !== undefined
+                    source: part.source.data !== undefined
                         ? {
                             type: "base64",
                             media_type: part.source.mediaType,
-                            data: part.source.dataBase64,
+                            data: bytesToBase64(part.source.data),
                         }
                         : { type: "url", url: part.source.uri ?? "" },
                     ...(part.title === undefined ? {} : { title: part.title }),
+                },
+            });
+        } else if (statusPartSummary(part) !== undefined) {
+            // Cloud activity has no Anthropic block type; stream its summary as
+            // a text block so compatible clients still see it.
+            const index = anthropicPartIndex(
+                state.messages[event.messageId],
+                part.id,
+            );
+            emit("content_block_start", {
+                type: "content_block_start",
+                index,
+                content_block: { type: "text", text: "" },
+            });
+            emit("content_block_delta", {
+                type: "content_block_delta",
+                index,
+                delta: {
+                    type: "text_delta",
+                    text: statusPartSummary(part)!,
                 },
             });
         } else if (part.type === "custom") {

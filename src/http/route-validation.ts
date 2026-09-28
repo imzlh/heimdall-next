@@ -79,10 +79,18 @@ export function assertNoRouteConflicts(
 }
 
 function hasForbiddenRoutePattern(path: string, owner: string): boolean {
-    // The operator plugin detail endpoint is the one deliberate parameter
-    // route. Every other route must be an exact path owned by its manifest or
-    // by the server composition root.
+    // Host-owned resource endpoints have narrowly enumerated parameter routes.
+    // Plugins still require exact manifest paths.
     if (owner === "admin" && path === "/plugin/:id") return false;
+    if (owner === "chat" && path === "/assets/:id") return false;
+    if (owner === "chat" && path === "/assets/:id/lease") return false;
+    if (owner === "admin-ui" && path === "/admin/chat/api/assets/:id") {
+        return false;
+    }
+    if (owner === "admin-ui" && path === "/admin/chat/api/assets/:id/lease") {
+        return false;
+    }
+    if (owner === "chat-asset-links" && path === "/:id") return false;
     return path.includes("*") || path.includes(":") ||
         ["(", ")", "[", "]", "{", "}", "+", "?"].some((token) =>
             path.includes(token)

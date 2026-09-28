@@ -19,22 +19,6 @@ export function toneForModel(model: string | undefined): string {
 // Conversation flattening (OpenAI messages → one ChatHub text)
 // ---------------------------------------------------------------------------
 
-/**
- * ChatHub injects the account's saved personalization memory and custom
- * instructions into the turn's system context server-side (see SPEC appendix
- * A.2). `disableMemory=1` on the connection blocks that at the session level;
- * this directive is the belt-and-suspenders text so the model also refuses to
- * lean on any remembered profile or on context inferred from the conversation.
- */
-export const MEMORY_OFF_DIRECTIVE =
-    "[system]\n本次对话禁用记忆：不要读取、引用或依据任何已保存的个性化记忆、用户画像或自定义指令作答；也不要根据历史对话或当前对话内容去检索、套用或建立长期记忆。只根据本次请求中明确给出的内容回答。";
-
-/** Prepend the memory-off directive to an outgoing ChatHub turn. */
-export function withMemoryOff(prompt: string): string {
-    const body = prompt.trim();
-    return body ? `${MEMORY_OFF_DIRECTIVE}\n\n${body}` : MEMORY_OFF_DIRECTIVE;
-}
-
 function contentToText(content: unknown): string {
     if (typeof content === "string") return content;
     if (Array.isArray(content)) {
@@ -116,6 +100,44 @@ export function flattenConversation(messages: unknown[]): string {
         out += `\n[${role}]\n${text}\n`;
     }
     return out.trim();
+}
+
+// ---------------------------------------------------------------------------
+// Content-policy block detection
+// ---------------------------------------------------------------------------
+
+/**
+ * M365 Copilot returns a short canned refusal when its content filter blocks a
+ * turn — e.g. "Hmm...it looks like I can't chat about this. Let's try a
+ * different topic.", the "Sorry, ...can't respond to this..." variant, or an
+ * apology form (both straight and curly apostrophes, and the Chinese wording).
+ * The refusal arrives as an ordinary bot message, so the only way to tell it
+ * apart from a real answer is by text.
+ */
+const CONTENT_BLOCK_PATTERNS: readonly RegExp[] = [
+    /it looks like i can.?t (chat about|respond to) this/i,
+    /let.?s try a different topic/i,
+    /i.?m sorry,? i can.?t respond/i,
+    /i apologize,? i cannot/i,
+    /(很)?抱歉，我无法/,
+];
+
+/** True when `text` is a Copilot content-policy refusal rather than an answer. */
+export function isContentPolicyBlock(text: string | undefined): boolean {
+    if (!text) return false;
+    const value = text.trim();
+    // The block is always a short canned message; a long reply that merely
+    // mentions "a different topic" is a real answer, not a refusal.
+    if (value.length === 0 || value.length > 100) return false;
+    return CONTENT_BLOCK_PATTERNS.some((pattern) => pattern.test(value));
+}
+
+/** Raised when the upstream refuses a turn on content policy. */
+export class ChatHubContentFilterError extends Error {
+    constructor(message = "ChatHub blocked the turn on content policy") {
+        super(message);
+        this.name = "ChatHubContentFilterError";
+    }
 }
 
 // ---------------------------------------------------------------------------

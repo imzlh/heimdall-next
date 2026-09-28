@@ -3,30 +3,36 @@ import type { Context } from "hono";
 import type {
     FrameDto,
     RequestDetailDto,
-    RequestStatusDto,
     RequestSummaryDto,
     UsageDayDto,
     UsageDto,
     UsageTotalsDto,
 } from "@heimdall/admin-contracts";
 import type {
+    RequestJournalDetailResponse,
+    RequestJournalListResponse,
+} from "@heimdall/admin-contracts/journal.ts";
+import type {
     RequestRecord,
-    RequestStatus,
     RequestStore,
     StoredFrame,
     UsageRecord,
 } from "@heimdall/storage";
 import type { ServerApp, ServerEnv } from "./app.ts";
 import { type StatsClock, statsSeries } from "../stats/report.ts";
+import { exportRequestJournal } from "./request-journal-export.ts";
+import {
+    encodeCursor,
+    queryAfterSeq,
+    queryCursor,
+    queryId,
+    queryLimit,
+    querySearch,
+    queryStatus,
+    queryTimestamp,
+} from "./request-journal-query.ts";
 
 const REQUEST_ID = "x-heimdall-request-id";
-const STATUSES = new Set<RequestStatus>([
-    "pending",
-    "running",
-    "completed",
-    "error",
-    "cancelled",
-]);
 
 /**
  * Read-only operator routes for the request journal.
@@ -42,9 +48,10 @@ export function createRequestJournalRoutes(
 
     app.get("/requests", (context) => {
         const requestId = currentRequestId(context);
-        const id = context.req.query("id")?.trim();
-        if (id !== undefined && id.length > 0) {
-            assertId(id);
+        const id = queryId(context);
+        if (id !== undefined) {
+            const afterSeq = queryAfterSeq(context);
+            const limit = queryLimit(context, "frameLimit", 100, 200);
             const record = store.getRequest(id);
             if (record === null) {
                 return errorResponse(
@@ -54,26 +61,53 @@ export function createRequestJournalRoutes(
                     `request not found: ${id}`,
                 );
             }
-            const frames = store.listFrames(
-                id,
-                -1,
-                queryLimit(context, "frameLimit", 100, 200),
-            );
-            const body: {
-                request: RequestDetailDto;
-                frames: FrameDto[];
-            } = {
+            const window = store.listFrames(id, afterSeq, limit + 1);
+            const frames = window.slice(0, limit);
+            const body: RequestJournalDetailResponse = {
                 request: toDetail(record, store.getUsage(id)),
                 frames: frames.map(toFrame),
+                nextAfterSeq: window.length > limit ? frames.at(-1)!.seq : null,
             };
             return json(requestId, body);
         }
+        const limit = queryLimit(context, "limit", 50, 100);
         const records = store.listRequests({
             status: queryStatus(context),
+            q: querySearch(context),
+            cursor: queryCursor(context),
             before: queryTimestamp(context, "before"),
-            limit: queryLimit(context, "limit", 50, 100),
+            limit: limit + 1,
         });
-        return json(requestId, { requests: records.map(toSummary) });
+        const page = records.slice(0, limit);
+        const body: RequestJournalListResponse = {
+            requests: page.map((record) =>
+                // Omit the field for rows with no usage row; carry it otherwise.
+                toSummary(record, store.getUsage(record.requestId) ?? undefined)
+            ),
+            nextCursor: records.length > limit
+                ? encodeCursor(page.at(-1)!)
+                : null,
+        };
+        return json(requestId, body);
+    });
+
+    app.get("/requests/export", (context) => {
+        const requestId = currentRequestId(context);
+        const id = queryId(context, true)!;
+        const record = store.getRequest(id);
+        if (record === null) {
+            return errorResponse(
+                requestId,
+                404,
+                "not_found",
+                `request not found: ${id}`,
+            );
+        }
+        return exportRequestJournal(
+            store,
+            toDetail(record, store.getUsage(id)),
+            requestId,
+        );
     });
 
     app.get("/usage", (context) => {
@@ -107,7 +141,10 @@ function recentUsageDays(
     }));
 }
 
-function toSummary(record: RequestRecord): RequestSummaryDto {
+function toSummary(
+    record: RequestRecord,
+    usage?: UsageRecord | null,
+): RequestSummaryDto {
     return {
         requestId: record.requestId,
         status: record.status,
@@ -116,9 +153,35 @@ function toSummary(record: RequestRecord): RequestSummaryDto {
         operation: record.operation,
         model: record.model,
         completedAt: record.completedAt,
+        firstTokenAt: record.firstTokenAt,
+        streaming: isStreaming(record),
         protocolPluginId: record.protocolPluginId,
         upstreamPluginId: record.upstreamPluginId,
+        ...(usage === undefined
+            ? {}
+            : { usage: usage === null ? null : toUsage(usage) }),
     };
+}
+
+/** Read the streaming intent off the stored request without decoding a body. */
+function isStreaming(record: RequestRecord): boolean | undefined {
+    const request = record.request;
+    if (request === null || typeof request !== "object") return undefined;
+    const traits = (request as { traits?: unknown }).traits;
+    if (
+        traits !== null && typeof traits === "object" &&
+        typeof (traits as { streaming?: unknown }).streaming === "boolean"
+    ) {
+        return (traits as { streaming: boolean }).streaming;
+    }
+    const payload = (request as { payload?: unknown }).payload;
+    if (
+        payload !== null && typeof payload === "object" &&
+        typeof (payload as { stream?: unknown }).stream === "boolean"
+    ) {
+        return (payload as { stream: boolean }).stream;
+    }
+    return undefined;
 }
 
 function toDetail(
@@ -131,6 +194,7 @@ function toDetail(
         response: record.response,
         error: record.error,
         usage: usage === null ? null : toUsage(usage),
+        metadata: record.metadata,
     };
 }
 
@@ -146,6 +210,7 @@ function toUsage(usage: UsageRecord): UsageDto {
         totalTokens: usage.totalTokens,
         cost: usage.cost,
         currency: usage.currency,
+        extensions: usage.extensions,
     };
 }
 
@@ -159,67 +224,8 @@ function toFrame(frame: StoredFrame): FrameDto {
         timestamp: frame.timestamp,
         event: frame.event,
         causationId: frame.causationId,
+        extensions: frame.extensions,
     };
-}
-
-function queryStatus(context: Context<ServerEnv>): RequestStatus | undefined {
-    const value = context.req.query("status")?.trim();
-    if (value === undefined || value.length === 0) return undefined;
-    if (!STATUSES.has(value as RequestStatus)) {
-        throw new JournalRouteError(
-            400,
-            "invalid_request",
-            "status is not a known request status",
-        );
-    }
-    return value as RequestStatusDto;
-}
-
-function queryTimestamp(
-    context: Context<ServerEnv>,
-    name: string,
-): string | undefined {
-    const value = context.req.query(name)?.trim();
-    if (value === undefined || value.length === 0) return undefined;
-    if (
-        !/^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.+\-Z]+$/.test(value) ||
-        value.length > 40
-    ) {
-        throw new JournalRouteError(
-            400,
-            "invalid_request",
-            `${name} must be an ISO-8601 timestamp`,
-        );
-    }
-    return value;
-}
-
-function queryLimit(
-    context: Context<ServerEnv>,
-    name: string,
-    fallback: number,
-    max: number,
-): number {
-    const raw = context.req.query(name)?.trim();
-    if (raw === undefined || raw.length === 0) return fallback;
-    if (!/^[1-9][0-9]*$/.test(raw)) {
-        throw new JournalRouteError(
-            400,
-            "invalid_request",
-            `${name} must be a positive integer`,
-        );
-    }
-    return Math.min(Number(raw), max);
-}
-
-function assertId(id: string): void {
-    if (id.length > 200 || id.includes("/") || id.includes("\\")) {
-        throw new JournalRouteError(
-            400,
-            "invalid_request",
-            "request id is invalid",
-        );
-    }
 }
 
 function currentRequestId(context: Context<ServerEnv>): string {
@@ -230,7 +236,7 @@ function currentRequestId(context: Context<ServerEnv>): string {
 function json(requestId: string, payload: unknown, status = 200): Response {
     return Response.json(payload, {
         status,
-        headers: { [REQUEST_ID]: requestId },
+        headers: { [REQUEST_ID]: requestId, "cache-control": "no-store" },
     });
 }
 
@@ -243,16 +249,4 @@ function errorResponse(
     return json(requestId, {
         error: { code, message, request_id: requestId },
     }, status);
-}
-
-class JournalRouteError extends Error {
-    readonly status: number;
-    readonly code: string;
-
-    constructor(status: number, code: string, message: string) {
-        super(message);
-        this.name = "JournalRouteError";
-        this.status = status;
-        this.code = code;
-    }
 }

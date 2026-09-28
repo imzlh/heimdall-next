@@ -16,6 +16,8 @@
 }
 .chat-sidebar {
     flex: 0 0 260px;
+    /* Long titles must ellipsis inside the island, never widen it. */
+    min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 16px;
@@ -106,10 +108,10 @@
 .chat-conversation.is-active {
     background: var(--accent-soft);
     border-color: color-mix(in srgb, var(--accent) 15%, transparent);
-    box-shadow: inset 3px 0 0 var(--accent);
 }
 .chat-conversation > span {
     overflow: hidden;
+    max-width: 100%;
     text-overflow: ellipsis;
     white-space: nowrap;
     font-size: 13px;
@@ -125,17 +127,14 @@
 .chat-conversation-row {
     position: relative;
 }
-.chat-conversation-row .chat-conversation {
-    padding-right: 72px;
-}
+/* Actions hover over the blank right end of the date row: no width reserved. */
 .chat-conversation-actions {
     position: absolute;
     right: 7px;
-    top: 50%;
+    bottom: 6px;
     display: flex;
     gap: 2px;
     opacity: 0;
-    transform: translateY(-50%);
     transition: opacity 160ms ease;
 }
 .chat-conversation-row:hover .chat-conversation-actions,
@@ -268,11 +267,14 @@
     border-top: 1px solid var(--border);
     font-size: 12px;
 }
-.chat-sidebar-footer > a {
-    color: var(--muted);
+.chat-sidebar-footer .chat-export-button {
+    border-radius: 999px;
+    font-size: 12px;
 }
-.chat-sidebar-footer > a:hover {
-    color: var(--text);
+.chat-sidebar-footer-actions {
+    display: flex;
+    align-items: center;
+    gap: 2px;
 }
 .chat-main {
     min-width: 0;
@@ -282,6 +284,9 @@
     flex-direction: column;
     height: 100%;
     flex-grow: 1;
+    /* The composer floats over the log's bottom edge (composer.css); in-flow
+       banners and chips reserve this much so they never slide underneath. */
+    --chat-dock-clearance: 126px;
 }
 .chat-header {
     display: flex;
@@ -339,7 +344,7 @@
     min-height: 36px;
     padding: 7px 13px;
     border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius);
     background-color: var(--surface);
     color: var(--text);
     font-size: 12px;
@@ -351,6 +356,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+.chat-model > .icon {
+    flex: 0 0 auto;
+    width: 14px;
+    height: 14px;
+    color: var(--accent);
+    opacity: .85;
 }
 .chat-model-chevron {
     flex: 0 0 auto;
@@ -475,60 +487,81 @@
     margin-left: auto;
     font-style: normal;
 }
-.chat-save-dot {
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--subtle);
-    flex-shrink: 0;
-}
-.chat-save-dot.dot-saving {
-    background: var(--accent);
-}
-.chat-save-dot.dot-saved {
-    background: var(--success);
-}
-.chat-save-dot.dot-error {
-    background: var(--danger);
-}
-/* Reasoning-effort segmented switch, matching the original three-way control. */
-.chat-effort-switch {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 3px;
-    padding: 3px;
-    border: 1px solid var(--border);
-    border-radius: 999px;
-    background: var(--bg);
-}
-.chat-effort-option {
+.chat-settings-error {
     display: inline-flex;
     align-items: center;
-    justify-content: center;
-    gap: 6px;
+    gap: 4px;
+    color: var(--danger);
+}
+.chat-plugin-list {
+    display: grid;
+    gap: 2px;
+}
+.chat-plugin-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     min-width: 0;
-    min-height: 30px;
-    padding: 0 8px;
+    padding: 8px 10px;
     border: 0;
-    border-radius: 999px;
+    border-radius: 10px;
     background: transparent;
-    color: var(--muted);
+    color: var(--text);
     font-size: 12px;
-    font-weight: 500;
-    white-space: nowrap;
-    transition: background 160ms ease, color 160ms ease, box-shadow 160ms ease;
+    text-align: left;
+    cursor: pointer;
+    transition: background-color 120ms ease;
 }
-.chat-effort-option:hover:not(:disabled) {
-    color: var(--text);
-    background: var(--surface-raised);
+.chat-plugin-row:hover:not(:disabled),
+.chat-plugin-row:focus-visible:not(:disabled) {
+    background-color: var(--surface-muted);
+    outline: none;
 }
-.chat-effort-option.active {
-    color: var(--text);
+.chat-plugin-row > .icon {
+    flex: 0 0 auto;
+    width: 15px;
+    height: 15px;
+    color: var(--muted);
+}
+.chat-plugin-copy {
+    flex: 1;
+    min-width: 0;
+    display: grid;
+    gap: 1px;
+}
+.chat-plugin-copy strong {
+    font-weight: 600;
+}
+.chat-plugin-copy small {
+    color: var(--subtle);
+    font-size: 11px;
+}
+.chat-plugin-switch {
+    position: relative;
+    flex: 0 0 auto;
+    width: 30px;
+    height: 18px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--text) 14%, transparent);
+    transition: background 160ms ease;
+}
+.chat-plugin-switch::after {
+    content: "";
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
     background: var(--surface);
-    box-shadow: inset 0 0 0 1px var(--border-strong), var(--shadow);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 25%);
+    transition: transform 180ms cubic-bezier(.22, 1, .36, 1);
 }
-.chat-effort-option.active:hover:not(:disabled) {
-    color: var(--accent);
+.chat-plugin-switch[data-on="true"] {
+    background: var(--accent);
+}
+.chat-plugin-switch[data-on="true"]::after {
+    transform: translateX(12px);
 }
 /* The system-prompt field keeps its own compact textarea. */
 .chat-settings-field textarea {
@@ -649,7 +682,7 @@
         gap: 12px;
     }
     .chat-messages {
-        padding: 80px var(--chat-gutter) 120px;
+        padding: 20px var(--chat-gutter) 120px;
     }
     .chat-empty h2 {
         font-size: 24px;

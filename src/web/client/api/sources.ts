@@ -8,6 +8,7 @@ import type {
     CreateSourceInput,
     UpdateSourceInput,
 } from "@heimdall/admin-contracts";
+import type { SourceDraftProbeResult } from "@heimdall/admin-contracts/source-probe.ts";
 
 /** Read the current revision before resolving an edit conflict. */
 export async function loadSourceMetadata(
@@ -71,6 +72,18 @@ export function createSource(input: CreateSourceInput): Promise<unknown> {
             config: input.config,
         }),
     });
+}
+
+/** Probe an in-memory draft using the exact preset and proxy selected for saving. */
+export async function probeSourceDraft(
+    input: CreateSourceInput,
+    signal?: AbortSignal,
+): Promise<SourceDraftProbeResult> {
+    const result = await request<{ probe: SourceDraftProbeResult }>(
+        "/api/admin/source-draft-probe",
+        { method: "POST", body: JSON.stringify(input), signal },
+    );
+    return result.probe;
 }
 
 function withEtag(data: unknown, etag: string): SourceConfigEnvelope {

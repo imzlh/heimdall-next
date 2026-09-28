@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "hono/jsx/dom";
+import type { ConsolePage } from "../shared/page-info.ts";
 import type { UiContribution, UiPolicy } from "@heimdall/admin-contracts/ui.ts";
 import type { SourceConfigSchema } from "@heimdall/admin-contracts/forms.ts";
 import type { ConsoleSnapshot } from "@heimdall/admin-contracts/console.ts";
@@ -18,7 +19,7 @@ import {
 export interface ConsoleProps {
     initial?: DashboardData;
     initialPanels?: Omit<ConsoleSnapshot, "dashboard">;
-    page?: "overview" | "channels" | "settings" | "plugin";
+    page?: ConsolePage;
     tab?: string;
     contributions?: readonly UiContribution[];
     sourcePluginIds?: Readonly<Record<string, string>>;

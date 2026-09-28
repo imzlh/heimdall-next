@@ -1,0 +1,723 @@
+/* Request history keeps the console's restrained cards and pill controls. */
+.journal-page {
+    padding: 0;
+    overflow: hidden;
+}
+.journal-heading {
+    padding: 24px 26px 18px;
+    margin: 0;
+}
+.journal-heading h2 {
+    font-size: 18px;
+}
+.journal-heading p {
+    margin-top: 5px;
+    font-size: 12px;
+}
+.journal-page button,
+.journal-detail button,
+.journal-detail-footer a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    min-height: 36px;
+    padding: 7px 13px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    color: var(--muted);
+    background: var(--surface);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: nowrap;
+    transition: background var(--motion-fast) ease,
+        border-color var(--motion-fast) ease, color var(--motion-fast) ease;
+}
+.journal-page button:hover:not(:disabled),
+.journal-detail button:hover:not(:disabled),
+.journal-detail-footer a:hover {
+    border-color: var(--border-strong);
+    color: var(--text);
+    background: var(--surface-muted);
+}
+.journal-detail .primary-button {
+    border-color: transparent;
+    background: var(--button-bg);
+    color: white;
+}
+.journal-detail .primary-button:hover:not(:disabled) {
+    border-color: transparent;
+    background: var(--button-hover);
+    color: white;
+}
+.journal-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    padding: 0 26px 18px;
+}
+.journal-search {
+    display: flex;
+    flex-direction: row;
+    flex: 1 1 280px;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
+    padding: 4px 5px 4px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    color: var(--subtle);
+    background: var(--bg);
+    transition: border-color var(--motion-fast) ease,
+        box-shadow var(--motion-fast) ease;
+}
+.journal-search:focus-within {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.journal-search input {
+    width: 100%;
+    min-width: 0;
+    padding: 4px 0;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: var(--text);
+    font-size: 13px;
+}
+.journal-search input::placeholder {
+    color: var(--subtle);
+}
+.journal-search button {
+    min-height: 30px;
+    border: 0;
+    color: var(--accent);
+    background: var(--accent-soft);
+}
+.journal-status-filter {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+    color: var(--subtle);
+    font-size: 12px;
+}
+.journal-status-filter select {
+    min-height: 40px;
+    padding: 7px 28px 7px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    color: var(--text);
+    background: var(--surface);
+    font-size: 12px;
+}
+.journal-list-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px 26px;
+    border-top: 1px solid var(--border);
+    background: var(--surface-muted);
+    font-size: 12px;
+}
+.journal-list-meta p {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.journal-auto-refresh {
+    display: inline-flex;
+    /* The global `label` rule forces column; keep the checkbox inline. */
+    flex-direction: row;
+    align-items: center;
+    gap: 7px;
+    color: var(--muted);
+    cursor: pointer;
+}
+.journal-auto-refresh input {
+    margin: 0;
+    accent-color: var(--accent);
+}
+.journal-table {
+    width: 100%;
+}
+.journal-table th:first-child,
+.journal-table td:first-child {
+    padding-left: 26px;
+}
+.journal-table th:last-child,
+.journal-table td:last-child {
+    padding-right: 26px;
+}
+.journal-table tbody tr {
+    transition: background var(--motion-fast) ease;
+}
+.journal-table tbody tr:hover,
+.journal-table tbody tr.selected {
+    background: var(--accent-soft);
+}
+.journal-table .request-id {
+    max-width: 220px;
+}
+.journal-request-link {
+    display: inline-flex;
+    max-width: 100%;
+    min-height: 36px;
+    align-items: center;
+    border-radius: 7px;
+    color: var(--accent);
+}
+.journal-request-link code {
+    display: block;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.journal-empty {
+    display: grid;
+    justify-items: center;
+    gap: 10px;
+    padding: 68px 24px;
+    color: var(--subtle);
+    text-align: center;
+}
+.journal-empty > .icon {
+    margin-bottom: 6px;
+}
+.journal-empty h3 {
+    color: var(--muted);
+    font-weight: 500;
+}
+.journal-empty p {
+    font-size: 12px;
+}
+.journal-error {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: 16px 26px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    background: var(--danger-soft);
+    overflow-wrap: anywhere;
+}
+.journal-error p {
+    color: var(--danger);
+    font-size: 12px;
+}
+.journal-error button {
+    flex-shrink: 0;
+}
+.journal-pagination {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 26px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12px;
+}
+.journal-pagination > span {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+}
+.journal-pagination small {
+    color: var(--subtle);
+    font-size: 11px;
+}
+.journal-pagination > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+}
+body:has(dialog.journal-detail[open]) {
+    overflow: hidden;
+}
+dialog.journal-detail {
+    inset: 0 0 0 auto;
+    width: min(760px, 94vw);
+    max-width: none;
+    height: 100dvh;
+    max-height: 100dvh;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 0;
+    border-left: 1px solid var(--border);
+    border-radius: 24px 0 0 24px;
+    color: var(--text);
+    background: var(--surface);
+    box-shadow: var(--shadow-lg);
+}
+dialog.journal-detail[open] {
+    display: flex;
+    flex-direction: column;
+}
+dialog.journal-detail::backdrop {
+    background: rgb(10 15 25 / 36%);
+    backdrop-filter: blur(3px);
+}
+.journal-detail-header {
+    display: flex;
+    flex-shrink: 0;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 26px 26px 20px;
+    border-bottom: 1px solid var(--border);
+}
+.journal-detail-heading {
+    min-width: 0;
+}
+.journal-eyebrow {
+    color: var(--subtle);
+    font-size: 11px;
+}
+.journal-detail-heading h2 {
+    margin-top: 5px;
+    overflow-wrap: anywhere;
+    font-size: 20px;
+}
+.journal-detail-heading p {
+    margin-top: 7px;
+    overflow-wrap: anywhere;
+    color: var(--subtle);
+}
+.journal-detail .icon-button {
+    flex-shrink: 0;
+    width: 36px;
+    padding: 8px;
+    border: 0;
+    background: var(--surface-muted);
+}
+.journal-detail-content {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    padding: 24px 26px 32px;
+}
+.journal-detail-content .journal-error {
+    margin: 0;
+}
+.journal-detail-meta {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px 24px;
+    margin: 0 0 22px;
+}
+.journal-detail-meta > div {
+    min-width: 0;
+}
+.journal-detail-meta dt {
+    margin-bottom: 5px;
+    color: var(--subtle);
+    font-size: 11px;
+}
+.journal-detail-meta dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+    font-size: 12px;
+}
+.journal-usage {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px 20px;
+    margin-bottom: 20px;
+    padding: 13px 16px;
+    border-radius: 12px;
+    color: var(--muted);
+    background: var(--accent-soft);
+    font-size: 11px;
+}
+.journal-usage strong {
+    margin-left: 4px;
+    color: var(--text);
+    font-size: 13px;
+}
+.journal-payloads {
+    display: grid;
+    gap: 8px;
+}
+.journal-json {
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+}
+.journal-json > summary {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    padding: 11px 13px;
+    list-style: none;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 550;
+    cursor: pointer;
+    transition: color var(--motion-fast) ease, background var(--motion-fast)
+        ease;
+}
+.journal-json > summary::-webkit-details-marker {
+    display: none;
+}
+.journal-json > summary:hover {
+    color: var(--text);
+    background: var(--surface-muted);
+}
+.journal-json > summary > .icon {
+    flex-shrink: 0;
+    color: var(--subtle);
+    transition: transform var(--motion-fast) ease;
+}
+.journal-json[open] > summary > .icon {
+    transform: rotate(90deg);
+}
+.journal-json[open] > summary {
+    border-bottom: 1px solid var(--border);
+}
+.journal-json pre {
+    margin: 0;
+    padding: 14px 16px;
+    max-height: 360px;
+    border-radius: 0;
+    color: var(--text);
+    line-height: 1.7;
+    white-space: pre;
+    tab-size: 2;
+}
+.journal-empty-value {
+    padding: 16px;
+    color: var(--subtle);
+    font-size: 12px;
+}
+.journal-frames {
+    display: grid;
+    gap: 8px;
+    margin-top: 26px;
+}
+.journal-frames-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin-bottom: 4px;
+}
+.journal-frames-heading h3 {
+    font-size: 13px;
+}
+.journal-frames-heading span,
+.journal-frame-end {
+    color: var(--subtle);
+    font-size: 11px;
+}
+.journal-frame > summary {
+    gap: 9px;
+    min-width: 0;
+}
+.journal-frame > summary strong {
+    min-width: 0;
+    overflow: hidden;
+    font-weight: 500;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+.journal-frame > summary time {
+    margin-left: auto;
+    color: var(--subtle);
+    font-size: 10px;
+    font-weight: 400;
+    white-space: nowrap;
+}
+.journal-frame-end {
+    padding: 10px;
+    text-align: center;
+}
+.journal-detail-footer {
+    display: grid;
+    flex-shrink: 0;
+    gap: 10px;
+    padding: 16px 26px max(16px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border);
+    background: var(--surface);
+}
+.journal-detail-actions,
+.journal-detail-actions > div {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.journal-detail-actions {
+    justify-content: space-between;
+}
+.journal-loading {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 30px 0;
+    color: var(--subtle);
+    font-size: 13px;
+}
+.journal-notice {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: var(--success);
+    font-size: 12px;
+}
+@media (prefers-reduced-motion: no-preference) {
+    dialog.journal-detail[open] {
+        animation: journal-drawer-in 240ms var(--motion-ease) both;
+    }
+    dialog.journal-detail[open]::backdrop {
+        animation: journal-backdrop-in 180ms ease both;
+    }
+    .journal-loading .icon,
+    .journal-refresh:disabled .icon {
+        animation: journal-spinner 900ms linear infinite;
+    }
+    @keyframes journal-drawer-in {
+        from {
+            opacity: 0;
+            transform: translateX(30px);
+        }
+        to {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+    @keyframes journal-backdrop-in {
+        from {
+            opacity: 0;
+        }
+        to {
+            opacity: 1;
+        }
+    }
+    @keyframes journal-spinner {
+        to {
+            transform: rotate(360deg);
+        }
+    }
+}
+@media (max-width: 640px) {
+    .journal-heading,
+    .journal-filters,
+    .journal-list-meta,
+    .journal-pagination {
+        padding-left: 16px;
+        padding-right: 16px;
+    }
+    .journal-search {
+        flex-basis: 100%;
+    }
+    .journal-search input,
+    .journal-status-filter select {
+        font-size: 16px;
+    }
+    .journal-pagination button,
+    .journal-detail button {
+        min-height: 40px;
+    }
+    dialog.journal-detail {
+        width: 100vw;
+        border: 0;
+        border-radius: 0;
+    }
+    .journal-detail-header,
+    .journal-detail-content,
+    .journal-detail-footer {
+        padding-left: 18px;
+        padding-right: 18px;
+    }
+    .journal-detail-meta {
+        gap: 14px 16px;
+    }
+    .journal-frame > summary time {
+        display: none;
+    }
+    .journal-detail-actions > div {
+        flex: 1;
+        justify-content: flex-end;
+    }
+}
+
+/* ── 系统日志 ────────────────────────────────────────────────────────────
+   A calm audit timeline, sitting directly on the page: time left of one
+   continuous rail, level colors live on the dots, scope tags stay neutral.
+   The filter is an icon-only segmented control tinted by level. */
+.system-log-page {
+    margin-top: 6px;
+}
+/* The level filter teleports into the page header, left of the refresh
+   button; this is just its landing node. */
+.system-log-slot {
+    display: inline-flex;
+    align-items: center;
+}
+.system-log-levels {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    background: var(--surface-muted);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+}
+.system-log-level-chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--muted);
+    text-decoration: none;
+    cursor: pointer;
+    /* Selection is a slow fade: the icon eases into its level color. */
+    transition: color 350ms ease, background-color 350ms ease,
+        box-shadow 350ms ease;
+}
+.system-log-level-chip .icon {
+    display: block;
+}
+.system-log-level-chip:hover:not(.is-active) {
+    color: var(--text);
+}
+.system-log-level-chip.is-active {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: var(--shadow);
+}
+.system-log-chip-info.is-active {
+    color: var(--accent);
+}
+.system-log-chip-warn.is-active {
+    color: var(--warning);
+}
+.system-log-chip-error.is-active {
+    color: var(--danger);
+}
+.system-log-ledger {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+.system-log-item {
+    display: grid;
+    grid-template-columns: 92px 24px 92px minmax(0, 1fr);
+    column-gap: 12px;
+    align-items: start;
+    padding: 12px 0 12px 24px;
+    transition: background var(--motion-fast) ease;
+}
+.system-log-item:hover {
+    background: var(--accent-soft);
+}
+.system-log-time {
+    padding-top: 1px;
+    color: var(--subtle);
+    font-size: 11px;
+    line-height: 20px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+.system-log-rail {
+    position: relative;
+    align-self: stretch;
+}
+.system-log-rail::before {
+    content: "";
+    position: absolute;
+    /* One whole rail: every row's segment reaches through the 12px row
+       padding to meet its neighbors, so the line runs the list edge to edge. */
+    top: -12px;
+    bottom: -12px;
+    left: 50%;
+    width: 1px;
+    transform: translateX(-0.5px);
+    background: var(--border);
+}
+.system-log-dot {
+    position: relative;
+    z-index: 1;
+    display: block;
+    width: 9px;
+    height: 9px;
+    margin: 5.5px auto 0;
+    border-radius: 50%;
+    background: var(--accent);
+}
+.system-log-level-debug .system-log-dot {
+    background: var(--border-strong);
+}
+.system-log-level-warn .system-log-dot {
+    background: var(--warning);
+}
+.system-log-level-error .system-log-dot {
+    background: var(--danger);
+}
+.system-log-scope {
+    justify-self: start;
+    max-width: 100%;
+    padding: 2px 9px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface-muted);
+    color: var(--muted);
+    font-size: 10.5px;
+    line-height: 16px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    /* Pure pigment: the tag is display-only, so the caret never hovers it. */
+    cursor: none;
+}
+.system-log-scope-count {
+    margin-left: 5px;
+    color: currentColor;
+    opacity: .75;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+.system-log-body {
+    min-width: 0;
+}
+.system-log-message {
+    margin: 0;
+    color: var(--text);
+    font-size: 12.5px;
+    line-height: 20px;
+    overflow-wrap: anywhere;
+}
+.system-log-detail {
+    margin: 5px 0 0;
+    color: var(--subtle);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: 10.5px;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+.system-log-level-warn .system-log-message {
+    color: var(--warning);
+}
+.system-log-level-error .system-log-message {
+    color: var(--danger);
+}
+.system-log-note {
+    margin: 14px 0 8px 24px;
+    color: var(--subtle);
+    font-size: 11px;
+}

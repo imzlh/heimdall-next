@@ -28,6 +28,7 @@ interface RequestOptions {
     method?: string;
     headers?: HeadersInit;
     body?: BodyInit | null;
+    signal?: AbortSignal;
 }
 
 interface PerformResult {
@@ -104,6 +105,10 @@ export async function performRequest(
             headers,
         });
     } catch (error) {
+        if (
+            options.signal?.aborted ||
+            (error instanceof Error && error.name === "AbortError")
+        ) throw error;
         throw new AdminApiError(
             error instanceof Error ? error.message : "无法连接到管理服务",
             { code: "network_error" },
@@ -117,7 +122,11 @@ export async function performRequest(
         if (contentType.includes("application/json")) {
             try {
                 payload = await response.json() as unknown;
-            } catch {
+            } catch (error) {
+                if (
+                    options.signal?.aborted ||
+                    (error instanceof Error && error.name === "AbortError")
+                ) throw error;
                 payload = null;
             }
         } else {

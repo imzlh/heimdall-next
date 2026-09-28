@@ -367,6 +367,7 @@ function validatePart(value: unknown, path: string): ContentPart {
             if (part.label !== undefined) string(part.label, `${path}.label`);
             if (part.url !== undefined) string(part.url, `${path}.url`);
             if (part.quote !== undefined) string(part.quote, `${path}.quote`);
+            if (part.ref !== undefined) string(part.ref, `${path}.ref`);
             break;
         case "custom":
             text(part.name, `${path}.name`);
@@ -387,12 +388,12 @@ function validateBlobRef(
 ): asserts value is BlobRef {
     const blob = record(value, path);
     text(blob.mediaType, `${path}.mediaType`);
-    if (blob.uri === undefined && blob.dataBase64 === undefined) {
-        fail(path, "requires uri or dataBase64");
+    if (blob.uri === undefined && blob.data === undefined) {
+        fail(path, "requires uri or data");
     }
     if (blob.uri !== undefined) text(blob.uri, `${path}.uri`);
-    if (blob.dataBase64 !== undefined) {
-        string(blob.dataBase64, `${path}.dataBase64`);
+    if (blob.data !== undefined && !(blob.data instanceof Uint8Array)) {
+        fail(`${path}.data`, "must be a Uint8Array");
     }
     if (blob.bytes !== undefined) {
         nonNegativeInteger(blob.bytes, `${path}.bytes`);
@@ -477,6 +478,18 @@ function validateEvent(
             break;
         case "usage":
             validateUsage(event.usage, `${path}.usage`);
+            break;
+        case "suggestions": {
+            if (!Array.isArray(event.suggestions)) {
+                fail(`${path}.suggestions`, "must be an array");
+            }
+            event.suggestions.forEach((item, index) =>
+                text(item, `${path}.suggestions[${index}]`)
+            );
+            break;
+        }
+        case "title":
+            text(event.title, `${path}.title`);
             break;
         case "checkpoint":
             text(event.stateHash, `${path}.stateHash`);
@@ -579,6 +592,10 @@ function json(
         if (!Number.isFinite(value)) fail(path, "contains a non-finite number");
         return;
     }
+    // The kernel graph is JSON plus raw binary: a `BlobRef.data` payload rides
+    // through as a `Uint8Array` (never base64), so accept binary as an opaque
+    // leaf. `validateBlobRef` still checks it appears only where a blob allows.
+    if (ArrayBuffer.isView(value) || value instanceof ArrayBuffer) return;
     if (typeof value !== "object") {
         fail(path, `contains non-JSON value ${typeof value}`);
     }

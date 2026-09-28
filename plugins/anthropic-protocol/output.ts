@@ -1,4 +1,5 @@
 import {
+    bytesToBase64,
     type ContentPart,
     type GenerationRequest,
     type JsonObject,
@@ -22,6 +23,7 @@ import {
     isTerminalStatus,
     parseJsonText,
     sanitizeJson,
+    statusPartSummary,
 } from "./shared.ts";
 
 export async function materialize(
@@ -150,14 +152,16 @@ export function toAnthropicContent(
             });
         } else if (part.type === "refusal") {
             result.push({ type: "text", text: part.text });
+        } else if (statusPartSummary(part) !== undefined) {
+            result.push({ type: "text", text: statusPartSummary(part)! });
         } else if (part.type === "image") {
             result.push({
                 type: "image",
-                source: part.source.dataBase64 !== undefined
+                source: part.source.data !== undefined
                     ? {
                         type: "base64",
                         media_type: part.source.mediaType,
-                        data: part.source.dataBase64,
+                        data: bytesToBase64(part.source.data),
                     }
                     : {
                         type: "url",
@@ -165,11 +169,11 @@ export function toAnthropicContent(
                     },
             });
         } else if (part.type === "document") {
-            const source = part.source.dataBase64 !== undefined
+            const source = part.source.data !== undefined
                 ? {
                     type: "base64",
                     media_type: part.source.mediaType,
-                    data: part.source.dataBase64,
+                    data: bytesToBase64(part.source.data),
                 }
                 : { type: "url", url: part.source.uri ?? "" };
             result.push({

@@ -6,18 +6,22 @@ export interface RuntimeSettings {
     readonly proxyKey: string;
     readonly limitPerMinute: number;
     readonly probeIntervalMs: number;
+    /** Model id used to auto-name chat conversations; "" / absent disables it. */
+    readonly titleModel?: string;
 }
 
 export interface RuntimeSettingsPatch {
     readonly proxyKey?: string;
     readonly limitPerMinute?: number;
     readonly probeIntervalMs?: number;
+    readonly titleModel?: string;
 }
 
 export interface PublicRuntimeSettings {
     readonly proxyKeyConfigured: boolean;
     readonly limitPerMinute: number;
     readonly probeIntervalMs: number;
+    readonly titleModel: string;
 }
 
 export interface RuntimeSettingsHandle {
@@ -31,6 +35,7 @@ interface StoredRuntimeSettings {
     readonly proxyKey?: unknown;
     readonly limitPerMinute?: unknown;
     readonly probeIntervalMs?: unknown;
+    readonly titleModel?: unknown;
 }
 
 const settingsKey = ["runtime"] as const;
@@ -69,6 +74,7 @@ export function redactRuntimeSettings(
         proxyKeyConfigured: value.proxyKey.length > 0,
         limitPerMinute: value.limitPerMinute,
         probeIntervalMs: value.probeIntervalMs,
+        titleModel: value.titleModel ?? "",
     };
 }
 
@@ -86,6 +92,9 @@ export function applyRuntimeSettingsPatch(
         probeIntervalMs: patch.probeIntervalMs === undefined
             ? current.probeIntervalMs
             : patch.probeIntervalMs,
+        titleModel: patch.titleModel === undefined
+            ? current.titleModel
+            : patch.titleModel,
     });
 }
 
@@ -144,10 +153,15 @@ export function normalizeRuntimeSettings(
             "probeIntervalMs must be an integer from 0 to 86400000",
         );
     }
+    const titleModel = (value.titleModel ?? "").trim();
+    if (titleModel.length > 200) {
+        throw new TypeError("titleModel must be at most 200 characters");
+    }
     return {
         proxyKey: value.proxyKey.trim(),
         limitPerMinute: value.limitPerMinute,
         probeIntervalMs: value.probeIntervalMs,
+        titleModel,
     };
 }
 
@@ -160,5 +174,8 @@ function storedSettings(value: StoredRuntimeSettings): RuntimeSettings {
         probeIntervalMs: typeof value.probeIntervalMs === "number"
             ? value.probeIntervalMs
             : 300_000,
+        titleModel: typeof value.titleModel === "string"
+            ? value.titleModel
+            : "",
     };
 }

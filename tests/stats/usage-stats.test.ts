@@ -177,6 +177,89 @@ Deno.test("stats series and rankings cover the requested natural days", async ()
     assertEquals(today.models.length, 3);
 });
 
+Deno.test("stats trend serves wall-clock hour buckets", async () => {
+    using store = openStore();
+    seed(store);
+    const app = createStatsRoutes(store, clock);
+    const trend = await (await app.request("/stats/trend?mode=hour")).json();
+    assertEquals(trend.mode, "hour");
+    assertEquals(trend.bucketMinutes, 60);
+    assertEquals(trend.fallback, false);
+    // 11:00 Shanghai now: the 24 hour buckets start 12:00 yesterday and end
+    // with the hour in progress.
+    assertEquals(trend.from, "2026-09-23T04:00:00.000Z");
+    assertEquals(trend.until, "2026-09-24T04:00:00.000Z");
+    assertEquals(trend.series.length, 24);
+    const first = trend.series[0];
+    assertEquals(first.from, "2026-09-23T04:00:00.000Z");
+    assertEquals(first.day, "2026-09-23");
+    assertEquals(first.label, "12:00");
+    // r1 (15:59:59.999Z) lands in the 23:00 Shanghai bucket; r2 (16:00Z) in midnight's.
+    const buckets = trend.series.map(
+        (point: { label: string; requestCount: number; totalTokens: number }) => [
+            point.label,
+            point.requestCount,
+            point.totalTokens,
+        ],
+    );
+    assertEquals(buckets[11], ["23:00", 1, 3]);
+    assertEquals(buckets[12], ["00:00", 1, 30]);
+    assertEquals(buckets[16], ["04:00", 1, 0]);
+    assertEquals(buckets[21], ["09:00", 1, 0]);
+    assertEquals(buckets[22], ["10:00", 1, 10]);
+    assertEquals(
+        buckets.filter((entry: [string, number, number]) => entry[1] > 0).length,
+        5,
+    );
+});
+
+Deno.test("stats trend zooms the recent window onto today's active span", async () => {
+    using store = openStore();
+    seed(store);
+    const app = createStatsRoutes(store, clock);
+    const trend = await (await app.request("/stats/trend?mode=recent")).json();
+    assertEquals(trend.mode, "recent");
+    assertEquals(trend.fallback, false);
+    // Token activity runs midnight Shanghai (r2) to 10:00 (r5); two hours of
+    // context on each side make a 13h window, so 30 minute buckets fit.
+    assertEquals(trend.from, "2026-09-23T14:00:00.000Z");
+    assertEquals(trend.until, "2026-09-24T03:00:00.000Z");
+    assertEquals(trend.bucketMinutes, 30);
+    assertEquals(trend.series.length, 26);
+    // r1 at 23:59:59.999 Shanghai (yesterday) survives inside the context.
+    const context = trend.series[3];
+    assertEquals(context.from, "2026-09-23T15:30:00.000Z");
+    assertEquals(context.label, "23:30");
+    assertEquals(context.requestCount, 1);
+    assertEquals(context.totalTokens, 3);
+    const burst = trend.series[4];
+    assertEquals(burst.requestCount, 1);
+    assertEquals(burst.totalTokens, 30);
+});
+
+Deno.test("stats trend falls back to the trailing day when today is quiet", async () => {
+    using store = openStore();
+    record(store, "old", "2026-09-17T12:00:00.000Z", "model-c", "completed", {
+        input: 50,
+        output: 50,
+        total: 100,
+    });
+    const app = createStatsRoutes(store, clock);
+    const trend = await (await app.request("/stats/trend?mode=recent")).json();
+    assertEquals(trend.mode, "recent");
+    assertEquals(trend.fallback, true);
+    assertEquals(trend.bucketMinutes, 60);
+    assertEquals(trend.from, "2026-09-23T04:00:00.000Z");
+    assertEquals(trend.until, "2026-09-24T04:00:00.000Z");
+    assertEquals(trend.series.length, 24);
+    assertEquals(
+        trend.series.every((point: { requestCount: number }) =>
+            point.requestCount === 0
+        ),
+        true,
+    );
+});
+
 Deno.test("model ranking reports truncation beyond its row limit", async () => {
     using store = openStore();
     for (let index = 0; index <= MODEL_RANKING_LIMIT; index++) {
@@ -210,6 +293,8 @@ Deno.test("mounted stats routes validate parameters and the time zone", async ()
             "series?days=7.5",
             "series?days=1e1",
             "series?days=abc",
+            "trend?mode=week",
+            "trend?mode=hourly",
             "models?date=2026-02-30",
             "models?date=2026-9-1",
             "models?date=2999-01-01",

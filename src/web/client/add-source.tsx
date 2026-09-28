@@ -17,6 +17,7 @@ import {
 } from "./source-setup-draft.ts";
 import {
     CustomSourceConfig,
+    type SourceSetupProbe,
     type SourceSetupSaveInput,
     type SourceSetupSource,
 } from "./source-config-form.tsx";
@@ -37,6 +38,7 @@ export interface AddSourceFlowProps {
     readonly proxyPool?: ProxyPoolView | null;
     readonly onClose: () => void;
     readonly onSave: (input: SourceSetupSaveInput) => Promise<void>;
+    readonly onProbe?: SourceSetupProbe;
     readonly onSaved?: (draft: SourceSetupDraft) => void;
     /** Only the host selects a preset renderer and its module permissions. */
     readonly renderPreset?: (
@@ -55,6 +57,7 @@ export function AddSourceFlow(
         proxyPool,
         onClose,
         onSave,
+        onProbe,
         onSaved,
         renderPreset,
     }: AddSourceFlowProps,
@@ -538,6 +541,7 @@ export function AddSourceFlow(
                                 disabled={busy}
                                 onSelectSource={setSourcePluginId}
                                 onSave={save}
+                                onProbe={onProbe}
                                 onBack={() => back("choice")}
                             />
                         )}

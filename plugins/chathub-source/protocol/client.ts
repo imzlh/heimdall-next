@@ -18,6 +18,7 @@ import type {
     ChatCallOptions,
     ChatHubClientOptions,
     ChatHubEvent,
+    ChatHubMeterError,
     ChatHubReference,
     ChatHubRequest,
     ChatHubResult,
@@ -158,6 +159,7 @@ export class ChatHubClient {
         const events: ChatHubEvent[] = [];
         const references: ChatHubReference[] = [];
         const suggestions: SuggestedResponse[] = [];
+        const imageUrls: string[] = [];
         const timings: number[] = [];
         let handshakeComplete = false;
         let connectTimer: ReturnType<typeof setTimeout> | undefined;
@@ -170,6 +172,10 @@ export class ChatHubClient {
         let finalText: string | undefined;
         let throttling: ChatHubThrottling | undefined;
         let chatName: string | undefined;
+        let turnState: string | undefined;
+        let resultValue: string | undefined;
+        let resultMessage: string | undefined;
+        let meteringInformation: ChatHubMeterError[] | undefined;
 
         const recordTiming = (): void => {
             const now = this.#clock();
@@ -252,11 +258,18 @@ export class ChatHubClient {
                     events,
                     references: uniqueByJson(references),
                     suggestions: uniqueByJson(suggestions),
+                    ...(imageUrls.length > 0
+                        ? { images: [...new Set(imageUrls)] }
+                        : {}),
                     completion,
                     finalText: finalText,
                     reasoning: reasoningAccumulator.text || undefined,
                     throttling,
                     chatName,
+                    turnState,
+                    resultValue,
+                    resultMessage,
+                    meteringInformation,
                     receivedTokenMetrics: receivedTokenMetricsResult(),
                 });
             };
@@ -301,6 +314,9 @@ export class ChatHubClient {
                 if (event.suggestions && event.suggestions.length > 0) {
                     suggestions.push(...event.suggestions);
                 }
+                if (event.images && event.images.length > 0) {
+                    imageUrls.push(...event.images);
+                }
                 responsesSent++;
                 recordTiming();
                 if (event.kind === "stream-item") {
@@ -314,6 +330,12 @@ export class ChatHubClient {
                 }
                 if (event.throttling) throttling = event.throttling;
                 if (event.chatName) chatName = event.chatName;
+                if (event.turnState) turnState = event.turnState;
+                if (event.resultValue) resultValue = event.resultValue;
+                if (event.resultMessage) resultMessage = event.resultMessage;
+                if (event.meteringInformation) {
+                    meteringInformation = event.meteringInformation;
+                }
                 await options.onEvent?.(event);
             };
 

@@ -9,6 +9,33 @@ import {
 } from "./composer-behavior.ts";
 import type { ChatController, ChatState } from "./types.ts";
 import { Icon } from "../../shared/icons.tsx";
+import type { IconName } from "../../shared/icons.tsx";
+
+const EFFORT_OPTIONS = [
+    {
+        value: "low",
+        label: "快速",
+        hint: "更快的回答，更少的推理",
+        icon: "zap",
+    },
+    {
+        value: "medium",
+        label: "默认",
+        hint: "速度与深度的平衡",
+        icon: "gauge",
+    },
+    {
+        value: "high",
+        label: "深入",
+        hint: "更充分的推理，回答更慢",
+        icon: "brain",
+    },
+] as const satisfies readonly {
+    value: "low" | "medium" | "high";
+    label: string;
+    hint: string;
+    icon: IconName;
+}[];
 
 export function ChatComposer(
     { state, controller }: { state: ChatState; controller: ChatController },
@@ -17,17 +44,29 @@ export function ChatComposer(
     const draftInput = useRef<HTMLTextAreaElement | null>(null);
     const assetsButton = useRef<HTMLButtonElement | null>(null);
     const assetsPanel = useRef<HTMLDivElement | null>(null);
+    const effortButton = useRef<HTMLButtonElement | null>(null);
+    const effortMenu = useRef<HTMLDivElement | null>(null);
     const previousAttachments = useRef({
         count: state.attachments.length,
         conversation: state.selectedId,
     });
     const [assetsOpen, setAssetsOpen] = useState(false);
+    const [effortOpen, setEffortOpen] = useState(false);
     const busy = state.loading || state.creating || state.sending ||
         state.managing;
     const disabled = !state.available || !state.authenticated || busy ||
         state.attachmentsBusy;
     const hasModel = !!state.model && state.models.includes(state.model);
     const canSend = !disabled && hasModel && !!state.draft.trim();
+    // Reasoning effort rides with the conversation; a fresh unsaved chat keeps
+    // the picked value in the controller and applies it once the chat exists.
+    const effort = state.conversation
+        ? state.conversation.reasoningEffort ?? "medium"
+        : state.pendingEffort;
+    const effortMeta =
+        EFFORT_OPTIONS.find((option) => option.value === effort) ??
+            EFFORT_OPTIONS.find((option) => option.value === "medium")!;
+    const effortLocked = disabled;
 
     // Drafts also change after server acknowledgement, failed sends and history
     // selection. Resize those updates too, not just physical keystrokes.
@@ -102,11 +141,42 @@ export function ChatComposer(
         };
     }, [assetsOpen]);
 
+    useEffect(() => {
+        if (!effortOpen) return;
+        const outside = (event: PointerEvent) => {
+            const target = event.target as Node | null;
+            if (
+                !effortMenu.current?.contains(target) &&
+                !effortButton.current?.contains(target)
+            ) setEffortOpen(false);
+        };
+        const escape = (event: KeyboardEvent) => {
+            if (event.key !== "Escape") return;
+            if (document.querySelector("dialog[open]")) return;
+            event.preventDefault();
+            setEffortOpen(false);
+            effortButton.current?.focus();
+        };
+        document.addEventListener("pointerdown", outside);
+        document.addEventListener("keydown", escape);
+        return () => {
+            document.removeEventListener("pointerdown", outside);
+            document.removeEventListener("keydown", escape);
+        };
+    }, [effortOpen]);
+
     function chooseFiles(event: Event) {
         const input = event.currentTarget as HTMLInputElement;
         const files = Array.from(input.files ?? []);
         input.value = "";
         if (files.length) void controller.addAttachments(files);
+    }
+
+    function chooseEffort(next: "low" | "medium" | "high") {
+        setEffortOpen(false);
+        effortButton.current?.focus();
+        if (next === effort) return;
+        controller.chooseEffort(next);
     }
 
     function submit() {
@@ -136,6 +206,14 @@ export function ChatComposer(
         controller.setDraft(text);
         resizeComposerInput(input);
     }
+
+    // Status line under the capsule; collapsed entirely when there is nothing
+    // to say so the capsule rests near the bottom edge.
+    const metaStatus = state.attachmentsBusy
+        ? "正在上传图片…"
+        : state.attachments.length && !state.draft.trim()
+        ? "添加一段文字后发送图片"
+        : "";
 
     return (
         <div class="chat-composer-region">
@@ -167,8 +245,8 @@ export function ChatComposer(
                         aria-label="添加图片"
                         aria-busy={state.attachmentsBusy ? "true" : "false"}
                         title={state.attachmentsBusy
-                            ? "正在读取图片…"
-                            : "添加图片，最多 4 张"}
+                            ? "正在上传图片…"
+                            : "添加图片，最多 4 张，每张 5 MiB"}
                     >
                         <span class="chat-attach-glyph" aria-hidden="true">
                             <span class="chat-attach-ready">
@@ -178,6 +256,20 @@ export function ChatComposer(
                                 <Icon name="spinner" />
                             </span>
                         </span>
+                    </button>
+                    <button
+                        ref={effortButton}
+                        type="button"
+                        class="chat-composer-tool chat-effort-toggle"
+                        onClick={() => setEffortOpen(!effortOpen)}
+                        aria-expanded={effortOpen ? "true" : "false"}
+                        aria-haspopup="menu"
+                        aria-controls="chat-effort-menu"
+                        disabled={effortLocked}
+                        aria-label={`思考等级：${effortMeta.label}`}
+                        title={`思考等级：${effortMeta.label}（${effortMeta.hint}）`}
+                    >
+                        <Icon name={effortMeta.icon} />
                     </button>
                     {!!state.attachments.length && (
                         <button
@@ -214,7 +306,9 @@ export function ChatComposer(
                                     .value,
                             )}
                         onKeyDown={keydown}
-                        aria-describedby="chat-composer-hint"
+                        aria-describedby={metaStatus
+                            ? "chat-composer-hint"
+                            : undefined}
                         aria-keyshortcuts="Enter Shift+Enter Control+Enter Meta+Enter"
                     />
                     <div class="chat-composer-action-slot">
@@ -248,6 +342,37 @@ export function ChatComposer(
                             <Icon name="stop" />
                         </button>
                     </div>
+                </div>
+                <div
+                    ref={effortMenu}
+                    id="chat-effort-menu"
+                    class="chat-effort-popover"
+                    data-open={effortOpen ? "true" : "false"}
+                    role="menu"
+                    aria-label="思考等级"
+                    aria-hidden={effortOpen ? "false" : "true"}
+                    inert={!effortOpen}
+                >
+                    {EFFORT_OPTIONS.map((option) => (
+                        <button
+                            key={option.value}
+                            type="button"
+                            role="menuitemradio"
+                            aria-checked={effort === option.value
+                                ? "true"
+                                : "false"}
+                            class="chat-effort-option"
+                            disabled={effortLocked}
+                            onClick={() => chooseEffort(option.value)}
+                        >
+                            <Icon name={option.icon} />
+                            <span>
+                                <strong>{option.label}</strong>
+                                <small>{option.hint}</small>
+                            </span>
+                            {effort === option.value && <Icon name="check" />}
+                        </button>
+                    ))}
                 </div>
                 <div
                     ref={assetsPanel}
@@ -309,22 +434,13 @@ export function ChatComposer(
                     </ul>
                 </div>
             </form>
-            <div class="chat-composer-meta">
-                <p id="chat-composer-hint" class="chat-composer-hint">
-                    {state.attachmentsBusy
-                        ? "正在读取图片…"
-                        : state.attachments.length && !state.draft.trim()
-                        ? "添加一段文字后发送图片"
-                        : (
-                            <>
-                                <kbd>Enter</kbd> 发送 ·{" "}
-                                <kbd>Shift / Ctrl / ⌘</kbd>
-                                {" + "}
-                                <kbd>Enter</kbd> 换行
-                            </>
-                        )}
-                </p>
-            </div>
+            {metaStatus && (
+                <div class="chat-composer-meta">
+                    <p id="chat-composer-hint" class="chat-composer-hint">
+                        {metaStatus}
+                    </p>
+                </div>
+            )}
         </div>
     );
 }

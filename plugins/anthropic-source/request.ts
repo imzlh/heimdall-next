@@ -4,6 +4,7 @@ import type {
     Message,
     OperationRequest,
 } from "@heimdall/contracts";
+import { bytesToBase64 } from "@heimdall/contracts";
 import {
     type AnthropicSourceConfig,
     SAFE_FORWARD_FIELDS,
@@ -168,11 +169,11 @@ function imageSource(
     part: Extract<ContentPart, { type: "image" }>,
 ): WireObject {
     const source = part.source;
-    if (source.dataBase64 !== undefined) {
+    if (source.data !== undefined) {
         return {
             type: "base64",
             media_type: source.mediaType,
-            data: source.dataBase64,
+            data: bytesToBase64(source.data),
         };
     }
     if (source.uri !== undefined) {

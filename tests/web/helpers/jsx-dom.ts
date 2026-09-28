@@ -165,14 +165,20 @@ export class TestElement extends TestNode {
 
     private matches(selector: string): boolean {
         const match = selector.match(
-            /^(\w+)?(?:\[([\w-]+)(?:="([^"]*)")?\])?$/,
+            /^([\w-]+)?((?:\[[\w-]+(?:="[^"]*")?\])*)$/,
         );
-        if (!match) throw new Error(`Unsupported test selector: ${selector}`);
-        return (!match[1] || this.nodeName === match[1].toUpperCase()) &&
-            (!match[2] ||
-                (match[3] === undefined
-                    ? this.hasAttribute(match[2])
-                    : this.getAttribute(match[2]) === match[3]));
+        if (!match || (!match[1] && !match[2])) {
+            throw new Error(`Unsupported test selector: ${selector}`);
+        }
+        if (match[1] && this.nodeName !== match[1].toUpperCase()) return false;
+        for (const attr of match[2]!.matchAll(/\[([\w-]+)(?:="([^"]*)")?\]/g)) {
+            const name = attr[1]!;
+            const value = attr[2];
+            if (value === undefined) {
+                if (!this.hasAttribute(name)) return false;
+            } else if (this.getAttribute(name) !== value) return false;
+        }
+        return true;
     }
 
     /** Only the button's default submit action is modeled. */

@@ -1,6 +1,7 @@
 import type {
     ServerTool,
     ToolBudget,
+    ToolExecutionContext,
     ToolInvocation,
     ToolOutcome,
     ToolPlugin,
@@ -36,6 +37,7 @@ export interface ChatToolset {
         call: ToolInvocation,
         budget: RunBudget,
         signal: AbortSignal,
+        request?: ToolExecutionContext["request"],
     ): Promise<ToolOutcome>;
 }
 
@@ -67,7 +69,7 @@ export function createChatToolset(
             execution: "server",
         })),
         isServerTool: (name) => registry.has(name),
-        async run(call, budget, signal) {
+        async run(call, budget, signal, request) {
             if (call.argumentsText.length > MAX_TOOL_ARGUMENT_CHARS) {
                 return fail("tool arguments are too large");
             }
@@ -77,6 +79,7 @@ export function createChatToolset(
             try {
                 const outcome = await entry.tool.execute(call, {
                     signal,
+                    ...(request ? { request } : {}),
                     budget: {
                         consume: (key, limit) =>
                             budget.consume(

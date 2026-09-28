@@ -96,6 +96,15 @@ export interface SourceContext {
     readonly requestId: string;
     readonly signal: AbortSignal;
     readonly metadata: Readonly<Record<string, JsonValue>>;
+    /**
+     * Stable identifier for the conversation this request belongs to, resolved
+     * centrally by the kernel: an explicit id from request metadata when the
+     * protocol carries one, otherwise a value derived from the conversation's
+     * opening so a stateless protocol's turns still cohere. A stateful source
+     * keys a reusable upstream session on it; it is undefined when no identity
+     * can be established (e.g. an empty or non-generation request).
+     */
+    readonly conversationId?: string;
 }
 
 export interface InferenceSource {

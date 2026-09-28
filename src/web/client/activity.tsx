@@ -13,7 +13,7 @@ import {
     requestReceivedTime,
     requestState,
 } from "../shared/activity-presentation.ts";
-import { Icon } from "../shared/icons.tsx";
+import { DurationSummary, TokenSummary } from "../shared/request-cells.tsx";
 
 export interface UsageSummaryData {
     usage: UsageSnapshot | null;
@@ -128,7 +128,7 @@ export function ActivityPanel({ revision, initial }: {
             <div class="panel-heading">
                 <div>
                     <h2 id="activity-title">最近请求</h2>
-                    <p>最近 20 条请求</p>
+                    <p>最近 20 条请求 · <a href="/admin?view=requests">查看全部</a></p>
                 </div>
                 <span class="status-chip chip-muted">
                     {usage
@@ -180,10 +180,11 @@ function RequestTableRows(
             <table class="request-table">
                 <thead>
                     <tr>
-                        <th scope="col">时间</th>
+                        <th scope="col">时间 / 请求 ID</th>
                         <th scope="col">模型 / 操作</th>
                         <th scope="col">状态</th>
-                        <th scope="col">请求 ID</th>
+                        <th scope="col">耗时</th>
+                        <th scope="col">Token</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -197,6 +198,13 @@ function RequestTableRows(
                                             request.receivedAt,
                                         )}
                                     </time>
+                                    <a
+                                        class="request-id-inline"
+                                        title={request.requestId}
+                                        href={`/admin?view=requests&id=${encodeURIComponent(request.requestId ?? "")}`}
+                                    >
+                                        {request.requestId}
+                                    </a>
                                 </td>
                                 <td class="request-model">
                                     <strong title={request.model}>
@@ -214,10 +222,11 @@ function RequestTableRows(
                                         {state.label}
                                     </span>
                                 </td>
-                                <td class="request-id">
-                                    <code title={request.requestId}>
-                                        {request.requestId}
-                                    </code>
+                                <td class="request-duration">
+                                    <DurationSummary row={request} />
+                                </td>
+                                <td class="request-tokens-cell">
+                                    <TokenSummary row={request} />
                                 </td>
                             </tr>
                         );

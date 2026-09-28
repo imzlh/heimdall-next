@@ -1,4 +1,5 @@
 import {
+    assert,
     assertEquals,
     assertRejects,
     assertStrictEquals,
@@ -239,6 +240,191 @@ Deno.test("source registry chooses priority peers round-robin and validates fram
             execute: source("bad-models").execute,
         })
     );
+});
+
+function committingSource(id: string, priority = 0): InferenceSource {
+    return {
+        id,
+        capabilities: [{
+            operation: "generation.create",
+            models: ["model-a"],
+            streaming: true,
+            priority,
+        }],
+        execute(request) {
+            const streamId = `${id}-stream`;
+            return (async function* () {
+                yield frame(streamId, request.requestId, 1, {
+                    kind: "run.started",
+                    request,
+                });
+                yield frame(streamId, request.requestId, 2, {
+                    kind: "message.started",
+                    message: {
+                        id: "m1",
+                        role: "assistant",
+                        parts: [],
+                        status: "in_progress",
+                    },
+                });
+                yield frame(streamId, request.requestId, 3, {
+                    kind: "part.started",
+                    messageId: "m1",
+                    part: { id: "p1", type: "text", text: "hi" },
+                });
+                yield frame(streamId, request.requestId, 4, {
+                    kind: "part.completed",
+                    messageId: "m1",
+                    partId: "p1",
+                });
+                yield frame(streamId, request.requestId, 5, {
+                    kind: "message.completed",
+                    messageId: "m1",
+                    finishReason: "stop",
+                });
+                yield frame(streamId, request.requestId, 6, {
+                    kind: "run.completed",
+                    finishReason: "stop",
+                });
+            })();
+        },
+    };
+}
+
+async function drain(
+    registry: SourceRegistry,
+    request: OperationRequest,
+): Promise<void> {
+    for await (
+        const _ of registry.run(request, {
+            requestId: request.requestId,
+            signal: new AbortController().signal,
+            metadata: {},
+        })
+    ) { /* exhaust the stream */ }
+}
+
+function chatRequest(
+    conversationId: string,
+): OperationRequest<GenerationRequest> {
+    return { ...requestFor(), metadata: { conversationId } };
+}
+
+Deno.test("source registry keeps a conversation on the source that last served it", async () => {
+    const registry = new SourceRegistry();
+    registry.register(committingSource("a"));
+    registry.register(committingSource("b"));
+    const chat = chatRequest("chat");
+    // The first turn round-robins to the first peer and remembers it.
+    await drain(registry, chat);
+    // Later turns of the same conversation stick to "a", not advancing to "b".
+    assertEquals(registry.select(chat).id, "a");
+    assertEquals(registry.select(chat).id, "a");
+    // A conversation with no remembered source still round-robins.
+    assertEquals(registry.select(chatRequest("other")).id, "b");
+});
+
+Deno.test("conversation affinity never routes to a cooling source", async () => {
+    const registry = new SourceRegistry();
+    registry.register(committingSource("a"));
+    registry.register(committingSource("b"));
+    const chat = chatRequest("chat");
+    await drain(registry, chat);
+    assertEquals(registry.select(chat).id, "a");
+    registry.recordProbe("a", { ok: false, message: "down" });
+    // The pinned source is cooling, so a ready peer serves the turn instead.
+    assertEquals(registry.select(chat).id, "b");
+});
+
+Deno.test("conversation affinity expires and falls back to round-robin", async () => {
+    let now = 1_000_000;
+    const registry = new SourceRegistry({
+        now: () => new Date(now),
+        conversationAffinityMs: 1_000,
+    });
+    registry.register(committingSource("a"));
+    registry.register(committingSource("b"));
+    const chat = chatRequest("chat");
+    await drain(registry, chat);
+    assertEquals(registry.select(chat).id, "a");
+    now += 2_000;
+    // The stale hint is dropped; selection resumes round-robin.
+    assertEquals(registry.select(chat).id, "b");
+});
+
+function openingRequest(
+    text: string,
+    extra: readonly GenerationRequest["messages"][number][] = [],
+): OperationRequest<GenerationRequest> {
+    return {
+        ...requestFor(),
+        payload: {
+            model: "model-a",
+            stream: true,
+            messages: [
+                {
+                    id: "u1",
+                    role: "user",
+                    parts: [{ id: "t1", type: "text", text }],
+                },
+                ...extra,
+            ],
+        },
+    };
+}
+
+Deno.test("stateless turns stick to one source via their shared opening", async () => {
+    const registry = new SourceRegistry();
+    registry.register(committingSource("a"));
+    registry.register(committingSource("b"));
+    // No conversation id, as an OpenAI/Anthropic request carries none.
+    const first = openingRequest("Explain HTTP caching");
+    await drain(registry, first);
+    // A later turn resends the same opening plus new turns; it derives the same
+    // identity and stays on the source that warmed the session.
+    const second = openingRequest("Explain HTTP caching", [
+        {
+            id: "a1",
+            role: "assistant",
+            parts: [{ id: "r1", type: "text", text: "sure" }],
+        },
+        {
+            id: "u2",
+            role: "user",
+            parts: [{ id: "t2", type: "text", text: "go on" }],
+        },
+    ]);
+    assertEquals(registry.select(second).id, "a");
+    // A different opening is a different conversation, so it round-robins.
+    assertEquals(registry.select(openingRequest("Something else")).id, "b");
+});
+
+Deno.test("the kernel hands the resolved conversation id to the source", async () => {
+    const seen: (string | undefined)[] = [];
+    const capturing: InferenceSource = {
+        id: "capture",
+        capabilities: [{
+            operation: "generation.create",
+            models: ["model-a"],
+            streaming: true,
+        }],
+        execute(request, context) {
+            seen.push(context.conversationId);
+            return stream(request, "capture-stream");
+        },
+    };
+    const registry = new SourceRegistry();
+    registry.register(capturing);
+    // An explicit id is passed through, namespaced apart from a derived one.
+    await drain(registry, chatRequest("thread-7"));
+    assertEquals(seen.at(-1), "id:thread-7");
+    // A stateless request still arrives with a stable derived identity.
+    await drain(registry, openingRequest("Explain HTTP caching"));
+    const derived = seen.at(-1);
+    assert(derived !== undefined && derived.startsWith("anchor:"));
+    // An empty request carries no identity, so none is injected.
+    await drain(registry, requestFor());
+    assertEquals(seen.at(-1), undefined);
 });
 
 Deno.test("kernel runtime applies middleware and lifecycle observers around a source", async () => {
@@ -581,7 +767,9 @@ Deno.test("runtime finalizes a post-output source exception exactly once", async
         for await (const item of execution.frames) kinds.push(item.event.kind);
     });
     assertStrictEquals(error, failure);
-    assertEquals(kinds, ["run.started", "tool.call"]);
+    // After partial output the runtime appends a terminal run.error frame so a
+    // truncated stream is never silent, then still rethrows the source failure.
+    assertEquals(kinds, ["run.started", "tool.call", "run.error"]);
     assertEquals(calls, 1);
     assertEquals(outcomes, ["error"]);
 });

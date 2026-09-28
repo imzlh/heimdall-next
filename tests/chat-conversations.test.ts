@@ -40,7 +40,10 @@ Deno.test("chat conversation rename and deletion update real history without cha
         assertEquals(updated.createdAt, createdAt);
         assertNotEquals(updated.updatedAt, createdAt);
         assertEquals(store.getConversation(conversation.id), updated);
-        assertEquals(store.listMessages(conversation.id), [message]);
+        assertEquals(store.listMessages(conversation.id), [{
+            ...message,
+            parentId: null,
+        }]);
         const loaded = await app.request(url);
         assertEquals((await loaded.json()).conversation.title, "整理后的标题");
 

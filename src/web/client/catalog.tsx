@@ -9,6 +9,7 @@ import {
 } from "../shared/proxy-presentation.ts";
 import { Icon } from "../shared/icons.tsx";
 import {
+    shortSourceId,
     sourceAvailabilityText,
     sourceInstanceEnabled,
     sourceState,
@@ -23,6 +24,7 @@ export function SourceCard(
         onToggle,
         pending = false,
         status,
+        statusInline = false,
         configurable = false,
     }: {
         source: ListedSource;
@@ -32,6 +34,8 @@ export function SourceCard(
         onToggle?: (source: ListedSource) => void;
         pending?: boolean;
         status?: Child;
+        /** Render plugin channel info directly; no fold-out. */
+        statusInline?: boolean;
         configurable?: boolean;
     },
 ) {
@@ -47,7 +51,7 @@ export function SourceCard(
                     <h3 title={source.name || id}>
                         {source.name || id || "未命名渠道"}
                     </h3>
-                    {source.name && <code title={id}>{id}</code>}
+                    {id && <code title={id}>{shortSourceId(id)}</code>}
                 </div>
                 <span class={`status-chip chip-${state.tone}`}>
                     {state.label}
@@ -79,14 +83,16 @@ export function SourceCard(
                     ? sourceProxySummaryLabel(source.proxySummary)
                     : sourceProxyLabel(source.proxy)}
             </p>
-            {status && (
-                <details class="source-status-slot">
-                    <summary>
-                        渠道详情 <Icon name="chevron-down" size={14} />
-                    </summary>
-                    <div class="source-status-content">{status}</div>
-                </details>
-            )}
+            {status && (statusInline
+                ? <div class="source-status-content is-open">{status}</div>
+                : (
+                    <details class="source-status-slot">
+                        <summary>
+                            渠道详情 <Icon name="chevron-down" size={14} />
+                        </summary>
+                        <div class="source-status-content">{status}</div>
+                    </details>
+                ))}
             <footer class="source-card-actions">
                 {onConfigure || onManage
                     ? (

@@ -1,6 +1,8 @@
 /** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { useState } from "hono/jsx/dom";
 import { Icon } from "../../shared/icons.tsx";
+import { Dropdown } from "./dropdown.tsx";
+import { Switch } from "./switch.tsx";
 import type { Child } from "hono/jsx";
 import {
     type AuthorizationStates,
@@ -132,38 +134,30 @@ export function SchemaForm(props: SchemaFormProps) {
                 break;
             case "bool":
                 control = (
-                    <input
-                        {...attrs}
-                        type="checkbox"
-                        value="true"
+                    <Switch
+                        id={id}
                         checked={value === true}
                         disabled={props.disabled || field.readOnly}
-                        onChange={(event) =>
-                            change(
-                                field.name,
-                                (event.currentTarget as HTMLInputElement)
-                                    .checked,
-                            )}
+                        ariaLabel={field.label}
+                        describedBy={descriptions || undefined}
+                        onToggle={() => change(field.name, !(value === true))}
                     />
                 );
                 break;
             case "enum":
                 control = (
-                    <select
-                        {...attrs}
+                    <Dropdown
+                        id={id}
                         value={typeof value === "string" ? value : ""}
-                        required={required}
+                        options={[
+                            { value: "", label: "请选择" },
+                            ...field.options,
+                        ]}
                         disabled={props.disabled || field.readOnly}
-                        onChange={(event) =>
-                            change(field.name, fieldValue(event))}
-                    >
-                        <option value="">请选择</option>
-                        {field.options.map((option) => (
-                            <option key={option.value} value={option.value}>
-                                {option.label}
-                            </option>
-                        ))}
-                    </select>
+                        ariaLabel={field.label}
+                        describedBy={descriptions || undefined}
+                        onChange={(next) => change(field.name, next)}
+                    />
                 );
                 break;
             case "secret": {

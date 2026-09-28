@@ -96,12 +96,47 @@ async function setup(
         requests,
         changes,
         async edit(name: string, value: string) {
+            if (name === "proxy-default" || name.startsWith("proxy-auth-")) {
+                // 自定义下拉：仅当菜单未开时点触发器，再选选项。
+                const menuOpen =
+                    dom.root.querySelectorAll('button[role="option"]').length >
+                        0;
+                if (!menuOpen) {
+                    await dom.act(() =>
+                        find(dom.root, `button[data-dropdown="${name}"]`)
+                            .click()
+                    );
+                }
+                await dom.act(() =>
+                    find(
+                        dom.root,
+                        `button[role="option"][data-value="${value}"]`,
+                    ).click()
+                );
+                return;
+            }
             await dom.act(() => {
                 const field = find(dom.root, `[name="${name}"]`);
                 field.value = value;
-                // hono/jsx/dom maps select onChange to input as well.
                 field.dispatchEvent(new Event("input"));
             });
+        },
+        dropdownValue(name: string) {
+            return find(dom.root, `button[data-dropdown="${name}"]`)
+                .getAttribute("data-value")!;
+        },
+        async openDropdown(name: string) {
+            await dom.act(() =>
+                find(dom.root, `button[data-dropdown="${name}"]`).click()
+            );
+        },
+        dropdownOptions() {
+            return dom.root.querySelectorAll('button[role="option"]').map((
+                option,
+            ) => ({
+                value: option.getAttribute("data-value")!,
+                disabled: option.getAttribute("disabled") !== null,
+            }));
         },
         async click(label: string) {
             await dom.act(() => button(dom.root, label).click());
@@ -160,10 +195,7 @@ Deno.test("proxy controls add and edit entries, send replacement credentials onl
                 },
             }],
         });
-        assertEquals(
-            find(test.root, `[name="proxy-auth-${id}"]`).value,
-            "keep",
-        );
+        assertEquals(await test.dropdownValue(`proxy-auth-${id}`), "keep");
         assertEquals(
             test.root.querySelector(`[name="proxy-user-${id}"]`),
             null,
@@ -207,12 +239,16 @@ Deno.test("proxy controls turn a disabled or removed default into direct access 
     const test = await setup(pool);
     try {
         await test.click("已启用");
-        assertEquals(find(test.root, '[name="proxy-default"]').value, "");
+        assertEquals(await test.dropdownValue("proxy-default"), "");
         assertEquals(
             button(test.root, "已停用").getAttribute("aria-pressed"),
             "false",
         );
-        assert(find(test.root, 'option[value="office"]').disabled);
+        await test.openDropdown("proxy-default");
+        assert(
+            test.dropdownOptions().find((option) => option.value === "office")
+                ?.disabled,
+        );
         assertEquals(test.requests, []);
         await test.click("保存代理池");
         assertEquals(JSON.parse(String(test.requests[0]!.body)), {
@@ -225,7 +261,7 @@ Deno.test("proxy controls turn a disabled or removed default into direct access 
             }],
         });
         await test.click("已停用");
-        assertEquals(find(test.root, '[name="proxy-default"]').value, "");
+        assertEquals(await test.dropdownValue("proxy-default"), "");
         await test.edit("proxy-default", "office");
         await test.click("保存代理池");
         assertEquals(
@@ -238,12 +274,12 @@ Deno.test("proxy controls turn a disabled or removed default into direct access 
         assertEquals(test.requests.length, 2);
         await test.click("保留代理");
         assert(find(test.root, '[data-proxy-id="office"]'));
-        assertEquals(find(test.root, '[name="proxy-default"]').value, "office");
+        assertEquals(await test.dropdownValue("proxy-default"), "office");
         assert(button(test.root, "保存代理池").disabled);
         await test.click("移除代理");
         await test.click("确认移除");
         assertEquals(test.root.querySelector('[data-proxy-id="office"]'), null);
-        assertEquals(find(test.root, '[name="proxy-default"]').value, "");
+        assertEquals(await test.dropdownValue("proxy-default"), "");
         assertEquals(test.requests.length, 2);
         assert(!button(test.root, "保存代理池").disabled);
         await test.click("保存代理池");
@@ -317,7 +353,7 @@ Deno.test("proxy controls preserve explicitly replaced credentials across CAS re
             latest.entries[0]!.url,
         );
         assertEquals(
-            find(test.root, '[name="proxy-auth-office"]').value,
+            await test.dropdownValue("proxy-auth-office"),
             "replace",
         );
         assertEquals(
@@ -328,7 +364,7 @@ Deno.test("proxy controls preserve explicitly replaced credentials across CAS re
             find(test.root, '[name="proxy-password-office"]').value,
             "private-cas-password",
         );
-        assertEquals(find(test.root, '[name="proxy-default"]').value, "");
+        assertEquals(await test.dropdownValue("proxy-default"), "");
         assert(!find(test.root, "fieldset").disabled);
         await test.click("保存代理池");
         assertEquals(test.requests.length, 3);
@@ -350,7 +386,7 @@ Deno.test("proxy controls preserve explicitly replaced credentials across CAS re
             }],
         });
         assertEquals(
-            find(test.root, '[name="proxy-auth-office"]').value,
+            await test.dropdownValue("proxy-auth-office"),
             "keep",
         );
         assertEquals(

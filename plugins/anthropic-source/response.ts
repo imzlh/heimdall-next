@@ -155,18 +155,22 @@ function appendBlock(
 /**
  * Map Anthropic token accounting onto existing HIP usage fields.
  *
- * Anthropic reports `input_tokens` EXCLUSIVE of cache, so cache reads land in
- * `cachedInputTokens` and cache writes in `cacheWriteTokens`; `totalTokens`
- * carries the billed sum. `service_tier` is preserved under extensions.
+ * Anthropic reports `input_tokens` exclusive of both cache reads and writes.
+ * HIP's `inputTokens` counts freshly processed input, which includes cache
+ * writes but not cache reads, so writes are folded in; cache reads stay in
+ * `cachedInputTokens` and `totalTokens` carries the billed sum.
+ * `service_tier` is preserved under extensions.
  */
 export function parseUsage(value: WireObject): Usage {
-    const inputTokens = integer(value.input_tokens);
+    const rawInput = integer(value.input_tokens);
     const outputTokens = integer(value.output_tokens);
     const cachedInputTokens = integer(value.cache_read_input_tokens);
     const cacheWriteTokens = integer(value.cache_creation_input_tokens);
+    const inputTokens = rawInput === undefined
+        ? undefined
+        : rawInput + (cacheWriteTokens ?? 0);
     const totalTokens = inputTokens !== undefined && outputTokens !== undefined
-        ? inputTokens + outputTokens + (cachedInputTokens ?? 0) +
-            (cacheWriteTokens ?? 0)
+        ? inputTokens + outputTokens + (cachedInputTokens ?? 0)
         : undefined;
     const usage: Record<string, unknown> = {
         inputTokens,

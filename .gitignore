@@ -1,7 +1,7 @@
 .env
 .env.*
 !.env.example
-/data/
+/data*/
 /dist/
 /node_modules/
 /.migration-backups/

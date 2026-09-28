@@ -6,7 +6,10 @@ import {
 } from "@std/assert";
 import { Hono } from "hono";
 import { createServerApp } from "@heimdall/core/http/app.ts";
-import type { ChatInitial } from "@heimdall/admin-contracts/chat.ts";
+import type {
+    ChatInitial,
+    ChatMessage,
+} from "@heimdall/admin-contracts/chat.ts";
 
 const secret = "chat-page-private-token";
 const conversation = {
@@ -16,7 +19,7 @@ const conversation = {
     updatedAt: "2026-09-24T00:00:00Z",
 };
 
-function app() {
+function app(messages?: ChatMessage[]) {
     const chatRoutes = new Hono();
     chatRoutes.get(
         "/conversations",
@@ -27,7 +30,7 @@ function app() {
         (context) =>
             context.json({
                 conversation,
-                messages: [{
+                messages: messages ?? [{
                     id: "message",
                     conversationId: conversation.id,
                     role: "assistant",
@@ -119,6 +122,7 @@ Deno.test("chat SSR preserves the compact single-row composer before JavaScript 
     assertStringIncludes(composer, 'rows="1"');
     assertStringIncludes(composer, 'placeholder="发送消息给 Heimdall…"');
     assertStringIncludes(composer, 'aria-label="添加图片"');
+    assertStringIncludes(composer, 'title="添加图片，最多 4 张，每张 5 MiB"');
     assertStringIncludes(composer, 'aria-label="发送消息"');
     assertStringIncludes(composer, 'aria-hidden="true" tabindex="-1" disabled');
     assertFalse(composer.includes("<select"));
@@ -138,4 +142,82 @@ Deno.test("chat SSR preserves the compact single-row composer before JavaScript 
     assertStringIncludes(html, 'href="/admin/chat?id=test-chat"');
     assertStringIncludes(html, "已有会话仍可阅读");
     assertStringIncludes(html, "&lt;script&gt;private()&lt;/script&gt;");
+});
+
+Deno.test("chat SSR shows selected user and assistant versions and stored images without JavaScript", async () => {
+    const assetId = "bd83bcca-c477-42e7-9ef7-09cf31b8c2d7";
+    const messages: ChatMessage[] = [
+        {
+            id: "user-current",
+            conversationId: conversation.id,
+            role: "user",
+            text: "",
+            createdAt: conversation.createdAt,
+            parentId: null,
+            branch: {
+                index: 1,
+                count: 3,
+                messageIds: ["user-before", "user-current", "user-after"],
+            },
+            attachments: [{ assetId, mediaType: "image/png" }],
+        },
+        {
+            id: "assistant-current",
+            conversationId: conversation.id,
+            role: "assistant",
+            text: "当前回复内容",
+            createdAt: conversation.createdAt,
+            parentId: "user-current",
+            branch: {
+                index: 1,
+                count: 2,
+                messageIds: ["assistant-before", "assistant-current"],
+            },
+        },
+        {
+            id: "single",
+            conversationId: conversation.id,
+            role: "user",
+            text: "只有一个版本的提问",
+            createdAt: conversation.createdAt,
+            parentId: "assistant-current",
+            branch: { index: 0, count: 1, messageIds: ["single"] },
+        },
+        {
+            id: "plugin-call",
+            conversationId: conversation.id,
+            role: "assistant",
+            callId: "call-1",
+            name: "example-tool",
+            text: "{}",
+            createdAt: conversation.createdAt,
+            parentId: "single",
+            branch: {
+                index: 1,
+                count: 2,
+                messageIds: ["plugin-old", "plugin-call"],
+            },
+        },
+    ];
+    const response = await app(messages).request("/admin/chat?id=test-chat", {
+        headers: { authorization: `Bearer ${secret}` },
+    });
+    const html = await response.text();
+    assertEquals(response.status, 200);
+    assertStringIncludes(html, 'aria-label="第 2 个提问版本，共 3 个"');
+    assertStringIncludes(html, 'aria-label="第 2 个回复版本，共 2 个"');
+    const counters = [
+        ...html.matchAll(
+            /<span class="chat-branch-counter"[^>]*>([^<]*)<\/span>/g,
+        ),
+    ];
+    assertEquals(counters.map((match) => match[1]), ["版本 2/3", "版本 2/2"]);
+    assertStringIncludes(html, `src="/admin/chat/api/assets/${assetId}"`);
+    assertStringIncludes(html, "当前回复内容");
+    assertFalse(html.includes('aria-label="上一个提问版本"'));
+    assertFalse(html.includes('aria-label="下一个回复版本"'));
+    const initial = boot(html);
+    assertEquals(initial.messages[0]?.branch, messages[0]!.branch);
+    assertEquals(initial.messages[1]?.branch, messages[1]!.branch);
+    assertEquals(initial.messages[0]?.attachments?.[0]?.assetId, assetId);
 });

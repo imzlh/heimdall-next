@@ -1,5 +1,5 @@
 import type { ToolDefinition } from "../hip/mod.ts";
-import type { PluginManifest } from "./plugin.ts";
+import type { PluginManifest, RequestContext } from "./plugin.ts";
 
 /** A model-issued call; the named plugin owns argument validation. */
 export interface ToolInvocation {
@@ -21,6 +21,8 @@ export interface ToolBudget {
 export interface ToolExecutionContext {
     readonly signal: AbortSignal;
     readonly budget: ToolBudget;
+    /** JSON-only identity for conversation-scoped plugins; no HTTP headers or body. */
+    readonly request?: Pick<RequestContext, "requestId" | "metadata">;
 }
 
 export interface ServerTool {

@@ -1,6 +1,8 @@
 /** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
-import { useEffect, useState } from "hono/jsx/dom";
+import { useEffect, useRef, useState } from "hono/jsx/dom";
 import { controlValue } from "./dom.ts";
+import { GatewayKeyField } from "./gateway-key.tsx";
+import { gatewayKeyPatch } from "./gateway-key-draft.ts";
 import { Icon } from "../shared/icons.tsx";
 import {
     AdminApiError,
@@ -29,25 +31,42 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
     const [interval, setInterval] = useState(
         initial ? String(initial.settings.probeIntervalMs) : "",
     );
+    const [titleModel, setTitleModel] = useState(
+        initial ? initial.settings.titleModel : "",
+    );
     const [proxyKey, setProxyKey] = useState("");
+    const [clearProxyKey, setClearProxyKey] = useState(false);
     const [keyConfigured, setKeyConfigured] = useState(
         initial?.settings.proxyKeyConfigured ?? false,
     );
-    const [baseline, setBaseline] = useState({ limit, interval });
+    const [baseline, setBaseline] = useState({ limit, interval, titleModel });
+    const pending = useRef(false);
+    const mounted = useRef(true);
     const busy = loading || saving;
     const dirty = limit !== baseline.limit || interval !== baseline.interval ||
-        proxyKey.length > 0;
+        titleModel !== baseline.titleModel || proxyKey.trim().length > 0 ||
+        clearProxyKey;
+
+    useEffect(() => {
+        mounted.current = true;
+        return () => {
+            mounted.current = false;
+        };
+    }, []);
 
     function applySettings(result: RuntimeSettingsEnvelope) {
         const next = {
             limit: String(result.settings.limitPerMinute),
             interval: String(result.settings.probeIntervalMs),
+            titleModel: result.settings.titleModel,
         };
         setEtag(result.etag);
         setLimit(next.limit);
         setInterval(next.interval);
+        setTitleModel(next.titleModel);
         setBaseline(next);
         setProxyKey("");
+        setClearProxyKey(false);
         setKeyConfigured(result.settings.proxyKeyConfigured);
         setConflict(false);
         setLoaded(true);
@@ -74,40 +93,50 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
         };
     }, [reload]);
 
-    async function save(clearProxyKey = false) {
-        if (busy || !loaded || conflict) return;
+    async function save() {
+        if (pending.current || busy || !loaded || conflict) return;
         setError("");
         setMessage("");
         const limitPerMinute = Number(limit);
         const probeIntervalMs = Number(interval);
         if (
             !limit.trim() || !Number.isSafeInteger(limitPerMinute) ||
-            limitPerMinute < 0
+            limitPerMinute < 0 || limitPerMinute > 100_000
         ) {
-            setError("每分钟限额必须是非负整数");
+            setError("每分钟限额必须是 0 到 100000 的整数");
             return;
         }
         if (
             !interval.trim() || !Number.isSafeInteger(probeIntervalMs) ||
-            probeIntervalMs < 0
+            probeIntervalMs < 0 || probeIntervalMs > 86_400_000
         ) {
-            setError("探测间隔必须是非负整数");
+            setError("探测间隔必须是 0 到 86400000 的整数");
             return;
         }
+        pending.current = true;
         setSaving(true);
         try {
             const patch: {
                 limitPerMinute: number;
                 probeIntervalMs: number;
                 proxyKey?: string;
-            } = { limitPerMinute, probeIntervalMs };
-            if (clearProxyKey) patch.proxyKey = "";
-            else if (proxyKey.trim()) patch.proxyKey = proxyKey;
-            applySettings(await saveRuntimeSettings(patch, etag));
+                titleModel?: string;
+            } = {
+                limitPerMinute,
+                probeIntervalMs,
+                ...gatewayKeyPatch(proxyKey, clearProxyKey),
+            };
+            if (titleModel.trim() !== baseline.titleModel) {
+                patch.titleModel = titleModel.trim();
+            }
+            const result = await saveRuntimeSettings(patch, etag);
+            if (!mounted.current) return;
+            applySettings(result);
             setMessage(
                 clearProxyKey ? "已清除网关访问密钥" : "已保存，立即生效",
             );
         } catch (cause) {
+            if (!mounted.current) return;
             if (
                 cause instanceof AdminApiError &&
                 [409, 412, 428].includes(cause.status)
@@ -120,7 +149,8 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
                 setError(`保存运行设置失败：${describeError(cause)}`);
             }
         } finally {
-            setSaving(false);
+            pending.current = false;
+            if (mounted.current) setSaving(false);
         }
     }
 
@@ -163,6 +193,7 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
                         <input
                             type="number"
                             min="0"
+                            max="100000"
                             step="1"
                             inputMode="numeric"
                             required
@@ -176,6 +207,7 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
                         <input
                             type="number"
                             min="0"
+                            max="86400000"
                             step="1"
                             inputMode="numeric"
                             required
@@ -185,18 +217,25 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
                                 setInterval(controlValue(event))}
                         />
                     </label>
+                    <GatewayKeyField
+                        value={proxyKey}
+                        configured={keyConfigured}
+                        clearRequested={clearProxyKey}
+                        disabled={busy || !loaded || conflict}
+                        onChange={(value, clear) => {
+                            setProxyKey(value);
+                            setClearProxyKey(clear);
+                        }}
+                    />
                     <label class="wide-field">
-                        网关访问密钥
+                        对话标题模型
                         <input
-                            type="password"
-                            autoComplete="new-password"
-                            value={proxyKey}
-                            placeholder={keyConfigured
-                                ? "已配置，留空则保留"
-                                : "未配置"}
+                            type="text"
+                            value={titleModel}
+                            placeholder="留空则用对话所选模型生成标题"
                             disabled={busy || !loaded || conflict}
                             onInput={(event) =>
-                                setProxyKey(controlValue(event))}
+                                setTitleModel(controlValue(event))}
                         />
                     </label>
                 </div>
@@ -207,14 +246,6 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
                         disabled={busy || !loaded || conflict}
                     >
                         {saving ? "保存中…" : "保存设置"}
-                    </button>
-                    <button
-                        class="text-button"
-                        type="button"
-                        disabled={busy || !loaded || conflict || !keyConfigured}
-                        onClick={() => void save(true)}
-                    >
-                        清除网关访问密钥
                     </button>
                     <button
                         class={dirty ? "text-button" : "icon-button"}

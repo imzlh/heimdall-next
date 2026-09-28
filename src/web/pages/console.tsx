@@ -4,6 +4,8 @@ import { uiContributionKey } from "@heimdall/admin-contracts/ui.ts";
 import { PluginSlots } from "../components/slots.tsx";
 import { Icon } from "../shared/icons.tsx";
 import { ChannelsSnapshot, OverviewSnapshot } from "./catalog.tsx";
+import { SystemLogSnapshotView } from "./system-log.tsx";
+import { JournalSnapshotView } from "./journal.tsx";
 import { type ConsolePage, consolePageInfo } from "../shared/page-info.ts";
 import { dashboardUiContext } from "../shared/ui-context.ts";
 import {
@@ -14,6 +16,7 @@ import {
     requestReceivedTime,
     requestState,
 } from "../shared/activity-presentation.ts";
+import { DurationSummary, TokenSummary } from "../shared/request-cells.tsx";
 
 export type { ConsolePage } from "../shared/page-info.ts";
 export interface ConsolePageProps {
@@ -99,6 +102,12 @@ export function ConsolePageView(props: ConsolePageProps) {
                             policy={policy}
                             sourcePluginIds={props.sourcePluginIds}
                         />
+                    )}
+                    {page === "logs" && snapshot.systemLog && (
+                        <SystemLogSnapshotView snapshot={snapshot.systemLog} />
+                    )}
+                    {page === "requests" && snapshot.journal && (
+                        <JournalSnapshotView snapshot={snapshot.journal} />
                     )}
                     {page === "settings" && (
                         <>
@@ -270,7 +279,7 @@ function RequestTable({ snapshot }: { snapshot: ConsoleSnapshot }) {
             <div class="panel-heading">
                 <div>
                     <h2 id="activity-title">用量与最近请求</h2>
-                    <p>最近 20 条请求</p>
+                    <p>最近 20 条请求 · <a href="/admin?view=requests">查看全部</a></p>
                 </div>
                 <span class="status-chip chip-muted">
                     {snapshot.usage.usage
@@ -320,11 +329,12 @@ function RequestTable({ snapshot }: { snapshot: ConsoleSnapshot }) {
                             <thead>
                                 <tr>
                                     <th scope="col">
-                                        接收时间 <small>UTC</small>
+                                        时间 / 请求 ID <small>本地时区</small>
                                     </th>
                                     <th scope="col">模型 / 操作</th>
                                     <th scope="col">状态</th>
-                                    <th scope="col">请求 ID</th>
+                                    <th scope="col">耗时</th>
+                                    <th scope="col">Token</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -341,6 +351,13 @@ function RequestTable({ snapshot }: { snapshot: ConsoleSnapshot }) {
                                                         request.receivedAt,
                                                     )}
                                                 </time>
+                                                <a
+                                                    class="request-id-inline"
+                                                    title={request.requestId}
+                                                    href={`/admin?view=requests&id=${encodeURIComponent(request.requestId ?? "")}`}
+                                                >
+                                                    {request.requestId}
+                                                </a>
                                             </td>
                                             <td class="request-model">
                                                 <strong title={request.model}>
@@ -360,10 +377,13 @@ function RequestTable({ snapshot }: { snapshot: ConsoleSnapshot }) {
                                                     {state.label}
                                                 </span>
                                             </td>
-                                            <td class="request-id">
-                                                <code title={request.requestId}>
-                                                    {request.requestId}
-                                                </code>
+                                            <td class="request-duration">
+                                                <DurationSummary
+                                                    row={request}
+                                                />
+                                            </td>
+                                            <td class="request-tokens-cell">
+                                                <TokenSummary row={request} />
                                             </td>
                                         </tr>
                                     );

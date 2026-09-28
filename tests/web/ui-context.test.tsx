@@ -93,6 +93,7 @@ Deno.test("UI context exposes only host-selected scalar status, scoped to one so
             source: {
                 enabled: true,
                 state: "可用",
+                stateTone: "success",
                 priority: 4,
                 modelCount: 2,
                 capabilityCount: 1,
@@ -114,7 +115,7 @@ Deno.test("schema bindings render actual status during SSR and keep fallback whe
     const context = sourceUiContext(dashboardUiContext(dashboard), source);
     const html = (<PluginSlot contribution={contribution} context={context} />)
         .toString();
-    assertStringIncludes(html, "<dd>2</dd>");
+    assertStringIncludes(html, "<dd><strong>2</strong></dd>");
     assertStringIncludes(html, "可用");
     assertStringIncludes(html, "最近探测通过");
     assertFalse(html.includes("待更新"));
@@ -224,9 +225,9 @@ Deno.test("SSR status bindings update with the live catalog and disappear when p
     });
     const html = async () =>
         await (await app.request("/admin?view=channels")).text();
-    assertStringIncludes(await html(), "<dd>2</dd>");
+    assertStringIncludes(await html(), "<dd><strong>2</strong></dd>");
     models = ["alpha", "beta", "gamma"];
-    assertStringIncludes(await html(), "<dd>3</dd>");
+    assertStringIncludes(await html(), "<dd><strong>3</strong></dd>");
     enabled = false;
     assertFalse(
         (await html()).includes('data-ui-extension="sample.source:status"'),

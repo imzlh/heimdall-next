@@ -8,6 +8,7 @@ import {
     type PresetUiContext,
     type PresetUiFeedback,
 } from "@heimdall/admin-contracts/preset-ui.ts";
+import type { SourceDraftProbeResult } from "@heimdall/admin-contracts/source-probe.ts";
 
 export type PresetUiCleanup = () => void | Promise<void>;
 export interface PresetUiModule {
@@ -22,6 +23,10 @@ export interface PresetEditorActions {
     readonly onPreview?: (
         config: PresetJsonObject,
     ) => Promise<PresetJsonObject | void>;
+    readonly onProbe?: (
+        config: PresetJsonObject,
+        signal: AbortSignal,
+    ) => Promise<SourceDraftProbeResult>;
 }
 
 /** The caller supplies a host-approved loader; plugin metadata cannot select it. */
@@ -38,6 +43,7 @@ export function mountPresetEditor(
     let failed = false;
     let busy = false;
     let saved = false;
+    const lifetime = new AbortController();
     let cleanup: PresetUiCleanup | undefined;
     const feedback = (value: PresetUiFeedback) => {
         if (disposed || failed) return;
@@ -71,15 +77,33 @@ export function mountPresetEditor(
             });
             return;
         }
+        if (action.kind === "probe" && !actions.onProbe) {
+            feedback({
+                kind: "probe",
+                status: "error",
+                errors: { _form: "此预设暂不支持连接测试，可以直接保存。" },
+            });
+            return;
+        }
         busy = true;
         feedback({ kind: action.kind, status: "pending" });
         void (async () => {
             try {
+                let probe: SourceDraftProbeResult | undefined;
                 if (action.kind === "save") {
                     await actions.onSubmit(action.config);
                     saved = true;
+                } else if (action.kind === "probe") {
+                    probe = await actions.onProbe!(
+                        action.config,
+                        lifetime.signal,
+                    );
                 } else await actions.onPreview!(action.config);
-                feedback({ kind: action.kind, status: "success" });
+                feedback({
+                    kind: action.kind,
+                    status: "success",
+                    ...(probe ? { probe } : {}),
+                });
             } catch {
                 feedback({
                     kind: action.kind,
@@ -87,6 +111,8 @@ export function mountPresetEditor(
                     errors: {
                         _form: action.kind === "save"
                             ? "保存失败，请检查配置和登录状态后重试。"
+                            : action.kind === "probe"
+                            ? "连接测试失败，请检查配置和登录状态后重试。"
                             : "预览失败，请检查配置后重试。",
                     },
                 });
@@ -121,6 +147,7 @@ export function mountPresetEditor(
     return async () => {
         if (disposed) return;
         disposed = true;
+        lifetime.abort();
         element.removeEventListener(PRESET_UI_ACTION_EVENT, receive);
         await release();
     };

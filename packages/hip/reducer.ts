@@ -417,6 +417,12 @@ export function applyFrame(
         case "usage":
             next = { ...next, usage: event.usage };
             break;
+        case "suggestions":
+            next = { ...next, suggestions: event.suggestions };
+            break;
+        case "title":
+            next = { ...next, title: event.title };
+            break;
         case "run.completed":
             allMessagesCompleted(next);
             next = {

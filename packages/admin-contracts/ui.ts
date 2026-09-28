@@ -43,6 +43,7 @@ export type UiBlock =
         readonly kind: "badge";
         readonly label: string;
         readonly labelFrom?: UiValuePath;
+        readonly toneFrom?: UiValuePath;
         readonly tone?: UiTone;
     }
     | { readonly kind: "link"; readonly label: string; readonly href: string }
@@ -227,8 +228,10 @@ function validBlock(value: unknown): value is UiBlock {
                     validValuePath(value.valueFrom)) &&
                 (value.unit === undefined || boundedText(value.unit, 24));
         case "badge":
-            return value.labelFrom === undefined ||
-                validValuePath(value.labelFrom);
+            return (value.labelFrom === undefined ||
+                validValuePath(value.labelFrom)) &&
+                (value.toneFrom === undefined ||
+                    validValuePath(value.toneFrom));
         case "link":
             return safeUiHref(value.href);
         case "action":
@@ -275,9 +278,31 @@ export function resolveUiBlock(block: UiBlock, context: UiContext): UiBlock {
         return { ...block, text: value };
     }
     if (block.kind === "badge" && boundedText(value, UI_LIMITS.title)) {
-        return { ...block, label: value };
+        const toneFrom = block.toneFrom !== undefined &&
+                validValuePath(block.toneFrom)
+            ? resolveScalar(context, block.toneFrom)
+            : undefined;
+        return {
+            ...block,
+            label: value,
+            ...(typeof toneFrom === "string" &&
+                    tones.includes(toneFrom as UiTone)
+                ? { tone: toneFrom as UiTone }
+                : {}),
+        };
     }
     return block;
+}
+
+function resolveScalar(context: UiContext, path: UiValuePath): unknown {
+    let value: unknown = context.data;
+    for (const part of path) {
+        if (!record(value)) return undefined;
+        const descriptor = Object.getOwnPropertyDescriptor(value, part);
+        if (!descriptor || !("value" in descriptor)) return undefined;
+        value = descriptor.value;
+    }
+    return value;
 }
 
 function validContribution(value: unknown): value is UiContribution {

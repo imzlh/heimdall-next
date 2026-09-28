@@ -8,6 +8,7 @@ import "./style.css";
 import "./shell.css";
 import "./cards.css";
 import "./preset-auth.css";
+import "./journal.css";
 
 const root = document.getElementById("heimdall-console");
 const boot = document.getElementById("heimdall-boot");

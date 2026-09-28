@@ -17,6 +17,11 @@ Deno.test("server environment has explicit storage and process defaults", () => 
     assertEquals(environment.kvPath, undefined);
     assertEquals(environment.requestsPath, "/application/data/requests.sqlite");
     assertEquals(environment.chatPath, "/application/data/chat.sqlite");
+    assertEquals(
+        environment.chatAssetsPath,
+        "/application/data/chat-assets.sqlite",
+    );
+    assertEquals(environment.publicBaseUrl, undefined);
     assertEquals(environment.retentionDays, 0);
     assertEquals(
         environment.timeZone,
@@ -26,10 +31,12 @@ Deno.test("server environment has explicit storage and process defaults", () => 
         proxyKey: "",
         limitPerMinute: 120,
         probeIntervalMs: 300_000,
+        titleModel: "",
     });
     assertEquals(environment.adminAuthToken, undefined);
     assertEquals(environment.adminAssetsRoot, undefined);
     assertEquals(environment.adminUiPolicyPath, undefined);
+    assertEquals(environment.httpLog, true);
 });
 
 Deno.test("server environment parses deployment overrides and optional assets", () => {
@@ -39,6 +46,8 @@ Deno.test("server environment parses deployment overrides and optional assets", 
         HEIMDALL_KV_PATH: " /persistent/config.sqlite ",
         HEIMDALL_REQUESTS_PATH: "/persistent/requests.sqlite",
         HEIMDALL_CHAT_PATH: "/persistent/chat.sqlite",
+        HEIMDALL_CHAT_ASSETS_PATH: "/persistent/assets.sqlite",
+        HEIMDALL_PUBLIC_BASE_URL: " https://gateway.example/ ",
         HEIMDALL_REQUEST_RETENTION_DAYS: "30",
         HEIMDALL_TIMEZONE: " america/new_york ",
         HEIMDALL_PROXY_KEY: " proxy-key ",
@@ -55,16 +64,20 @@ Deno.test("server environment parses deployment overrides and optional assets", 
         kvPath: "/persistent/config.sqlite",
         requestsPath: "/persistent/requests.sqlite",
         chatPath: "/persistent/chat.sqlite",
+        chatAssetsPath: "/persistent/assets.sqlite",
+        publicBaseUrl: "https://gateway.example",
         retentionDays: 30,
         timeZone: "America/New_York",
         runtimeSettings: {
             proxyKey: "proxy-key",
             limitPerMinute: 0,
             probeIntervalMs: 0,
+            titleModel: "",
         },
         adminAuthToken: "admin-token",
         adminAssetsRoot: "/application/assets",
         adminUiPolicyPath: "/application/ui-policy.json",
+        httpLog: true,
     });
 
     values.HEIMDALL_ADMIN_ASSETS = "   ";
@@ -72,6 +85,12 @@ Deno.test("server environment parses deployment overrides and optional assets", 
     const optional = readServerEnvironment((name) => values[name]);
     assertEquals(optional.adminAssetsRoot, undefined);
     assertEquals(optional.adminUiPolicyPath, undefined);
+
+    values.HEIMDALL_HTTP_LOG = "off";
+    assertEquals(
+        readServerEnvironment((name) => values[name]).httpLog,
+        false,
+    );
 });
 
 Deno.test("server environment rejects invalid process settings before startup", () => {

@@ -5,9 +5,12 @@ import type { ProxyPoolView } from "@heimdall/admin-contracts/proxies.ts";
 import type { UiPolicy } from "@heimdall/admin-contracts/ui.ts";
 import { safeUiAssetPath } from "@heimdall/admin-contracts/ui.ts";
 import { AddSourceFlow } from "./add-source.tsx";
-import { createSource, previewPreset } from "./api/admin.ts";
+import { createSource, previewPreset, probeSourceDraft } from "./api/admin.ts";
 import { PresetEditor } from "./forms/preset-editor.tsx";
-import { CustomSourceConfig } from "./source-config-form.tsx";
+import {
+    CustomSourceConfig,
+    type SourceSetupProbe,
+} from "./source-config-form.tsx";
 import type { SourceSetupDraft } from "./source-setup-draft.ts";
 import {
     presetConfigSchema,
@@ -43,6 +46,18 @@ export function SourceCreateDialog(props: SourceCreateDialogProps) {
             plugin.id === preset.id && plugin.enabled
         )
     );
+    const probe: SourceSetupProbe = (
+        { draft, sourcePluginId, config },
+        signal,
+    ) => probeSourceDraft({
+        id: draft.id,
+        name: draft.name,
+        priority: draft.priority,
+        proxy: draft.proxy,
+        sourcePluginId,
+        ...(draft.mode === "preset" ? { presetId: draft.presetId } : {}),
+        config,
+    }, signal);
     return (
         <AddSourceFlow
             sources={sources}
@@ -50,6 +65,7 @@ export function SourceCreateDialog(props: SourceCreateDialogProps) {
             proxyPool={props.proxyPool}
             onClose={props.onClose}
             onSaved={props.onSaved}
+            onProbe={probe}
             onSave={async ({ draft, sourcePluginId, config }) => {
                 await createSource({
                     id: draft.id,
@@ -93,6 +109,12 @@ export function SourceCreateDialog(props: SourceCreateDialogProps) {
                                 ...(draft.proxy ? { proxy: draft.proxy } : {}),
                             }}
                             onSubmit={controls.onSave}
+                            onProbe={(config, signal) =>
+                                probe({
+                                    draft,
+                                    sourcePluginId: preset.sourcePluginId!,
+                                    config,
+                                }, signal)}
                             onPreview={async (config) => {
                                 controls.onBusyChange(true);
                                 try {
@@ -121,6 +143,7 @@ export function SourceCreateDialog(props: SourceCreateDialogProps) {
                         disabled={controls.busy}
                         onSelectSource={() => {}}
                         onSave={({ config }) => controls.onSave(config)}
+                        onProbe={probe}
                     />
                 );
             }}

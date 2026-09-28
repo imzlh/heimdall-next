@@ -22,7 +22,7 @@ export const sessionFetch: typeof fetch = async (input, init) => {
         const value = headers.get(name);
         if (value !== null) forwarded[name] = value;
     }
-    const method = init?.method ?? request?.method ?? "GET";
+    const method = (init?.method ?? request?.method ?? "GET").toUpperCase();
     const signal = init?.signal ?? request?.signal;
     let bodyText: string | undefined;
     if (init?.body !== undefined && init.body !== null) {
@@ -39,6 +39,19 @@ export const sessionFetch: typeof fetch = async (input, init) => {
     const bridgeHeaders = new Headers({ "content-type": "application/json" });
     const requestId = headers.get("x-request-id");
     if (requestId !== null) bridgeHeaders.set("x-request-id", requestId);
+    if (url.pathname === "/api/admin/requests/export") {
+        if (method !== "GET" || bodyText !== undefined || url.hash !== "") {
+            throw new Error("日志下载必须使用不带请求体的读取请求");
+        }
+        const downloadHeaders = new Headers({ accept: "application/json" });
+        if (requestId !== null) downloadHeaders.set("x-request-id", requestId);
+        return await fetch(`/admin/ui/requests/export${url.search}`, {
+            method: "GET",
+            credentials: "same-origin",
+            signal,
+            headers: downloadHeaders,
+        });
+    }
     return await fetch("/admin/ui/request", {
         method: "POST",
         credentials: "same-origin",

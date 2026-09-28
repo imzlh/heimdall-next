@@ -1,12 +1,18 @@
 import {
+    acquireChatAttachment,
     type ChatSettingsPatch,
     createConversation,
     deleteChatConversation,
+    deleteChatMessage,
+    forkChatConversation,
     listChatConversations,
     loadChatConversation,
     openChatStream,
+    releaseChatAttachment,
     renameChatConversation,
+    switchChatBranch,
     updateChatConversationSettings,
+    uploadChatAttachment,
 } from "../api/chat.ts";
 import type { ChatApi } from "./types.ts";
 
@@ -28,6 +34,24 @@ export function createChatApi(): ChatApi {
             ),
         remove: (id, signal) =>
             deleteChatConversation(id, { ...options, signal }),
+        deleteMessage: (conversationId, messageId, signal) =>
+            deleteChatMessage(conversationId, messageId, {
+                ...options,
+                signal,
+            }),
+        switchBranch: (conversationId, messageId, signal) =>
+            switchChatBranch(conversationId, messageId, { ...options, signal }),
+        fork: (conversationId, messageId, signal) =>
+            forkChatConversation(conversationId, messageId, {
+                ...options,
+                signal,
+            }),
+        upload: (file, signal) =>
+            uploadChatAttachment(file, { ...options, signal }),
+        acquireAttachment: (assetId, signal) =>
+            acquireChatAttachment(assetId, { ...options, signal }),
+        releaseAttachment: (assetId, leaseId) =>
+            releaseChatAttachment(assetId, leaseId, options),
         open: (command, onEvent) =>
             openChatStream(
                 command,

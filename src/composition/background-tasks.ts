@@ -7,12 +7,21 @@ import {
     runMaintenance,
 } from "./maintenance.ts";
 
+/** Minimal event sink; the process default `log` satisfies it. */
+export interface EventRecorder {
+    debug(scope: string, message: string, detail?: string): void;
+    info(scope: string, message: string, detail?: string): void;
+    warn(scope: string, message: string, detail?: string): void;
+    error(scope: string, message: string, detail?: string): void;
+}
+
 /** Own timers and cancellation independently of HTTP and plugin resources. */
 export function startBackgroundTasks(
     sources: SourceRegistry,
     settings: RuntimeSettingsHandle,
     requests: PrunableJournal,
     retentionDays: number,
+    logger?: EventRecorder,
 ): AsyncDisposable {
     let stopped = false;
     let interval = settings.get().probeIntervalMs;
@@ -35,8 +44,12 @@ export function startBackgroundTasks(
         if (stopped || active || interval === 0) return;
         restart = false;
         const controller = new AbortController();
-        const done = probeSources(sources, 10_000, controller.signal).catch(
-            () => undefined,
+        const done = probeSources(sources, 10_000, controller.signal).then(
+            () => logger?.debug("probe", "完成一轮上游健康探测。"),
+            (error) => {
+                if (controller.signal.aborted) return;
+                logger?.warn("probe", "上游健康探测未完成。", reason(error));
+            },
         );
         const current = { controller, done };
         active = current;
@@ -62,8 +75,21 @@ export function startBackgroundTasks(
     if (retentionDays > 0) {
         const sweep = () => {
             try {
-                runMaintenance(requests, { retentionDays });
-            } catch { /* A failed sweep must not crash the serving process. */ }
+                const result = runMaintenance(requests, { retentionDays });
+                if (result.prunedRequests > 0) {
+                    logger?.info(
+                        "maintenance",
+                        `已回收 ${result.prunedRequests} 条过期请求日志。`,
+                    );
+                }
+            } catch (error) {
+                // A failed sweep must not crash the serving process.
+                logger?.warn(
+                    "maintenance",
+                    "请求日志回收失败。",
+                    reason(error),
+                );
+            }
         };
         sweep();
         maintenanceTimer = setInterval(sweep, MAINTENANCE_INTERVAL_MS);
@@ -80,4 +106,9 @@ export function startBackgroundTasks(
             await active?.done;
         },
     };
+}
+
+function reason(error: unknown): string | undefined {
+    if (error instanceof Error) return error.message;
+    return typeof error === "string" && error.length > 0 ? error : undefined;
 }

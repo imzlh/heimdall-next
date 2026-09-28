@@ -3,6 +3,7 @@ import type { ConversationState } from "@heimdall/hip";
 import {
     chatFinishReason,
     isPublicReasoning,
+    statusPartSummary,
     toolPartIndex,
     toUnixSeconds,
     wantsStreamUsage,
@@ -50,6 +51,21 @@ export function chatStreamEvents(
                 finish_reason: null,
             }],
         }];
+    }
+    if (event.kind === "part.started") {
+        // Cloud activity has no structured OpenAI field; surface its
+        // pre-rendered summary to compatible clients as a content line.
+        const summary = statusPartSummary(event.part);
+        if (summary !== undefined) {
+            return [{
+                ...base,
+                choices: [{
+                    index: 0,
+                    delta: { content: summary + "\n" },
+                    finish_reason: null,
+                }],
+            }];
+        }
     }
     if (event.kind === "part.delta") {
         const message = state.messages[event.messageId];

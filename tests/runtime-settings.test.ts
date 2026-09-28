@@ -57,6 +57,7 @@ Deno.test("runtime settings persist without returning the proxy key", async () =
             proxyKeyConfigured: true,
             limitPerMinute: 15,
             probeIntervalMs: 300_000,
+            titleModel: "",
         });
         assertEquals(JSON.stringify(saved).includes("stored-key"), false);
         assertEquals(settings.get().proxyKey, "stored-key");
@@ -90,6 +91,46 @@ Deno.test("runtime settings persist without returning the proxy key", async () =
                 ),
             TypeError,
         );
+    } finally {
+        kv.close();
+        await Deno.remove(directory, { recursive: true });
+    }
+});
+
+Deno.test("runtime settings round-trip the chat title model", async () => {
+    const directory = await Deno.makeTempDir({ prefix: "heimdall-title-" });
+    const kv = await Deno.openKv(`${directory}/settings.sqlite3`);
+    try {
+        const store = new DenoKvConfigStore(kv);
+        const settings = createRuntimeSettings({
+            proxyKey: "",
+            limitPerMinute: 120,
+            probeIntervalMs: 300_000,
+        });
+        assertEquals(settings.get().titleModel, "");
+        const saved = await saveRuntimeSettings(store, settings, {
+            titleModel: "  gpt-4o-mini  ",
+        });
+        // Stored trimmed, and surfaced in the public view.
+        assertEquals(saved.settings.titleModel, "gpt-4o-mini");
+        assertEquals(settings.get().titleModel, "gpt-4o-mini");
+
+        const restarted = createRuntimeSettings({
+            proxyKey: "",
+            limitPerMinute: 120,
+            probeIntervalMs: 300_000,
+        });
+        await hydrateRuntimeSettings(store, restarted);
+        assertEquals(restarted.get().titleModel, "gpt-4o-mini");
+
+        // An empty string clears it again.
+        const cleared = await saveRuntimeSettings(
+            store,
+            restarted,
+            { titleModel: "" },
+            restarted.versionstamp(),
+        );
+        assertEquals(cleared.settings.titleModel, "");
     } finally {
         kv.close();
         await Deno.remove(directory, { recursive: true });

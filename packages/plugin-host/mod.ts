@@ -106,6 +106,9 @@ export interface PluginRecordStore {
     put(record: PluginRecord): Promise<void>;
     delete(id: string): Promise<void>;
     list(): Promise<readonly PluginRecord[]>;
+    /** Commit metadata only after the complete immutable artifact is durable. */
+    install?(record: PluginRecord, artifact: PluginArtifact): Promise<void>;
+    readArtifact?(id: string): Promise<PluginArtifact | undefined>;
 }
 
 export interface PluginHostOptions {
@@ -127,6 +130,10 @@ export interface PluginHost {
     uninstall(id: string): Promise<boolean>;
     get(id: string): Promise<PluginRecord | undefined>;
     list(): Promise<readonly PluginRecord[]>;
+    /** Re-verify persisted packages and restart previously enabled runtimes. */
+    restore?(): Promise<readonly PluginRecord[]>;
+    /** Stop runtimes without changing durable enable preferences. */
+    close?(): Promise<void>;
     /** Invoke only an enabled plugin through its host-managed runtime.
      * Successful durable disable/uninstall cancels active invocation waits. */
     invoke(

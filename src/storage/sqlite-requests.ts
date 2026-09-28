@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS requests (
   received_at TEXT NOT NULL,
   status TEXT NOT NULL,
   completed_at TEXT,
+  first_token_at TEXT,
   request_json TEXT NOT NULL,
   response_json TEXT,
   error_json TEXT,
@@ -73,6 +74,8 @@ CREATE INDEX IF NOT EXISTS requests_received
   ON requests(received_at DESC, request_id DESC);
 CREATE INDEX IF NOT EXISTS requests_status_received
   ON requests(status, received_at DESC);
+CREATE INDEX IF NOT EXISTS requests_status_cursor
+  ON requests(status, received_at DESC, request_id DESC);
 `;
 
 interface RequestRow {
@@ -85,6 +88,7 @@ interface RequestRow {
     received_at: string;
     status: string;
     completed_at: string | null;
+    first_token_at: string | null;
     request_json: string;
     response_json: string | null;
     error_json: string | null;
@@ -185,8 +189,8 @@ export class SqliteRequestStore implements RequestStore {
         const row = this.#db.prepare(
             `SELECT request_id, stream_id, operation, model,
                     protocol_plugin_id, upstream_plugin_id, received_at,
-                    status, completed_at, request_json, response_json,
-                    error_json, metadata_json
+                    status, completed_at, first_token_at, request_json,
+                    response_json, error_json, metadata_json
              FROM requests WHERE request_id = ?`,
         ).get(requestId) as RequestRow | undefined;
         return row === undefined ? null : toRequest(row);
@@ -217,6 +221,17 @@ export class SqliteRequestStore implements RequestStore {
         }
     }
 
+    /** Stamp the moment the first content frame arrived; keeps the earliest. */
+    markFirstToken(requestId: string, timestamp: string): void {
+        this.#alive();
+        requireId(requestId, "request id");
+        requireText(timestamp, "firstTokenAt");
+        this.#db.prepare(
+            `UPDATE requests SET first_token_at = ?
+             WHERE request_id = ? AND first_token_at IS NULL`,
+        ).run(timestamp, requestId);
+    }
+
     listRequests(options: RequestListOptions = {}): readonly RequestRecord[] {
         this.#alive();
         const status = options.status;
@@ -224,31 +239,59 @@ export class SqliteRequestStore implements RequestStore {
             throw new TypeError(`unknown request status: ${status}`);
         }
         const before = optionalText(options.before);
-        const limit = clampLimit(options.limit, 50, 200);
+        const cursor = options.cursor;
+        if (cursor !== undefined) {
+            requireText(cursor.receivedAt, "cursor receivedAt");
+            requireId(cursor.requestId, "cursor requestId");
+        }
+        const query = optionalText(options.q);
+        // Escape LIKE metacharacters so pasted IDs are searched literally.
+        const pattern = query === null
+            ? null
+            : `%${
+                query.replaceAll("\\", "\\\\").replaceAll("%", "\\%")
+                    .replaceAll("_", "\\_")
+            }%`;
+        const filters: string[] = [];
+        const parameters: (string | number)[] = [];
+        if (status !== undefined) {
+            filters.push("status = ?");
+            parameters.push(status);
+        }
+        if (before !== null) {
+            filters.push("received_at < ?");
+            parameters.push(before);
+        }
+        if (cursor !== undefined) {
+            filters.push("(received_at, request_id) < (?, ?)");
+            parameters.push(cursor.receivedAt, cursor.requestId);
+        }
+        if (pattern !== null) {
+            filters.push(`(request_id LIKE ? ESCAPE '\\'
+                OR model LIKE ? ESCAPE '\\'
+                OR operation LIKE ? ESCAPE '\\'
+                OR protocol_plugin_id LIKE ? ESCAPE '\\'
+                OR upstream_plugin_id LIKE ? ESCAPE '\\')`);
+            parameters.push(pattern, pattern, pattern, pattern, pattern);
+        }
+        parameters.push(clampLimit(options.limit, 50, 200));
         const rows = this.#db.prepare(
             `SELECT request_id, stream_id, operation, model,
                     protocol_plugin_id, upstream_plugin_id, received_at,
-                    status, completed_at, request_json, response_json,
-                    error_json, metadata_json
+                    status, completed_at, first_token_at, request_json,
+                    response_json, error_json, metadata_json
              FROM requests
-             WHERE (? IS NULL OR status = ?)
-               AND (? IS NULL OR received_at < ?)
+             ${filters.length === 0 ? "" : `WHERE ${filters.join(" AND ")}`}
              ORDER BY received_at DESC, request_id DESC
              LIMIT ?`,
-        ).all(
-            status ?? null,
-            status ?? null,
-            before,
-            before,
-            limit,
-        ) as unknown as RequestRow[];
+        ).all(...parameters) as unknown as RequestRow[];
         return rows.map(toRequest);
     }
 
     appendFrame(frame: StoredFrame): boolean {
         this.#alive();
         requireId(frame.requestId, "request id");
-        if (!Number.isInteger(frame.seq) || frame.seq < 0) {
+        if (!Number.isSafeInteger(frame.seq) || frame.seq < 0) {
             throw new TypeError("frame seq must be a non-negative integer");
         }
         requireText(frame.eventId, "event id");
@@ -288,8 +331,10 @@ export class SqliteRequestStore implements RequestStore {
         limit?: number,
     ): readonly StoredFrame[] {
         this.#alive();
-        if (!Number.isInteger(afterSeq)) {
-            throw new TypeError("afterSeq must be an integer");
+        if (!Number.isSafeInteger(afterSeq) || afterSeq < -1) {
+            throw new TypeError(
+                "afterSeq must be an integer greater than or equal to -1",
+            );
         }
         const rows = this.#db.prepare(
             `SELECT request_id, seq, version, stream_id, event_id, timestamp,
@@ -304,6 +349,18 @@ export class SqliteRequestStore implements RequestStore {
             clampLimit(limit, 200, 500),
         ) as unknown as FrameRow[];
         return rows.map(toFrame);
+    }
+
+    getFrameSummary(requestId: string): {
+        count: number;
+        lastSeq: number | null;
+    } {
+        this.#alive();
+        const row = this.#db.prepare(
+            `SELECT COUNT(*) AS count, MAX(seq) AS last_seq
+             FROM frames WHERE request_id = ?`,
+        ).get(requestId) as { count: number; last_seq: number | null };
+        return { count: row.count, lastSeq: row.last_seq };
     }
 
     putUsage(usage: UsageRecord): void {
@@ -491,8 +548,19 @@ export function openSqliteRequestStore(path: string): SqliteRequestStore {
         );
     }
     db.exec(SCHEMA);
+    // Additive column for pre-existing journals; new databases get it above.
+    if (!columns(db, "requests").has("first_token_at")) {
+        db.exec("ALTER TABLE requests ADD COLUMN first_token_at TEXT");
+    }
     if (version.user_version < 1) db.exec("PRAGMA user_version = 1");
     return new SqliteRequestStore(db);
+}
+
+function columns(db: DatabaseSync, table: string): Set<string> {
+    return new Set(
+        (db.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[])
+            .map((row) => row.name),
+    );
 }
 
 function toRequest(row: RequestRow): RequestRecord {
@@ -507,6 +575,7 @@ function toRequest(row: RequestRow): RequestRecord {
         receivedAt: row.received_at,
         status,
         completedAt: row.completed_at ?? undefined,
+        firstTokenAt: row.first_token_at ?? undefined,
         request: decodeJson(row.request_json),
         response: row.response_json === null
             ? undefined

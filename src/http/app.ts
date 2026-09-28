@@ -8,6 +8,7 @@ import {
 } from "./admin-routes.ts";
 import { createGatewayMiddleware, type GatewayOptions } from "./gateway.ts";
 import { createChatAuthMiddleware } from "./chat-auth.ts";
+import { createAccessLog } from "./access-log.ts";
 import { errorHandler, notFoundHandler } from "./error-handler.ts";
 import { healthHandler } from "./health.ts";
 import {
@@ -26,6 +27,12 @@ import type { UiCatalogOptions } from "../web/server/ui-catalog.ts";
 export type ServerEnv = {
     Variables: {
         requestId: string;
+        /**
+         * The management target a proxy/bridge endpoint dispatched to (e.g.
+         * `GET /api/admin/status`). When set, the access log shows it in place
+         * of the opaque bridge method and path (`POST /admin/ui/request`).
+         */
+        accessLogTarget?: string;
     };
 };
 
@@ -80,12 +87,18 @@ export interface ServerAppOptions {
      * replaces that group, because the replacement owns the management surface.
      */
     readonly requestJournal?: RequestStore;
+    /** In-memory system event log surfaced by the built-in admin routes. */
+    readonly systemLog?: import("../observability/system-log.ts").SystemLog;
     /** IANA zone defining natural days in usage statistics; the process zone by default. */
     readonly statsTimeZone?: string;
     /** Proxy key and per-peer limit for `/v1`. Omitted means the gate is off. */
     readonly gateway?: GatewayOptions;
     /** Local chat history and generation. Not part of the proxy-key gate. */
     readonly chatRoutes?: MountableApp;
+    /** Independently signed, expiring reads for upstream image fetches. */
+    readonly chatAssetLinkRoutes?: MountableApp;
+    /** Print a Gin-style line per HTTP request to the console. Off by default. */
+    readonly accessLog?: boolean;
 }
 
 /**
@@ -95,6 +108,9 @@ export interface ServerAppOptions {
  */
 export function createServerApp(options: ServerAppOptions = {}): ServerApp {
     const app = new Hono<ServerEnv>();
+
+    // Outermost so it also records 404s and errors; it never reads the body.
+    if (options.accessLog) app.use("*", createAccessLog());
 
     app.onError(errorHandler);
     app.notFound(notFoundHandler);
@@ -177,6 +193,7 @@ export function createServerApp(options: ServerAppOptions = {}): ServerApp {
         catalog: options.adminCatalog,
         management: options.adminManagement,
         requestJournal: options.requestJournal,
+        systemLog: options.systemLog,
         statsTimeZone: options.statsTimeZone,
     });
     assertNoRouteConflicts(adminRoutes, "admin");
@@ -186,6 +203,16 @@ export function createServerApp(options: ServerAppOptions = {}): ServerApp {
     mountRouteGroup(app, "/admin", adminRoutes, adminMiddleware);
     // Both existing management prefixes remain stable for external clients.
     mountRouteGroup(app, "/api/admin", adminRoutes, adminMiddleware);
+
+    if (options.chatAssetLinkRoutes !== undefined) {
+        assertNoRouteConflicts(options.chatAssetLinkRoutes, "chat-asset-links");
+        mountRouteGroup(
+            app,
+            "/api/chat/asset-links",
+            options.chatAssetLinkRoutes,
+            requestIdMiddleware,
+        );
+    }
 
     if (options.chatRoutes !== undefined) {
         assertNoRouteConflicts(options.chatRoutes, "chat");

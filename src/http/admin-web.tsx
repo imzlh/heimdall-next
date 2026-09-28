@@ -17,6 +17,9 @@ import { serializeBoot } from "../web/server/serialize.ts";
 export { serializeBoot } from "../web/server/serialize.ts";
 import { createUiBridge } from "../web/server/bridge.ts";
 import { loadConsoleSnapshot } from "../web/server/snapshot.ts";
+import { loadSystemLogSnapshot } from "../web/server/system-log-snapshot.ts";
+import { loadJournalSnapshot } from "../web/server/journal-snapshot.ts";
+import { createJournalDownload } from "../web/server/journal-download.ts";
 import {
     createUiActions,
     type UiActionRegistry,
@@ -53,6 +56,10 @@ export function createAdminWebRoutes(options: AdminWebOptions): ServerApp {
     app.post("/admin/session", session.login);
     app.post("/admin/logout", session.logout);
     app.post("/admin/ui/request", createUiBridge({ ...options, session }));
+    app.get(
+        "/admin/ui/requests/export",
+        createJournalDownload({ ...options, session }),
+    );
     app.get("/admin/ui/catalog", createUiCatalogRoute(session, catalog.load));
     app.get(
         "/chat",
@@ -122,11 +129,26 @@ export function createAdminWebRoutes(options: AdminWebOptions): ServerApp {
     for (const path of ["/admin"]) {
         app.get(path, async (context) => {
             const authorized = await session.authorized(context);
+            const view = context.req.query("view") ?? "overview";
             const snapshot = await loadConsoleSnapshot({
                 ...options,
                 authorized,
                 origin: new URL(context.req.url).origin,
+                includeActivity: !["channels", "settings", "plugin", "logs", "requests"].includes(view),
             });
+            if (view === "logs" || view === "requests") {
+                const url = new URL(context.req.url);
+                const logOptions = {
+                    ...options,
+                    authorized,
+                    origin: url.origin,
+                };
+                if (view === "requests") {
+                    snapshot.journal = await loadJournalSnapshot(logOptions, url.searchParams);
+                } else {
+                    snapshot.systemLog = await loadSystemLogSnapshot(logOptions, url.searchParams);
+                }
+            }
             const { contributions, schemas, sourcePluginIds, presetPages } =
                 authorized
                     ? await catalog.load(
@@ -134,9 +156,9 @@ export function createAdminWebRoutes(options: AdminWebOptions): ServerApp {
                         snapshot.dashboard.status.presets,
                     )
                     : EMPTY_UI_CATALOG;
-            const view = context.req.query("view") ?? "overview";
             const page: ConsolePage =
-                view === "channels" || view === "settings" || view === "plugin"
+                view === "channels" || view === "settings" ||
+                    view === "plugin" || view === "logs" || view === "requests"
                     ? view
                     : "overview";
             const tab = context.req.query("tab");
@@ -152,6 +174,7 @@ export function createAdminWebRoutes(options: AdminWebOptions): ServerApp {
             const nav = [
                 { id: "overview", label: "总览", href: "/admin" },
                 { id: "channels", label: "渠道", href: "/admin?view=channels" },
+                { id: "logs", label: "日志", href: "/admin?view=logs" },
                 { id: "settings", label: "设置", href: "/admin?view=settings" },
                 { id: "chat", label: "对话", href: "/admin/chat" },
                 ...pluginNavItems(contributions),
@@ -160,6 +183,9 @@ export function createAdminWebRoutes(options: AdminWebOptions): ServerApp {
                 initial: snapshot.dashboard,
                 initialPanels: {
                     requests: snapshot.requests,
+                    journal: snapshot.journal,
+                    systemLog: snapshot.systemLog,
+                    stats: snapshot.stats,
                     usage: snapshot.usage,
                     settings: snapshot.settings,
                     proxies: snapshot.proxies,
@@ -180,7 +206,7 @@ export function createAdminWebRoutes(options: AdminWebOptions): ServerApp {
                     (<AdminShell
                         title="Heimdall · 运维控制台"
                         nav={nav}
-                        active={page === "plugin" ? tab ?? "plugin" : page}
+                        active={page === "plugin" ? tab ?? "plugin" : page === "requests" ? "overview" : page}
                         scripts={
                             <>
                                 <script

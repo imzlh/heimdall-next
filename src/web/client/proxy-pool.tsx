@@ -13,6 +13,7 @@ import {
     saveProxyPool,
 } from "./api/admin.ts";
 import { controlValue } from "./dom.ts";
+import { Dropdown } from "./forms/dropdown.tsx";
 import { randomUuid } from "./random-id.ts";
 import {
     mergeProxyPoolDraft,
@@ -192,48 +193,44 @@ export function ProxyPoolPanel({ initial, initialError = "", onChanged }: {
                     class="proxy-pool-fields"
                     disabled={busy || !loaded || conflict}
                 >
-                    <label class="proxy-default-field">
-                        全局默认
-                        <select
-                            name="proxy-default"
+                    <div class="proxy-default-field">
+                        <span class="field-label">全局默认</span>
+                        <Dropdown
                             value={draft.defaultProxyId ?? ""}
-                            onChange={(event) => {
-                                const selected = controlValue(event) || null;
+                            dataName="proxy-default"
+                            options={[
+                                { value: "", label: "直连" },
+                                ...(draft.defaultProxyId &&
+                                        !draft.entries.some((entry) =>
+                                            entry.id === draft.defaultProxyId
+                                        )
+                                    ? [{
+                                        value: draft.defaultProxyId,
+                                        label: "原默认代理已移除，请重新选择",
+                                        disabled: true,
+                                    }]
+                                    : []),
+                                ...draft.entries.map((entry) => ({
+                                    value: entry.id,
+                                    label: `${entry.name || "未命名代理"}${
+                                        entry.enabled ? "" : "（已停用）"
+                                    }`,
+                                    disabled: !entry.enabled,
+                                })),
+                            ]}
+                            ariaLabel="全局默认"
+                            onChange={(next) => {
                                 setDraft((current) => ({
                                     ...current,
-                                    defaultProxyId: selected,
+                                    defaultProxyId: next || null,
                                 }));
                                 setNotice("");
                             }}
-                        >
-                            <option value="">直连</option>
-                            {draft.defaultProxyId &&
-                                !draft.entries.some((entry) =>
-                                    entry.id === draft.defaultProxyId
-                                ) &&
-                                (
-                                    <option
-                                        value={draft.defaultProxyId}
-                                        disabled
-                                    >
-                                        原默认代理已移除，请重新选择
-                                    </option>
-                                )}
-                            {draft.entries.map((entry) => (
-                                <option
-                                    value={entry.id}
-                                    key={entry.id}
-                                    disabled={!entry.enabled}
-                                >
-                                    {entry.name || "未命名代理"}
-                                    {entry.enabled ? "" : "（已停用）"}
-                                </option>
-                            ))}
-                        </select>
+                        />
                         <span class="field-help">
                             未单独指定代理的渠道继承此选择。
                         </span>
-                    </label>
+                    </div>
                     <div class="proxy-entry-list">
                         {draft.entries.map((entry) => (
                             <section
@@ -330,38 +327,48 @@ export function ProxyPoolPanel({ initial, initialError = "", onChanged }: {
                                                         })}
                                                 />
                                             </label>
-                                            <label class="wide-field">
-                                                代理认证
-                                                <select
-                                                    name={`proxy-auth-${entry.id}`}
+                                            <div class="wide-field">
+                                                <span class="field-label">
+                                                    代理认证
+                                                </span>
+                                                <Dropdown
                                                     value={entry.authMode}
-                                                    onChange={(event) =>
+                                                    dataName={`proxy-auth-${entry.id}`}
+                                                    ariaLabel={`代理认证 ${
+                                                        entry.name || entry.id
+                                                    }`}
+                                                    options={[
+                                                        {
+                                                            value: "keep",
+                                                            label: entry
+                                                                    .authConfigured
+                                                                ? "保留已保存认证"
+                                                                : "不设置认证",
+                                                        },
+                                                        {
+                                                            value: "replace",
+                                                            label: "填写新认证",
+                                                        },
+                                                        ...(entry
+                                                                .authConfigured
+                                                            ? [{
+                                                                value: "clear",
+                                                                label:
+                                                                    "清除已保存认证",
+                                                            }]
+                                                            : []),
+                                                    ]}
+                                                    onChange={(mode) =>
                                                         edit(entry.id, {
                                                             authMode:
-                                                                controlValue(
-                                                                    event,
-                                                                ) as ProxyEntryDraft[
+                                                                mode as ProxyEntryDraft[
                                                                     "authMode"
                                                                 ],
                                                             username: "",
                                                             password: "",
                                                         })}
-                                                >
-                                                    <option value="keep">
-                                                        {entry.authConfigured
-                                                            ? "保留已保存认证"
-                                                            : "不设置认证"}
-                                                    </option>
-                                                    <option value="replace">
-                                                        填写新认证
-                                                    </option>
-                                                    {entry.authConfigured && (
-                                                        <option value="clear">
-                                                            清除已保存认证
-                                                        </option>
-                                                    )}
-                                                </select>
-                                            </label>
+                                                />
+                                            </div>
                                             {entry.authMode === "replace" && (
                                                 <>
                                                     <label>

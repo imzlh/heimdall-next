@@ -22,10 +22,11 @@ export function generationPayload(input: OperationRequest): GenerationRequest {
                     "tool_result",
                     "json",
                     "refusal",
+                    "image",
                 ].includes(part.type)
             ) {
                 throw new TypeError(
-                    "ChatHub currently supports text and tool messages only",
+                    "ChatHub currently supports text, image and tool messages only",
                 );
             }
         }

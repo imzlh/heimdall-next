@@ -35,3 +35,45 @@ export function requestState(status?: string): {
             return { label: status || "未知", tone: "muted" };
     }
 }
+
+/** Elapsed milliseconds between two ISO timestamps, or null when not derivable. */
+function elapsedMs(from?: string, to?: string): number | null {
+    if (!from || !to) return null;
+    const span = Date.parse(to) - Date.parse(from);
+    return Number.isFinite(span) && span >= 0 ? span : null;
+}
+
+/** `842 ms` under a second, `1.23 s` above it. */
+export function formatDuration(ms: number): string {
+    return ms < 1000 ? `${ms} ms` : `${(ms / 1000).toFixed(2)} s`;
+}
+
+export interface RequestTimings {
+    /** First-content latency, shown only for streamed turns. */
+    readonly firstToken: string | null;
+    /** Total wall-clock time from receipt to completion. */
+    readonly total: string | null;
+}
+
+/**
+ * Format a row's latencies. Streamed turns expose time-to-first-token and the
+ * full duration; a non-streaming turn produces its answer in one shot, so only
+ * the total is meaningful and `firstToken` stays null.
+ */
+export function requestTimings(
+    row: {
+        receivedAt?: string;
+        completedAt?: string;
+        firstTokenAt?: string;
+        streaming?: boolean;
+    },
+): RequestTimings {
+    const total = elapsedMs(row.receivedAt, row.completedAt);
+    const first = row.streaming === true
+        ? elapsedMs(row.receivedAt, row.firstTokenAt)
+        : null;
+    return {
+        firstToken: first === null ? null : formatDuration(first),
+        total: total === null ? null : formatDuration(total),
+    };
+}

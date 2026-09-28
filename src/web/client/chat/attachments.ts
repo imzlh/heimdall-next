@@ -3,7 +3,7 @@ import type { ChatAttachment } from "../api/chat.ts";
 const MEDIA_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 const MAX_ATTACHMENTS = 4;
 const MAX_BASE64_CHARS = 1_400_000;
-const MAX_FILE_BYTES = Math.floor(MAX_BASE64_CHARS / 4) * 3;
+const MAX_FILE_BYTES = 5 * 1024 * 1024;
 
 export const CHAT_ATTACHMENT_ACCEPT = MEDIA_TYPES.join(",");
 
@@ -22,6 +22,12 @@ export function validateChatAttachments(
             throw new Error("图片附件无效，请重新选择");
         }
         validateMediaType(attachment.mediaType);
+        if (attachment.assetId !== undefined) {
+            if (!/^[A-Za-z0-9_-]{1,128}$/.test(attachment.assetId)) {
+                throw new Error("图片引用无效，请重新选择");
+            }
+            continue;
+        }
         const data = typeof attachment.dataBase64 === "string"
             ? attachment.dataBase64.trim()
             : "";
@@ -34,9 +40,10 @@ export function validateChatAttachments(
     }
 }
 
-/** Check every file before reading any, and return a new combined draft. */
-export async function readChatAttachments(
+/** Check every file before uploading any; drafts only retain asset references. */
+export async function uploadChatAttachments(
     files: readonly File[],
+    upload: (file: File) => Promise<ChatAttachment>,
     existing: readonly ChatAttachment[] = [],
 ): Promise<ChatAttachment[]> {
     if (existing.length + files.length > MAX_ATTACHMENTS) {
@@ -46,13 +53,18 @@ export async function readChatAttachments(
     for (const file of files) {
         validateMediaType(file.type);
         if (file.size === 0 || file.size > MAX_FILE_BYTES) {
-            throw new Error("图片不能为空，且每张图片最多 1,050,000 字节");
+            throw new Error("图片不能为空，且每张图片最多 5 MiB");
         }
     }
-    const added = await Promise.all(files.map(async (file) => ({
-        mediaType: file.type,
-        dataBase64: encodeBase64(new Uint8Array(await file.arrayBuffer())),
-    })));
+    const results = await Promise.allSettled(files.map(upload));
+    const failure = results.find((result) => result.status === "rejected");
+    if (failure?.status === "rejected") throw failure.reason;
+    const added = results.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : []
+    );
+    if (added.some((attachment) => !attachment.assetId)) {
+        throw new Error("图片未保存为资产，请重试上传");
+    }
     const attachments = [...existing, ...added];
     validateChatAttachments(attachments);
     return attachments;
@@ -64,14 +76,4 @@ function validateMediaType(mediaType: string): void {
     ) {
         throw new Error("仅支持 PNG、JPEG、GIF 和 WebP 图片");
     }
-}
-
-function encodeBase64(bytes: Uint8Array): string {
-    const chunks: string[] = [];
-    for (let offset = 0; offset < bytes.length; offset += 32_768) {
-        chunks.push(
-            String.fromCharCode(...bytes.subarray(offset, offset + 32_768)),
-        );
-    }
-    return btoa(chunks.join(""));
 }

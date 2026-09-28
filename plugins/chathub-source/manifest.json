@@ -24,7 +24,8 @@
                     {
                         "kind": "badge",
                         "label": "状态未知",
-                        "labelFrom": ["source", "state"]
+                        "labelFrom": ["source", "state"],
+                        "toneFrom": ["source", "stateTone"]
                     },
                     {
                         "kind": "metric",

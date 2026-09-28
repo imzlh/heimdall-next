@@ -14,11 +14,111 @@ import type { RequestStore } from "@heimdall/storage";
 import type { MountableApp, ServerApp, ServerEnv } from "./app.ts";
 import type { ModelsResponse } from "./public-routes.ts";
 import { createRequestJournalRoutes } from "./request-journal.ts";
+import { createSystemLogRoutes } from "./system-log-routes.ts";
+import type { SystemLog } from "@heimdall/core/observability/system-log.ts";
 import { assertNoRouteConflicts, mountRouteGroup } from "./route-validation.ts";
 import { createStatsRoutes } from "./stats-routes.ts";
 import { resolveTimeZone } from "../stats/calendar.ts";
+import type { SourceDraftProbeResult } from "@heimdall/admin-contracts/source-probe.ts";
 
 const requestIdHeader = "x-heimdall-request-id";
+
+/**
+ * One info line per successful management mutation, so the console's system
+ * log narrates what changed (添加渠道、更新设置…) without logging reads.
+ */
+function recordAction(
+    systemLog: SystemLog | undefined,
+    scope: string,
+    message: string,
+    detail?: string,
+    level: "info" | "warn" = "info",
+): void {
+    systemLog?.record({ level, scope, message, detail });
+}
+
+/** Trimmed id fallback for narration that cannot resolve an entity name. */
+function shortLabel(id: string): string {
+    return id.length > 12 ? `${id.slice(0, 8)}…` : id;
+}
+
+/** First readable name on a provider row carrying the given id. */
+function nameFromRow(row: unknown, id: string): string | undefined {
+    if (!isRecord(row)) return undefined;
+    if (row.id !== id) return undefined;
+    const name = row.name;
+    return typeof name === "string" && name.trim() !== "" ? name : undefined;
+}
+
+/**
+ * Narration prefers the human name, resolved through the detail provider when
+ * the composition offers one and otherwise by scanning the list provider.
+ * Lookup is best-effort: missing providers and failures degrade to a trimmed
+ * id and never break the operation itself.
+ */
+async function narrateSourceLabel(
+    options: AdminRouteOptions,
+    context: AdminRouteContext,
+    sourceId: string,
+): Promise<string> {
+    const detail = sourceDetailProvider(options);
+    if (detail !== undefined) {
+        try {
+            const source = await resolveDetail(detail, context, sourceId);
+            const name = nameFromRow(source, sourceId);
+            if (name !== undefined) return name;
+        } catch {
+            // fall through to the list scan
+        }
+    }
+    const list = sourceListProvider(options);
+    if (typeof list === "function") {
+        try {
+            const sources = await resolveCollection(list, context);
+            if (!(sources instanceof Response)) {
+                for (const source of sources) {
+                    const name = nameFromRow(source, sourceId);
+                    if (name !== undefined) return name;
+                }
+            }
+        } catch {
+            // narration stays best-effort
+        }
+    }
+    return shortLabel(sourceId);
+}
+
+async function narratePresetLabel(
+    options: AdminRouteOptions,
+    context: AdminRouteContext,
+    presetId: string,
+): Promise<string> {
+    const detail = presetDetailProvider(options);
+    if (detail !== undefined) {
+        try {
+            const preset = await resolveDetail(detail, context, presetId);
+            const name = nameFromRow(preset, presetId);
+            if (name !== undefined) return name;
+        } catch {
+            // fall through to the list scan
+        }
+    }
+    const list = presetListProvider(options);
+    if (typeof list === "function") {
+        try {
+            const presets = await resolveCollection(list, context);
+            if (!(presets instanceof Response)) {
+                for (const preset of presets) {
+                    const name = nameFromRow(preset, presetId);
+                    if (name !== undefined) return name;
+                }
+            }
+        } catch {
+            // narration stays best-effort
+        }
+    }
+    return shortLabel(presetId);
+}
 
 export interface AdminRouteContext {
     readonly request: Request;
@@ -58,6 +158,10 @@ export interface AdminWriteResult {
 
 /** State-changing capabilities supplied by the composition root. */
 export interface AdminManagementOptions {
+    readonly probeSourceDraft?: (
+        context: AdminRouteContext,
+        input: CreateSourceInput,
+    ) => MaybePromise<SourceDraftProbeResult>;
     readonly getProxies?: (
         context: AdminRouteContext,
     ) => MaybePromise<AdminWriteResult>;
@@ -134,6 +238,7 @@ export interface AdminManagementOptions {
             readonly proxyKey?: string;
             readonly limitPerMinute?: number;
             readonly probeIntervalMs?: number;
+            readonly titleModel?: string;
         },
         expectedVersionstamp?: string,
     ) => MaybePromise<AdminWriteResult>;
@@ -178,6 +283,8 @@ export interface AdminRouteOptions {
     readonly management?: AdminManagementOptions;
     /** Read-only request journal. Omitted when history storage is not installed. */
     readonly requestJournal?: RequestStore;
+    /** In-memory system event log. Omitted when the host does not expose one. */
+    readonly systemLog?: SystemLog;
     /** IANA zone defining natural days in usage statistics; the process zone by default. */
     readonly statsTimeZone?: string;
 }
@@ -306,6 +413,14 @@ export function createAdminRoutes(
         const result = await invokeManagement(() =>
             handler(adminContext, input)
         );
+        recordAction(
+            options.systemLog,
+            "渠道",
+            `添加渠道「${input.name}」`,
+            `id=${input.id} · 插件=${input.sourcePluginId}${
+                input.presetId ? ` · 预设=${input.presetId}` : ""
+            }`,
+        );
         return writeJson(
             result.data,
             adminContext.requestId,
@@ -323,6 +438,16 @@ export function createAdminRoutes(
         const result = await invokeManagement(() =>
             handler(adminContext, sourceId, input, expectedVersion(context))
         );
+        recordAction(
+            options.systemLog,
+            "渠道",
+            input.name !== undefined
+                ? `更新渠道「${input.name}」`
+                : `更新渠道 ${
+                    await narrateSourceLabel(options, adminContext, sourceId)
+                }`,
+            `id=${sourceId} · 字段=${Object.keys(input).join(" / ")}`,
+        );
         return writeJson(
             result.data,
             adminContext.requestId,
@@ -335,8 +460,16 @@ export function createAdminRoutes(
         const sourceId = requiredQuery(context, "id");
         const handler = options.management?.deleteSource;
         if (handler === undefined) return unavailable(adminContext.requestId);
+        // Resolve the display name before the source is gone.
+        const label = await narrateSourceLabel(options, adminContext, sourceId);
         const result = await invokeManagement(() =>
             handler(adminContext, sourceId, expectedVersion(context))
+        );
+        recordAction(
+            options.systemLog,
+            "渠道",
+            `删除渠道 ${label}`,
+            `id=${sourceId}`,
         );
         return writeJson(
             result.data,
@@ -389,6 +522,14 @@ export function createAdminRoutes(
                 expectedVersion(context),
             )
         );
+        recordAction(
+            options.systemLog,
+            "渠道",
+            `保存渠道配置 ${
+                await narrateSourceLabel(options, adminContext, sourceId)
+            }`,
+            `id=${sourceId}`,
+        );
         return writeJson(
             result.data,
             adminContext.requestId,
@@ -422,6 +563,14 @@ export function createAdminRoutes(
                 expectedVersion(context),
             )
         );
+        recordAction(
+            options.systemLog,
+            "预设",
+            `应用预设 ${
+                await narratePresetLabel(options, adminContext, presetId)
+            }`,
+            `id=${presetId}`,
+        );
         return writeJson(
             result.data,
             adminContext.requestId,
@@ -454,6 +603,14 @@ export function createAdminRoutes(
                 expectedVersion(context),
             )
         );
+        recordAction(
+            options.systemLog,
+            "代理",
+            "更新代理池",
+            Array.isArray(body.entries)
+                ? `共 ${body.entries.length} 个代理`
+                : undefined,
+        );
         return writeJson(
             result.data,
             adminContext.requestId,
@@ -482,6 +639,7 @@ export function createAdminRoutes(
             proxyKey?: string;
             limitPerMinute?: number;
             probeIntervalMs?: number;
+            titleModel?: string;
         } = {};
         if (body.proxyKey !== undefined) {
             if (typeof body.proxyKey !== "string") {
@@ -513,8 +671,24 @@ export function createAdminRoutes(
             }
             patch.probeIntervalMs = body.probeIntervalMs;
         }
+        if (body.titleModel !== undefined) {
+            if (typeof body.titleModel !== "string") {
+                throw new AdminRouteError(
+                    400,
+                    "invalid_request",
+                    "titleModel must be a string",
+                );
+            }
+            patch.titleModel = body.titleModel;
+        }
         const result = await invokeManagement(() =>
             handler(adminContext, patch, expectedVersion(context))
+        );
+        recordAction(
+            options.systemLog,
+            "设置",
+            "更新网关设置",
+            Object.keys(patch).join(" / "),
         );
         return writeJson(
             result.data,
@@ -540,7 +714,23 @@ export function createAdminRoutes(
         const result = await invokeManagement(() =>
             handler(adminContext, pluginId, enabled)
         );
+        recordAction(
+            options.systemLog,
+            "插件",
+            `${enabled ? "启用插件" : "停用插件"} ${pluginId}`,
+        );
         return json(context, { plugin: result }, adminContext.requestId);
+    });
+
+    app.post("/source-draft-probe", async (context) => {
+        const adminContext = toAdminContext(context);
+        const input = parseCreateSource(await readJsonBody(context));
+        const handler = options.management?.probeSourceDraft;
+        if (!handler) return unavailable(adminContext.requestId);
+        const result = await invokeManagement(() =>
+            handler(adminContext, input)
+        );
+        return json(context, { probe: result }, adminContext.requestId);
     });
 
     app.post("/source-probe", async (context) => {
@@ -551,6 +741,15 @@ export function createAdminRoutes(
         if (handler === undefined) return unavailable(adminContext.requestId);
         const result = await invokeManagement(() =>
             handler(adminContext, sourceId)
+        );
+        recordAction(
+            options.systemLog,
+            "渠道",
+            `探测渠道 ${
+                await narrateSourceLabel(options, adminContext, sourceId)
+            }`,
+            result.ok ? "成功" : result.message,
+            result.ok ? "info" : "warn",
         );
         return json(context, { probe: result }, adminContext.requestId);
     });
@@ -564,6 +763,7 @@ export function createAdminRoutes(
         const result = await invokeManagement(() =>
             handler(adminContext, pluginId)
         );
+        recordAction(options.systemLog, "插件", `卸载插件 ${pluginId}`);
         return json(context, { removed: result }, adminContext.requestId);
     });
 
@@ -586,6 +786,10 @@ export function createAdminRoutes(
 
     if (options.manifestRoutes !== undefined) {
         mountRouteGroup(app, "/", options.manifestRoutes);
+    }
+
+    if (options.systemLog !== undefined) {
+        mountRouteGroup(app, "/", createSystemLogRoutes(options.systemLog));
     }
 
     assertNoRouteConflicts(app, "admin");

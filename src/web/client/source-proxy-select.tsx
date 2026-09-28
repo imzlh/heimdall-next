@@ -4,7 +4,7 @@ import type {
     SourceProxySelection,
 } from "@heimdall/admin-contracts/proxies.ts";
 import { useId } from "hono/jsx/dom";
-import { controlValue } from "./dom.ts";
+import { Dropdown } from "./forms/dropdown.tsx";
 import {
     PROXY_IMPLEMENTATION_NOTE,
     sourceProxyLabel,
@@ -24,37 +24,38 @@ export function SourceProxySelect({ value, pool, disabled, onChange }: {
         !pool?.entries.some((entry) => entry.id === selectedId);
     return (
         <div class="source-proxy-field">
-            <label>
-                出站代理
-                <select
-                    name="source-proxy"
-                    value={sourceProxyValue(value)}
-                    disabled={disabled}
-                    aria-describedby={helpId}
-                    onChange={(event) =>
-                        onChange(sourceProxySelection(controlValue(event)))}
-                >
-                    <option value="inherit">
-                        {sourceProxyLabel({ mode: "inherit" }, pool)}
-                    </option>
-                    <option value="direct">直连</option>
-                    {missing && (
-                        <option value={`proxy:${selectedId}`} disabled>
-                            {selectedId}（{pool ? "已移除" : "待读取"}）
-                        </option>
-                    )}
-                    {pool?.entries.map((entry) => (
-                        <option
-                            key={entry.id}
-                            value={`proxy:${entry.id}`}
-                            disabled={!entry.enabled}
-                        >
-                            {entry.name}
-                            {entry.enabled ? "" : "（已停用）"}
-                        </option>
-                    ))}
-                </select>
-            </label>
+            <span class="field-label">出站代理</span>
+            <Dropdown
+                value={sourceProxyValue(value)}
+                disabled={disabled}
+                describedBy={helpId}
+                ariaLabel="出站代理"
+                dataName="source-proxy"
+                options={[
+                    {
+                        value: "inherit",
+                        label: sourceProxyLabel({ mode: "inherit" }, pool),
+                    },
+                    { value: "direct", label: "直连" },
+                    ...(missing
+                        ? [{
+                            value: `proxy:${selectedId}`,
+                            label: `${selectedId}（${
+                                pool ? "已移除" : "待读取"
+                            }）`,
+                            disabled: true,
+                        }]
+                        : []),
+                    ...(pool?.entries ?? []).map((entry) => ({
+                        value: `proxy:${entry.id}`,
+                        label: `${entry.name}${
+                            entry.enabled ? "" : "（已停用）"
+                        }`,
+                        disabled: !entry.enabled,
+                    })),
+                ]}
+                onChange={(next) => onChange(sourceProxySelection(next))}
+            />
             <p class="field-help" id={helpId}>
                 {PROXY_IMPLEMENTATION_NOTE}
             </p>

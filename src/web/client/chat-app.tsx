@@ -1,6 +1,9 @@
 /** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { useEffect, useRef, useState } from "hono/jsx/dom";
-import type { ChatInitial } from "@heimdall/admin-contracts/chat.ts";
+import type {
+    ChatInitial,
+    ChatMessage,
+} from "@heimdall/admin-contracts/chat.ts";
 import { useChat } from "./chat/use-chat.ts";
 import { ChatMessages } from "./chat/messages.tsx";
 import { ChatComposer } from "./chat/composer.tsx";
@@ -9,7 +12,11 @@ import { Icon } from "../shared/icons.tsx";
 import {
     type ConversationAction,
     ConversationDialog,
+    MessageDeleteDialog,
 } from "./chat/conversation-dialog.tsx";
+import { downloadConversation } from "./chat/export.ts";
+import { MessageEditor } from "./chat/message-editor.tsx";
+import { ConversationBranches } from "./chat/conversation-branches.tsx";
 
 function savedTheme(): "light" | "dark" {
     try {
@@ -37,42 +44,25 @@ function updateLocation(id: string) {
 
 type TitleSaveState = "idle" | "saving" | "saved" | "error";
 
-const EFFORT_OPTIONS = [
-    { value: "low", label: "快速", hint: "更快的回答，更少的推理" },
-    { value: "medium", label: "默认", hint: "速度与深度的平衡" },
-    { value: "high", label: "深入", hint: "更充分的推理，回答更慢" },
-] as const;
-
-/** Conversation settings popover: name with debounced auto-save plus the model. */
+/** Conversation settings popover: plugin switches plus the system prompt. */
 function ConversationSettings(
-    { state, controller, open, onDismiss }: {
+    { state, controller, open, onDismiss, onSelectBranch }: {
         state: ChatState;
         controller: ReturnType<typeof useChat>["controller"];
         open: boolean;
         onDismiss: () => void;
+        onSelectBranch: (messageId: string) => void;
     },
 ) {
     const panel = useRef<HTMLDivElement | null>(null);
-    const titleInput = useRef<HTMLInputElement | null>(null);
-    const [titleDraft, setTitleDraft] = useState(
-        state.conversation?.title ?? "",
-    );
     const [promptDraft, setPromptDraft] = useState(
         state.conversation?.systemPrompt ?? "",
     );
-    const [effortDraft, setEffortDraft] = useState(
-        state.conversation?.reasoningEffort ?? "medium",
-    );
-    const [saveState, setSaveState] = useState<TitleSaveState>("idle");
     const [settingsState, setSettingsState] = useState<TitleSaveState>("idle");
-    const saveTimer = useRef<number | undefined>(undefined);
     const settingsTimer = useRef<number | undefined>(undefined);
     const conversationId = state.conversation?.id ?? "";
     useEffect(() => {
-        setTitleDraft(state.conversation?.title ?? "");
         setPromptDraft(state.conversation?.systemPrompt ?? "");
-        setEffortDraft(state.conversation?.reasoningEffort ?? "medium");
-        setSaveState("idle");
         setSettingsState("idle");
     }, [conversationId]);
     useEffect(() => {
@@ -95,32 +85,10 @@ function ConversationSettings(
     }, [open, onDismiss]);
     useEffect(() => {
         return () => {
-            globalThis.clearTimeout(saveTimer.current ?? undefined);
             globalThis.clearTimeout(settingsTimer.current ?? undefined);
         };
     }, []);
-    function scheduleTitleSave(next: string) {
-        setTitleDraft(next);
-        globalThis.clearTimeout(saveTimer.current ?? undefined);
-        const original = state.conversation?.title ?? "";
-        if (!conversationId || next.trim() === original.trim()) return;
-        setSaveState("saving");
-        saveTimer.current = globalThis.setTimeout(async () => {
-            const normalized = next.trim();
-            if (!normalized || normalized.length > 120) {
-                setSaveState("error");
-                return;
-            }
-            const saved = await controller.rename(conversationId, normalized);
-            setSaveState(saved ? "saved" : "error");
-        }, 550);
-    }
-    function scheduleSettingsSave(
-        patch: {
-            readonly systemPrompt?: string;
-            readonly reasoningEffort?: "low" | "medium" | "high";
-        },
-    ) {
+    function scheduleSettingsSave(patch: { readonly systemPrompt?: string }) {
         globalThis.clearTimeout(settingsTimer.current ?? undefined);
         if (!conversationId) return;
         setSettingsState("saving");
@@ -137,48 +105,15 @@ function ConversationSettings(
         if (next === (state.conversation?.systemPrompt ?? "")) return;
         scheduleSettingsSave({ systemPrompt: next });
     }
-    function scheduleEffortSave(next: "low" | "medium" | "high") {
-        setEffortDraft(next);
-        if (next === (state.conversation?.reasoningEffort ?? "medium")) return;
-        scheduleSettingsSave({ reasoningEffort: next });
+    function toggleTool(id: string, enable: boolean) {
+        const current = state.conversation?.disabledTools ?? [];
+        const next = enable
+            ? current.filter((item) => item !== id)
+            : [...new Set([...current, id])];
+        if (next.length === current.length) return;
+        void controller.updateSettings(conversationId, { disabledTools: next });
     }
     if (!open) return null;
-    const statusLabel = saveState === "saving"
-        ? "保存中…"
-        : saveState === "saved"
-        ? "已保存"
-        : saveState === "error"
-        ? "保存失败"
-        : "自动保存";
-    const settingsMeta = (meta: TitleSaveState) => (
-        <small class="chat-settings-meta">
-            <span class={`chat-save-dot dot-${meta}`} aria-hidden="true" />
-            {meta === "saving"
-                ? "保存中…"
-                : meta === "saved"
-                ? "已保存"
-                : meta === "error"
-                ? "保存失败"
-                : "自动保存"}
-            {meta === "error" && (
-                <button
-                    type="button"
-                    class="chat-small-button"
-                    onClick={() => {
-                        setSettingsState("saving");
-                        void controller.updateSettings(conversationId, {
-                            systemPrompt: promptDraft,
-                            reasoningEffort: effortDraft,
-                        }).then((saved) =>
-                            setSettingsState(saved ? "saved" : "error")
-                        );
-                    }}
-                >
-                    重试
-                </button>
-            )}
-        </small>
-    );
     return (
         <div
             ref={panel}
@@ -186,87 +121,51 @@ function ConversationSettings(
             role="region"
             aria-label="对话设置"
         >
-            <label class="chat-settings-field">
-                <span>对话名称</span>
-                <input
-                    ref={titleInput}
-                    type="text"
-                    value={titleDraft}
-                    maxlength={120}
-                    disabled={busy(state)}
-                    placeholder="新对话"
-                    onInput={(event) =>
-                        scheduleTitleSave(
-                            (event.currentTarget as HTMLInputElement).value,
-                        )}
-                />
-                <small class="chat-settings-meta">
-                    <span
-                        class={`chat-save-dot dot-${saveState}`}
-                        aria-hidden="true"
-                    />
-                    {statusLabel}
-                    <em>{titleDraft.length} / 120</em>
-                    {saveState === "error" && (
-                        <button
-                            type="button"
-                            class="chat-small-button"
-                            onClick={() => scheduleTitleSave(titleDraft)}
-                        >
-                            重试
-                        </button>
-                    )}
-                </small>
-            </label>
-            <label class="chat-settings-field">
-                <span>模型</span>
-                <select
-                    value={state.model}
-                    disabled={busy(state) || !state.models.length}
-                    onChange={(event) =>
-                        controller.setModel(
-                            (event.currentTarget as HTMLSelectElement).value,
-                        )}
-                >
-                    {!state.models.length && (
-                        <option value="">暂无可用模型</option>
-                    )}
-                    {state.models.map((model) => (
-                        <option key={model} value={model}>{model}</option>
-                    ))}
-                </select>
-                <small class="chat-settings-meta">
-                    按会话记忆，刷新后仍保留。
-                </small>
-            </label>
-            <div
-                class="chat-settings-field"
-                role="radiogroup"
-                aria-label="思考等级"
-            >
-                <span>思考等级</span>
-                <div class="chat-effort-switch">
-                    {EFFORT_OPTIONS.map((option) => (
-                        <button
-                            key={option.value}
-                            type="button"
-                            role="radio"
-                            aria-checked={effortDraft === option.value
-                                ? "true"
-                                : "false"}
-                            class={`chat-effort-option${
-                                effortDraft === option.value ? " active" : ""
-                            }`}
-                            disabled={busy(state)}
-                            title={option.hint}
-                            onClick={() => scheduleEffortSave(option.value)}
-                        >
-                            {option.label}
-                        </button>
-                    ))}
+            <ConversationBranches
+                branches={state.conversation?.branches}
+                disabled={busy(state) || !state.available ||
+                    !state.authenticated}
+                onSelectBranch={onSelectBranch}
+            />
+            {state.tools.length > 0 && (
+                <div class="chat-settings-field">
+                    <span>插件</span>
+                    <div class="chat-plugin-list">
+                        {state.tools.map((tool) => {
+                            const on = !state.conversation?.disabledTools
+                                ?.includes(tool.id);
+                            return (
+                                <button
+                                    key={tool.id}
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={on ? "true" : "false"}
+                                    class="chat-plugin-row"
+                                    disabled={busy(state) || !conversationId}
+                                    onClick={() => toggleTool(tool.id, !on)}
+                                    title={on ? "点击停用" : "点击启用"}
+                                >
+                                    <Icon name="plugin" />
+                                    <span class="chat-plugin-copy">
+                                        <strong>{tool.name}</strong>
+                                        {tool.description && (
+                                            <small>{tool.description}</small>
+                                        )}
+                                    </span>
+                                    <span
+                                        class="chat-plugin-switch"
+                                        data-on={on ? "true" : "false"}
+                                        aria-hidden="true"
+                                    />
+                                </button>
+                            );
+                        })}
+                    </div>
+                    <small class="chat-settings-meta">
+                        按会话记忆，刷新后仍保留。
+                    </small>
                 </div>
-                {settingsMeta(settingsState)}
-            </div>
+            )}
             <label class="chat-settings-field">
                 <span>
                     系统提示词
@@ -285,11 +184,35 @@ function ConversationSettings(
                     maxlength={8000}
                     placeholder="写给这个会话的固定指令，每次对话都会生效…"
                     disabled={busy(state)}
-                    onInput={(event) => schedulePromptSave(
-                        (event.currentTarget as HTMLTextAreaElement).value,
-                    )}
+                    onInput={(event) =>
+                        schedulePromptSave(
+                            (event.currentTarget as HTMLTextAreaElement).value,
+                        )}
                 />
-                {settingsMeta(settingsState)}
+                {settingsState === "error" && (
+                    <small class="chat-settings-meta">
+                        <span class="chat-settings-error">
+                            保存失败
+                            <button
+                                type="button"
+                                class="chat-small-button"
+                                onClick={() => {
+                                    setSettingsState("saving");
+                                    void controller.updateSettings(
+                                        conversationId,
+                                        { systemPrompt: promptDraft },
+                                    ).then((saved) =>
+                                        setSettingsState(
+                                            saved ? "saved" : "error",
+                                        )
+                                    );
+                                }}
+                            >
+                                重试
+                            </button>
+                        </span>
+                    </small>
+                )}
             </label>
         </div>
     );
@@ -308,6 +231,12 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
     const [modelOpen, setModelOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [management, setManagement] = useState<ConversationAction | null>(
+        null,
+    );
+    const [deletingMessage, setDeletingMessage] = useState<string | null>(
+        null,
+    );
+    const [editingMessage, setEditingMessage] = useState<ChatMessage | null>(
         null,
     );
     const [atBottom, setAtBottom] = useState(true);
@@ -361,6 +290,7 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                 event.key.toLowerCase() === "n"
             ) {
                 event.preventDefault();
+                if (document.querySelector("dialog[open]")) return;
                 setHistoryOpen(false);
                 void controller.create();
             }
@@ -521,14 +451,6 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                         >
                             <Icon name="panel-close" />
                         </button>
-                        <a
-                            class="chat-icon-button"
-                            href="/admin"
-                            title="返回管理页面"
-                            aria-label="返回管理页面"
-                        >
-                            <Icon name="back" />
-                        </a>
                     </div>
                 </div>
                 <button
@@ -627,19 +549,46 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                     )}
                 </ul>
                 <div class="chat-sidebar-footer">
-                    <a href="/admin">返回管理页面</a>
                     <button
                         type="button"
-                        class="chat-icon-button"
-                        onClick={() =>
-                            setTheme(theme === "dark" ? "light" : "dark")}
-                        aria-label={`切换为${
-                            theme === "dark" ? "浅色" : "深色"
-                        }主题`}
-                        title="切换主题"
+                        class="chat-small-button chat-export-button"
+                        disabled={busyState ||
+                            !state.conversation ||
+                            !state.messages.length}
+                        onClick={() => {
+                            if (!state.conversation) return;
+                            downloadConversation(
+                                state.conversation,
+                                state.messages,
+                            );
+                        }}
+                        aria-label="导出当前会话为 Markdown"
+                        title="导出当前会话为 Markdown"
                     >
-                        <Icon name={theme === "dark" ? "sun" : "moon"} />
+                        <Icon name="download" />导出会话
                     </button>
+                    <div class="chat-sidebar-footer-actions">
+                        <a
+                            class="chat-icon-button"
+                            href="/admin"
+                            title="返回管理页面"
+                            aria-label="返回管理页面"
+                        >
+                            <Icon name="back" />
+                        </a>
+                        <button
+                            type="button"
+                            class="chat-icon-button"
+                            onClick={() =>
+                                setTheme(theme === "dark" ? "light" : "dark")}
+                            aria-label={`切换为${
+                                theme === "dark" ? "浅色" : "深色"
+                            }主题`}
+                            title="切换主题"
+                        >
+                            <Icon name={theme === "dark" ? "sun" : "moon"} />
+                        </button>
+                    </div>
                 </div>
             </aside>
             <button
@@ -710,6 +659,7 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                                 title={state.model || "选择模型"}
                                 onClick={() => setModelOpen(!modelOpen)}
                             >
+                                <Icon name="cpu" />
                                 <span class="chat-model-label">
                                     {state.model || "暂无可用模型"}
                                 </span>
@@ -783,6 +733,14 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                         controller={controller}
                         open={settingsOpen}
                         onDismiss={() => setSettingsOpen(false)}
+                        onSelectBranch={(messageId) => {
+                            followEnd.current = true;
+                            void controller.switchBranch(messageId).then(
+                                (saved) => {
+                                    if (saved) setSettingsOpen(false);
+                                },
+                            );
+                        }}
                     />
                 </header>
                 <div
@@ -807,7 +765,27 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                             controller.setDraft(text);
                             document.getElementById("chat-draft")?.focus();
                         }}
-                        onRetry={() => void controller.regenerate()}
+                        onRetry={(messageId) => {
+                            followEnd.current = true;
+                            void controller.regenerate(messageId);
+                        }}
+                        onContinue={(messageId) => {
+                            followEnd.current = true;
+                            void controller.continueMessage(messageId);
+                        }}
+                        onEditMessage={setEditingMessage}
+                        onForkMessage={(messageId) =>
+                            void controller.forkMessage(messageId)}
+                        onSwitchBranch={(messageId) => {
+                            followEnd.current = false;
+                            void controller.switchBranch(messageId);
+                        }}
+                        onReference={(attachment) => {
+                            controller.addReference(attachment);
+                            document.getElementById("chat-draft")?.focus();
+                        }}
+                        onDeleteMessage={(messageId) =>
+                            setDeletingMessage(messageId)}
                     />
                 </div>
                 {state.error && (
@@ -844,6 +822,30 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                         ? "正在创建会话"
                         : "已就绪"}
                 </p>
+                {state.suggestions.length > 0 && !state.sending && (
+                    <div class="chat-suggestions" aria-label="推荐问题">
+                        {state.suggestions.map((text) => (
+                            <button
+                                key={text}
+                                type="button"
+                                class="chat-suggestion"
+                                title={text}
+                                onClick={() => {
+                                    controller.setDraft(text);
+                                    document.getElementById("chat-draft")
+                                        ?.focus();
+                                }}
+                            >
+                                <Icon
+                                    name="chat"
+                                    size={14}
+                                    class="chat-suggestion-icon"
+                                />
+                                <span>{text}</span>
+                            </button>
+                        ))}
+                    </div>
+                )}
                 <ChatComposer state={state} controller={controller} />
             </section>
             {management && (
@@ -857,6 +859,34 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                             ? controller.rename(management.id, title)
                             : controller.remove(management.id)}
                     onDismiss={() => setManagement(null)}
+                />
+            )}
+            {deletingMessage && (
+                <MessageDeleteDialog
+                    key={deletingMessage}
+                    pending={state.managing || state.loading}
+                    error={state.error}
+                    onSubmit={() => {
+                        if (!state.selectedId) return Promise.resolve(false);
+                        return controller.removeMessage(
+                            state.selectedId,
+                            deletingMessage,
+                        );
+                    }}
+                    onDismiss={() => setDeletingMessage(null)}
+                />
+            )}
+            {editingMessage && (
+                <MessageEditor
+                    key={editingMessage.id}
+                    message={editingMessage}
+                    pending={busyState}
+                    error={state.error}
+                    onSubmit={(text) => {
+                        followEnd.current = true;
+                        return controller.editMessage(editingMessage.id, text);
+                    }}
+                    onDismiss={() => setEditingMessage(null)}
                 />
             )}
         </div>

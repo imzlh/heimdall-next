@@ -2,13 +2,12 @@
 import { DatabaseSync } from "node:sqlite";
 
 const db = new DatabaseSync("data-preview/requests.sqlite3");
-const pad = (n: number) => String(n).padStart(2, "0");
 const models = [
     ["gpt-5.2", "generation.create", "heimdall.protocol.openai"],
     ["gpt-5-mini", "generation.create", "heimdall.protocol.openai"],
     ["claude-sonnet-4-5", "generation.create", "heimdall.protocol.anthropic"],
     ["text-embedding-3-small", "embedding.create", "heimdall.protocol.openai"],
-];
+] as const;
 const perDay = [8, 5, 6, 4, 3, 5, 4];
 let seed = 42;
 const rand = () => {
@@ -26,20 +25,16 @@ const putUsage = db.prepare(
         request_id, input_tokens, output_tokens, total_tokens, updated_at
      ) VALUES (?, ?, ?, ?, ?)`,
 );
-for (let day = 0; day < 7; day++) {
+for (const [day, count] of perDay.entries()) {
     const base = new Date();
     base.setDate(base.getDate() - day);
-    for (let i = 0; i < perDay[day]; i++) {
+    for (let i = 0; i < count; i++) {
         const [model, operation, protocol] = models[
             Math.floor(rand() * models.length)
-        ];
+        ]!;
         const at = new Date(base);
         at.setHours(8 + Math.floor(rand() * 12), Math.floor(rand() * 60));
-        const receivedAt = `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${
-            pad(at.getDate())
-        }T${pad(at.getHours())}:${pad(at.getMinutes())}:${
-            pad(at.getSeconds())
-        }.000Z`;
+        const receivedAt = at.toISOString();
         const id = crypto.randomUUID();
         insert.run(
             id,

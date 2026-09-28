@@ -3,6 +3,7 @@ import {
     AdminApiError,
     configureAdminTransport,
     deleteSource,
+    probeSourceDraft,
     updateSource,
 } from "@heimdall/core/web/client/api/admin.ts";
 
@@ -155,4 +156,31 @@ Deno.test("source update and deletion retain API conflict diagnostics", async ()
             },
         );
     }
+});
+
+Deno.test("draft probe API sends the unsaved preset and proxy choice with request cancellation", async () => {
+    const probe = {
+        ok: true,
+        message: "连接正常",
+        checkedAt: "2026-09-28T00:00:00.000Z",
+        models: ["model-a"],
+    };
+    await withTransport(() => Response.json({ probe }), async (requests) => {
+        const controller = new AbortController();
+        const input = {
+            id: "e3ea7f49-9726-41a4-97c2-c6f00f51bb75",
+            name: "主渠道",
+            priority: 4,
+            sourcePluginId: "heimdall.source.openai-compatible",
+            presetId: "heimdall.preset.newapi",
+            proxy: { mode: "direct" as const },
+            config: { apiKey: "draft-secret" },
+        };
+        assertEquals(await probeSourceDraft(input, controller.signal), probe);
+        assertEquals(requests.length, 1);
+        assertEquals(requests[0]?.input, "/api/admin/source-draft-probe");
+        assertEquals(requests[0]?.init?.method, "POST");
+        assertEquals(requests[0]?.init?.signal, controller.signal);
+        assertEquals(JSON.parse(String(requests[0]?.init?.body)), input);
+    });
 });

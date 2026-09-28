@@ -32,6 +32,8 @@ export interface SourceConfigPanelProps {
     presetSchemas?: Readonly<Record<string, SourceConfigSchema>>;
     presets: ListedPreset[];
     presetId?: string;
+    /** Display name for the dialog header; falls back to the id. */
+    title?: string;
     onClose: () => void;
     onSaved: () => Promise<void>;
 }

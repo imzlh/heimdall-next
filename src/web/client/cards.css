@@ -163,6 +163,55 @@
     opacity: .6;
     cursor: wait;
 }
+/* Shared switch control (islands): the checkbox replacement. Track and knob
+   mirror source-state-toggle so every boolean control reads the same. */
+.switch-control {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 26px;
+    padding: 2px;
+    border: 0;
+    border-radius: 8px;
+    color: var(--muted);
+    background: transparent;
+    font-size: 11.5px;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color var(--motion-fast) ease;
+}
+.switch-control:hover:not(:disabled) {
+    color: var(--text);
+}
+.switch-track {
+    display: inline-flex;
+    flex: none;
+    width: 28px;
+    height: 17px;
+    padding: 3px;
+    border-radius: 999px;
+    background: var(--border-strong);
+    transition: background var(--motion-fast) ease;
+}
+.switch-track::before {
+    content: "";
+    width: 11px;
+    height: 11px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgb(0 0 0 / 15%);
+    transition: transform var(--motion-fast) var(--motion-ease);
+}
+.switch-control[aria-checked="true"] .switch-track {
+    background: var(--accent);
+}
+.switch-control[aria-checked="true"] .switch-track::before {
+    transform: translateX(11px);
+}
+.switch-control:disabled {
+    opacity: .6;
+    cursor: wait;
+}
 .source-management-id {
     padding: 10px 12px;
     border-radius: 10px;
@@ -552,6 +601,11 @@
 .source-status-slot[open] > summary > .icon {
     transform: rotate(180deg);
 }
+/* 常显模式（信息不折叠）：细线分隔卡片元信息与插件信息。 */
+.source-card > .source-status-content.is-open {
+    padding: 10px 0 0;
+    border-top: 1px solid var(--border);
+}
 .activity-panel .request-table {
     table-layout: fixed;
 }
@@ -753,24 +807,36 @@
     min-height: 96px;
     max-height: 480px;
 }
+/* 插件渠道信息（source.status）：无折叠的内联信息条，指标突出、徽章着色。 */
 .plugin-slots-source-status {
     gap: 10px;
 }
 .plugin-slots-source-status .plugin-slot {
-    max-height: 160px;
-    padding: 12px 0 0;
+    padding: 0;
     border-radius: 0;
-    border-top: 1px solid var(--border);
     background: transparent;
+    overflow: visible;
 }
 .plugin-slots-source-status .slot-heading {
-    margin-bottom: 8px;
+    align-items: baseline;
+    justify-content: flex-start;
+    gap: 4px 10px;
+    margin-bottom: 6px;
 }
 .plugin-slots-source-status .slot-heading h3 {
     font-size: 12px;
+    font-weight: 600;
 }
 .plugin-slots-source-status .slot-attribution {
-    font-size: 9px;
+    font-size: 10px;
+}
+.plugin-slots-source-status .slot-content {
+    align-items: center;
+    gap: 8px 16px;
+}
+.plugin-slots-source-status .slot-metrics {
+    flex: 0 1 auto;
+    min-width: 0;
 }
 .plugin-slots-source-status .slot-metric {
     display: flex;
@@ -779,23 +845,47 @@
     padding: 0;
     background: transparent;
 }
+.plugin-slots-source-status .slot-metric dt {
+    font-size: 11px;
+    color: var(--subtle);
+}
 .plugin-slots-source-status .slot-metric dd {
     margin: 0;
-    font-size: 13px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
 }
-.plugin-slots-source-status .slot-metrics {
-    flex: 0 1 auto;
-    min-width: 0;
+.plugin-slots-source-status .slot-metric dd small {
+    margin-left: 3px;
+    font-size: 10px;
+    font-weight: 400;
+    color: var(--subtle);
 }
-.plugin-slots-source-status .slot-content {
-    gap: 8px 18px;
-}
-.plugin-slots-source-status .slot-description,
 .plugin-slots-source-status .slot-text {
+    flex-basis: auto;
     font-size: 11px;
+    color: var(--subtle);
 }
 .plugin-slots-source-status .slot-description {
     margin-bottom: 8px;
+}
+.slot-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 550;
+}
+.slot-badge::before {
+    content: "";
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: currentColor;
+    opacity: .85;
 }
 .plugin-slots-settings-section {
     max-width: 820px;
@@ -1000,6 +1090,17 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 10px;
+    margin-bottom: 10px;
+}
+/* v1 把计数做成工具栏下的一行弱化文字，表格卡片因此有了自己的呼吸空间。 */
+.channels-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 14px;
+    color: var(--subtle);
+    font-size: 12.5px;
 }
 .channels-search {
     position: relative;
@@ -1033,7 +1134,10 @@
 }
 .channels-table th,
 .channels-table td {
-    padding: 12px 14px;
+    padding: 10px 12px;
+}
+.channels-table th {
+    white-space: nowrap;
 }
 .channels-table .channel-sort {
     display: inline-flex;
@@ -1046,8 +1150,14 @@
     font: inherit;
     cursor: pointer;
 }
+/* Inactive sort affordances stay invisible until the header is hovered. */
 .channels-table .channel-sort-arrow {
     font-size: 11px;
+    opacity: 0;
+    transition: opacity 120ms ease;
+}
+.channels-table .channel-sort:hover .channel-sort-arrow,
+.channels-table .channel-sort:focus-visible .channel-sort-arrow {
     opacity: .5;
 }
 .channels-table .channel-sort.is-active {
@@ -1068,26 +1178,23 @@
 .channels-row.row-tone-amber td:first-child {
     border-left-color: var(--warning);
 }
-.channels-row.row-tone-muted td:first-child {
-    border-left-color: var(--border-strong);
-}
 .channels-name strong {
     display: block;
+    min-width: 0;
+    flex: 0 1 auto;
     font-weight: 550;
     color: var(--text);
-    max-width: 280px;
+    max-width: 320px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 .channels-name code {
     display: block;
-    margin-top: 2px;
+    margin-top: 1px;
     color: var(--subtle);
     font-size: 11px;
-    max-width: 280px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    letter-spacing: .01em;
 }
 .channels-priority {
     white-space: nowrap;
@@ -1095,7 +1202,7 @@
 }
 .channels-state small {
     display: block;
-    margin-top: 3px;
+    margin-top: 2px;
     color: var(--subtle);
     font-size: 11px;
     max-width: 300px;
@@ -1123,6 +1230,66 @@
 }
 .channel-row-actions .icon-button:hover:not(:disabled) {
     color: var(--accent);
+}
+/* 名称列：主名 + 优先级小徽标同行，腾出的列宽让给插件信息。 */
+.channels-name-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+.channel-priority-tag {
+    flex-shrink: 0;
+    padding: 1px 7px;
+    border-radius: 999px;
+    background: var(--surface-muted);
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .02em;
+}
+/* 插件信息列：source.status 贡献常驻显示，不折叠。 */
+.channel-plugin-col {
+    min-width: 240px;
+    width: 26%;
+}
+.channel-plugin-col .plugin-slot {
+    overflow-wrap: anywhere;
+}
+.channel-plugin-empty {
+    color: var(--subtle);
+    font-size: 12px;
+}
+/* 添加渠道旁的列表/卡片切换：与主按钮一致的全圆角胶囊。 */
+.view-toggle {
+    display: inline-flex;
+    padding: 3px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--surface);
+    gap: 2px;
+}
+.view-toggle button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 30px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--subtle);
+    cursor: pointer;
+    transition: background var(--motion-fast) ease,
+        color var(--motion-fast) ease;
+}
+.view-toggle button:hover {
+    color: var(--text);
+}
+.view-toggle button.is-active {
+    background: var(--surface-muted);
+    color: var(--text);
 }
 @media (max-width: 600px) {
     .channels-toolbar select {
@@ -1272,6 +1439,47 @@
     font-size: 24px;
     font-weight: 650;
     font-variant-numeric: tabular-nums;
+}
+.trend-head-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+}
+.trend-modes {
+    display: inline-flex;
+    gap: 2px;
+    padding: 3px;
+    background: var(--surface-raised);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+}
+.trend-mode {
+    border: 0;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: 12px;
+    line-height: 1;
+    padding: 6px 12px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition:
+        color var(--motion-enter) var(--motion-ease),
+        background var(--motion-enter) var(--motion-ease);
+}
+.trend-mode:hover:not(:disabled) {
+    color: var(--text);
+}
+.trend-mode.is-active {
+    background: var(--surface);
+    color: var(--text);
+    font-weight: 600;
+    box-shadow: var(--shadow);
+}
+.trend-mode:disabled {
+    opacity: .55;
+    cursor: default;
 }
 .trend-chart-wrap {
     position: relative;
@@ -1447,4 +1655,40 @@
 }
 .trend-dot-output {
     stroke: var(--success);
+}
+
+/* Overview statistics block: one airy column, chips → cards → panels. */
+.overview-statistics {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    min-width: 0;
+}
+.overview-statistics .stats-grid {
+    gap: 14px;
+}
+.overview-statistics .stat-card > p {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.token-panel .usage-history {
+    margin: 16px 0 0;
+    padding-bottom: 0;
+    border-bottom: 0;
+    border-top: 1px solid var(--border);
+}
+.token-panel .usage-history > summary {
+    color: var(--subtle);
+}
+.token-panel .usage-history[open] {
+    margin-top: 14px;
+}
+
+/* Channels table: compact columns; the name column takes the slack. */
+.channels-table td:nth-child(2) {
+    white-space: nowrap;
+}
+.channels-table .channels-state {
+    max-width: 320px;
 }

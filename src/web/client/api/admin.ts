@@ -17,6 +17,7 @@ export {
     loadSourceConfig,
     loadSourceMetadata,
     previewPreset,
+    probeSourceDraft,
     saveSourceConfig,
     updateSource,
     validateSourceConfig,

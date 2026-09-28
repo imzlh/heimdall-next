@@ -1,153 +1,121 @@
-import {
-    assertEquals,
-    assertNotStrictEquals,
-    assertRejects,
-    assertThrows,
-} from "@std/assert";
+import { assertEquals, assertRejects, assertThrows } from "@std/assert";
 import type { ChatAttachment } from "@heimdall/core/web/client/api/chat.ts";
 import {
     CHAT_ATTACHMENT_ACCEPT,
-    readChatAttachments,
+    uploadChatAttachments,
     validateChatAttachments,
 } from "@heimdall/core/web/client/chat/attachments.ts";
 
-const png: ChatAttachment = { mediaType: "image/png", dataBase64: "AA==" };
+const inline: ChatAttachment = { mediaType: "image/png", dataBase64: "AA==" };
+const asset: ChatAttachment = {
+    assetId: "08ef4d1e-c1c7-4354-a172-e464892a40e8",
+    mediaType: "image/png",
+    size: 8,
+};
+const file = (type = "image/png", size = 8) =>
+    new File([new Uint8Array(size)], "picture.png", { type });
 
-class TrackedFile extends File {
-    reads = 0;
-
-    override arrayBuffer(): Promise<ArrayBuffer> {
-        this.reads++;
-        return super.arrayBuffer();
-    }
-}
-
-Deno.test("chat attachments encode supported images without changing the existing draft", async () => {
-    const existing = Object.freeze([Object.freeze({ ...png })]);
-    const files = [
-        new File([new Uint8Array([255])], "image.jpg", { type: "image/jpeg" }),
-        new File([new Uint8Array([255, 238])], "image.gif", {
-            type: "image/gif",
-        }),
-        new File([new Uint8Array([255, 238, 221])], "image.webp", {
-            type: "image/webp",
-        }),
-    ];
-    const attachments = await readChatAttachments(files, existing);
-    assertEquals(attachments, [
-        png,
-        { mediaType: "image/jpeg", dataBase64: "/w==" },
-        { mediaType: "image/gif", dataBase64: "/+4=" },
-        { mediaType: "image/webp", dataBase64: "/+7d" },
-    ]);
-    assertNotStrictEquals(attachments, existing);
-    assertEquals(existing, [png]);
+Deno.test("chat uploads original files once and keeps only references in a new draft", async () => {
+    const selected = file();
+    const existing = Object.freeze([Object.freeze({ ...asset })]);
+    const uploaded: File[] = [];
+    Object.defineProperty(selected, "arrayBuffer", {
+        value: () => {
+            throw new Error("the browser should not re-encode the file");
+        },
+    });
+    const added = { ...asset, assetId: "e203b792-baae-4cc2-a338-52c069e5a0ed" };
+    const result = await uploadChatAttachments([selected], (value) => {
+        uploaded.push(value);
+        return Promise.resolve(added);
+    }, existing);
+    assertEquals(uploaded, [selected]);
+    assertEquals(result, [asset, added]);
+    assertEquals(existing, [asset]);
     assertEquals(
         CHAT_ATTACHMENT_ACCEPT,
         "image/png,image/jpeg,image/gif,image/webp",
     );
 });
 
-Deno.test("chat attachments encode bytes across chunk boundaries", async () => {
-    const bytes = Uint8Array.from(
-        { length: 65_541 },
-        (_, index) => index % 256,
-    );
-    const [attachment] = await readChatAttachments([
-        new File([bytes], "image.png", { type: "image/png" }),
-    ]);
-    assertEquals(
-        Uint8Array.from(
-            atob(attachment!.dataBase64),
-            (char) => char.charCodeAt(0),
-        ),
-        bytes,
-    );
-});
-
-Deno.test("chat attachments enforce four images across existing and new selections before reading", async () => {
-    validateChatAttachments([png, png, png, png]);
-    assertThrows(() => validateChatAttachments([png, png, png, png, png]));
-    const file = new TrackedFile(["image"], "image.png", { type: "image/png" });
-    await assertRejects(() =>
-        readChatAttachments([file], [png, png, png, png])
-    );
-    assertEquals(file.reads, 0);
-});
-
-Deno.test("chat attachments reject unsupported types before reading any selected file", async () => {
+Deno.test("chat validates the entire selection before uploading any image", async () => {
+    let uploads = 0;
+    const upload = () => {
+        uploads++;
+        return Promise.resolve(asset);
+    };
     for (const type of ["image/svg+xml", "image/bmp", "text/plain", ""]) {
-        const valid = new TrackedFile(["image"], "valid.png", {
-            type: "image/png",
-        });
-        const invalid = new TrackedFile(["image"], "invalid.png", { type });
-        await assertRejects(() => readChatAttachments([valid, invalid]));
-        assertEquals([valid.reads, invalid.reads], [0, 0]);
-        assertThrows(() =>
-            validateChatAttachments([{ mediaType: type, dataBase64: "AA==" }])
+        await assertRejects(() =>
+            uploadChatAttachments([file(), file(type)], upload)
         );
     }
-});
-
-Deno.test("chat attachments accept the exact byte and base64 caps", async () => {
-    const [attachment] = await readChatAttachments([
-        new File([new Uint8Array(1_050_000)], "maximum.png", {
-            type: "image/png",
-        }),
-    ]);
-    assertEquals(attachment!.dataBase64.length, 1_400_000);
-    validateChatAttachments([attachment!]);
-    validateChatAttachments([{
-        ...png,
-        dataBase64: "A".repeat(1_399_998) + "==",
-    }]);
-    assertThrows(() =>
-        validateChatAttachments([{ ...png, dataBase64: "A".repeat(1_400_004) }])
-    );
-});
-
-Deno.test("chat attachments reject empty or oversized files before reading any selected file", async () => {
-    for (const size of [0, 1_050_001]) {
-        const valid = new TrackedFile(["image"], "valid.png", {
-            type: "image/png",
-        });
-        const invalid = new TrackedFile([new Uint8Array(size)], "invalid.png", {
-            type: "image/png",
-        });
-        await assertRejects(() => readChatAttachments([valid, invalid]));
-        assertEquals([valid.reads, invalid.reads], [0, 0]);
+    for (const size of [0, 5 * 1024 * 1024 + 1]) {
+        await assertRejects(() =>
+            uploadChatAttachments([file(), file("image/png", size)], upload)
+        );
     }
+    await assertRejects(() =>
+        uploadChatAttachments([file()], upload, [asset, asset, asset, asset])
+    );
+    assertEquals(uploads, 0);
 });
 
-Deno.test("chat attachment validation matches the server base64 alphabet and padding checks", () => {
-    for (const dataBase64 of ["A", "AA", "AAA", "AH==", "AAB=", " AA==\n"]) {
-        validateChatAttachments([{ ...png, dataBase64 }]);
+Deno.test("chat accepts five MiB uploads without a base64-sized draft", async () => {
+    const selected = file("image/png", 5 * 1024 * 1024);
+    const result = await uploadChatAttachments(
+        [selected],
+        (value) => Promise.resolve({ ...asset, size: value.size }),
+    );
+    assertEquals(result, [{ ...asset, size: 5 * 1024 * 1024 }]);
+    assertEquals(result[0]?.dataBase64, undefined);
+});
+
+Deno.test("chat failed uploads preserve existing references and reject inline upload responses", async () => {
+    const existing = Object.freeze([Object.freeze({ ...asset })]);
+    await assertRejects(() =>
+        uploadChatAttachments(
+            [file()],
+            () => Promise.reject(new Error("offline")),
+            existing,
+        )
+    );
+    await assertRejects(() =>
+        uploadChatAttachments([file()], () => Promise.resolve(inline), existing)
+    );
+    assertEquals(existing, [asset]);
+});
+
+Deno.test("chat validates asset IDs and still permits bounded legacy inline attachments", () => {
+    validateChatAttachments([asset, inline]);
+    for (
+        const assetId of [
+            "",
+            "../secret",
+            "https://other/image",
+            "a".repeat(129),
+        ]
+    ) {
+        assertThrows(() => validateChatAttachments([{ ...asset, assetId }]));
     }
     for (
         const dataBase64 of [
             "",
             " ",
             "====",
-            "A===",
-            "=AAA",
             "AA=A",
-            "AA==\nAA",
             "AA-_",
             "data:image/png;base64,AA==",
+            "A".repeat(1_400_004),
         ]
     ) {
-        assertThrows(() => validateChatAttachments([{ ...png, dataBase64 }]));
+        assertThrows(() =>
+            validateChatAttachments([{ mediaType: "image/png", dataBase64 }])
+        );
     }
-});
-
-Deno.test("chat attachments validate existing data before reading and preserve it after failure", async () => {
-    const invalid = Object.freeze({ ...png, dataBase64: "invalid!" });
-    const existing = Object.freeze([invalid]);
-    const file = new TrackedFile(["image"], "image.png", { type: "image/png" });
-    await assertRejects(() => readChatAttachments([file], existing));
-    assertEquals(file.reads, 0);
-    assertEquals(existing, [{
-        mediaType: "image/png",
-        dataBase64: "invalid!",
-    }]);
+    assertThrows(() =>
+        validateChatAttachments([{ ...asset, mediaType: "image/svg+xml" }])
+    );
+    assertThrows(() =>
+        validateChatAttachments([asset, asset, asset, asset, asset])
+    );
 });

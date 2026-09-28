@@ -1,4 +1,6 @@
 import { openSqliteChatStore } from "../storage/sqlite-chat.ts";
+import { openSqliteChatAssetStore } from "../storage/sqlite-assets.ts";
+import { ChatAssetService } from "../chat/assets.ts";
 import { openSqliteRequestStore } from "../storage/sqlite-requests.ts";
 import { DenoKvConfigStore } from "../storage/deno-kv.ts";
 import { loadBuiltinComposition } from "./builtins.ts";
@@ -16,6 +18,7 @@ import {
     readServerEnvironment,
     type ServerEnvironment,
 } from "./runtime-env.ts";
+import { log, systemLog } from "../observability/system-log.ts";
 
 export interface ServeOptions {
     readonly environment?: ServerEnvironment;
@@ -28,6 +31,8 @@ export interface ServeOptions {
 /** Own durable resources, background work, and the HTTP server for one run. */
 export async function serve(options: ServeOptions = {}): Promise<void> {
     const environment = options.environment ?? readServerEnvironment();
+    // Scrub the admin token from any event text before it reaches the buffer.
+    systemLog.addSecret(environment.adminAuthToken);
     // Register each resource immediately so partial startup also unwinds.
     await using resources = new AsyncDisposableStack();
     const kv = await Deno.openKv(environment.kvPath);
@@ -36,6 +41,21 @@ export async function serve(options: ServeOptions = {}): Promise<void> {
     resources.defer(() => requests.close());
     const chat = openSqliteChatStore(environment.chatPath);
     resources.defer(() => chat.close());
+    const assetStore = openSqliteChatAssetStore(
+        environment.chatAssetsPath ?? `${environment.chatPath}.assets.sqlite`,
+    );
+    resources.defer(() => assetStore.close());
+    const chatAssets = new ChatAssetService(assetStore, {
+        publicBaseUrl: environment.publicBaseUrl,
+    });
+    await chatAssets.migrateHistory(chat);
+    chatAssets.sweep(chat);
+    if (chatAssets.quarantinedAttachments > 0) {
+        log.warn(
+            "chat-assets",
+            `已隔离 ${chatAssets.quarantinedAttachments} 条损坏的旧版图片附件；原始数据保存在 Chat 数据库的 legacy_attachment_quarantine 表。`,
+        );
+    }
 
     const runtimeSettings = createRuntimeSettings(environment.runtimeSettings);
     const builtins = await loadBuiltinComposition({
@@ -56,6 +76,7 @@ export async function serve(options: ServeOptions = {}): Promise<void> {
         middleware: builtins.middleware,
         lifecycle: createRequestLifecycle(requests),
         requestJournal: requests,
+        systemLog,
         statsTimeZone: environment.timeZone,
         adminCatalog: builtins.catalog,
         adminManagement: builtins.management,
@@ -68,19 +89,33 @@ export async function serve(options: ServeOptions = {}): Promise<void> {
         adminPresetPages: () => loadPresetPages(adminUiPolicy),
         adminUiActions: options.adminUiActions,
         gateway: { settings: () => runtimeSettings.get() },
+        accessLog: environment.httpLog,
         chat: {
             store: chat,
+            assets: chatAssets,
             tools: builtins.toolPlugins,
+            titleModel: () => runtimeSettings.get().titleModel || undefined,
         },
     });
     const server = Deno.serve({
         hostname: environment.hostname,
         port: environment.port,
         signal: options.signal,
-        onListen: options.onListen,
-    }, app.fetch);
+        onListen: (address) => {
+            log.info(
+                "startup",
+                `网关已启动，监听 ${address.hostname}:${address.port}`,
+            );
+            options.onListen?.(address);
+        },
+    }, (request, info) => app.fetch(request, info));
     let shutdownPromise: Promise<void> | undefined;
-    const shutdown = () => shutdownPromise ??= server.shutdown();
+    const shutdown = () => {
+        if (shutdownPromise === undefined) {
+            log.info("shutdown", "收到停止信号，正在关闭网关。");
+        }
+        return shutdownPromise ??= server.shutdown();
+    };
     resources.defer(shutdown);
     resources.use(listenForShutdown(shutdown));
     resources.use(startBackgroundTasks(
@@ -88,6 +123,7 @@ export async function serve(options: ServeOptions = {}): Promise<void> {
         runtimeSettings,
         requests,
         environment.retentionDays,
+        log,
     ));
 
     await server.finished;

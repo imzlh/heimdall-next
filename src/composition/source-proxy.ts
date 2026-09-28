@@ -60,7 +60,8 @@ export class SourceProxyBindings {
                     ...options,
                     // A getter keeps both pool edits and per-source edits live,
                     // without discarding plugin-owned sessions or hot contexts.
-                    getProxy: () => this.pool.resolve(this.#selections.get(id)),
+                    getProxy: options?.getProxy ??
+                        (() => this.pool.resolve(this.#selections.get(id))),
                 });
                 id = source.id;
                 return source;

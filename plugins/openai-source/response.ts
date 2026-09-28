@@ -198,7 +198,7 @@ function appendStringPart(
 }
 
 export function parseUsage(value: WireObject): Usage {
-    const inputTokens = integer(value.input_tokens ?? value.prompt_tokens);
+    const promptTokens = integer(value.input_tokens ?? value.prompt_tokens);
     const outputTokens = integer(
         value.output_tokens ?? value.completion_tokens,
     );
@@ -209,11 +209,17 @@ export function parseUsage(value: WireObject): Usage {
     const outputDetails = isRecord(value.output_tokens_details)
         ? value.output_tokens_details
         : undefined;
+    const cachedInputTokens = integer(inputDetails?.cached_tokens);
+    // OpenAI's prompt_tokens is inclusive of cache reads; HIP's inputTokens
+    // excludes them (surfaced separately in cachedInputTokens).
+    const inputTokens = promptTokens === undefined
+        ? undefined
+        : Math.max(0, promptTokens - (cachedInputTokens ?? 0));
     return compact({
         inputTokens,
         outputTokens,
         totalTokens,
-        cachedInputTokens: integer(inputDetails?.cached_tokens),
+        cachedInputTokens,
         reasoningTokens: integer(outputDetails?.reasoning_tokens),
     });
 }
