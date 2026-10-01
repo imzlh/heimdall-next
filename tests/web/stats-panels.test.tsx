@@ -290,7 +290,9 @@ Deno.test("statistics island switches trend modes and keeps each window cached",
         return Promise.resolve(Response.json(body));
     });
     try {
-        await dom.act(() => render(<App />, dom.root as unknown as HTMLElement));
+        await dom.act(() =>
+            render(<App />, dom.root as unknown as HTMLElement)
+        );
         await dom.act();
         // The island boot has no SSR snapshot: day mode fetches the weekly series.
         assertEquals(requests, [

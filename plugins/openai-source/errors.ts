@@ -79,7 +79,7 @@ export async function responseError(
     return {
         code: providerCode ?? `upstream_http_${response.status}`,
         message,
-        providerCode,
+        ...(providerCode === undefined ? {} : { providerCode }),
         status: response.status,
         retryable: isRetryableStatus(response.status),
         ...(error === undefined ? {} : { details: safeJson(error) }),

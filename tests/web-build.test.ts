@@ -82,6 +82,10 @@ Deno.test("browser builds include console, chat and loadable preset modules", as
         entries["public/assets/plugins/chathub-setup.js"],
         "plugins/chathub-preset/ui.tsx",
     );
+    assertEquals(
+        entries["public/assets/plugins/chathub-account.js"],
+        "plugins/chathub-source/ui.tsx",
+    );
     for (const command of built) {
         assertEquals(command[0], "bundle");
         assert(command.includes("--node-modules-dir=none"));
@@ -142,6 +146,57 @@ Deno.test("browser build planning refuses colliding preset output files", async 
             () => commands(root),
             Error,
             "Duplicate browser output plugins/shared",
+        );
+    });
+});
+
+Deno.test("browser build planning discovers source UI modules and rejects unsafe or colliding outputs", async () => {
+    await withBuildRoot(async (root) => {
+        const plugin = await writeManifest(
+            root,
+            "account",
+            "/admin/assets/plugins/ignored.js",
+            "source",
+        );
+        const writeUi = (modulePath: string) =>
+            Deno.writeTextFile(
+                new URL("manifest.json", plugin),
+                JSON.stringify({
+                    id: "example.source",
+                    kind: "source",
+                    ui: [
+                        { render: { kind: "trusted", modulePath } },
+                        { render: { kind: "trusted", modulePath } },
+                        {
+                            render: {
+                                kind: "sandbox",
+                                documentPath:
+                                    "/admin/assets/plugins/account.html",
+                            },
+                        },
+                    ],
+                }),
+            );
+        await writeUi("/admin/assets/plugins/account.js");
+        const built = await commands(root);
+        assertEquals(built.length, 3);
+        assertEquals(
+            built.find((command) =>
+                output(command) === "public/assets/plugins/account.js"
+            )?.at(-1),
+            "plugins/account/ui.tsx",
+        );
+        await writeManifest(root, "preset", "/admin/assets/plugins/account.js");
+        await assertRejects(
+            () => commands(root),
+            Error,
+            "Duplicate browser output plugins/account",
+        );
+        await writeUi("/admin/assets/plugins/../console.js");
+        await assertRejects(
+            () => commands(root),
+            Error,
+            "Invalid UI module build output",
         );
     });
 });

@@ -80,14 +80,13 @@ export class ChatAssetService {
         mediaType: string,
         name?: string,
     ): Promise<PresentedAttachment> {
-        return await this.#storeImage(bytes, mediaType, name, true);
+        return await this.#storeImage(bytes, mediaType, name);
     }
 
     async #storeImage(
         bytes: Uint8Array,
         mediaType: string,
         name?: string,
-        reserve = false,
     ): Promise<PresentedAttachment> {
         assertMediaType(mediaType);
         if (!bytes.length || bytes.length > CHAT_ASSET_MAX_BYTES) {
@@ -109,9 +108,13 @@ export class ChatAssetService {
             return code >= 32 && code !== 127;
         }).join("").replaceAll("\\", "/")
             .split("/").pop()?.trim().slice(0, 240);
-        const lease = reserve
-            ? { id: crypto.randomUUID(), expiresAt: this.#leaseExpiry() }
-            : undefined;
+        // Every write precedes a possible async history update, including legacy
+        // inline conversion. Persist its lease and reclaim candidate with the
+        // bytes so failure or shutdown cannot strand an untracked orphan.
+        const lease = {
+            id: crypto.randomUUID(),
+            expiresAt: this.#leaseExpiry(),
+        };
         const asset = this.store.put(
             {
                 id: crypto.randomUUID(),
@@ -126,7 +129,7 @@ export class ChatAssetService {
         );
         return {
             ...presentAsset(asset),
-            ...(lease ? { leaseId: lease.id } : {}),
+            leaseId: lease.id,
         };
     }
 
@@ -233,6 +236,9 @@ export class ChatAssetService {
                     bytes,
                     attachment.mediaType,
                 );
+                // The internal conversion lease is never part of stored or
+                // presented history. It expires after the same bounded grace
+                // period as an abandoned draft; sweep then checks durable refs.
                 result.push({
                     assetId: asset.assetId,
                     mediaType: asset.mediaType,
@@ -305,11 +311,16 @@ export class ChatAssetService {
         candidates: readonly string[],
         chat: ChatAssetReferences,
     ): number {
+        this.queueReclaim(candidates);
+        return this.sweep(chat);
+    }
+
+    /** Persist candidates before deleting history so a crash cannot lose the cleanup work. */
+    queueReclaim(candidates: readonly string[]): void {
         const unique = [...new Set(candidates)].filter((id) =>
             CHAT_ASSET_ID.test(id)
         );
         this.store.markForReclaim(unique, this.#now().toISOString());
-        return this.sweep(chat);
     }
 
     /** Bounded opportunistic cleanup; no scheduler or scan of unrelated assets. */

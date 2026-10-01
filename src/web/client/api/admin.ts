@@ -12,6 +12,7 @@ export {
 export { loadDashboard } from "./dashboard.ts";
 export {
     applyPreset,
+    clearSourceCooldown,
     createSource,
     deleteSource,
     loadSourceConfig,

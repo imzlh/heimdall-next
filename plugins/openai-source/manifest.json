@@ -34,20 +34,32 @@
                     {
                         "kind": "badge",
                         "label": "状态未知",
-                        "labelFrom": ["source", "state"],
-                        "toneFrom": ["source", "stateTone"]
+                        "labelFrom": [
+                            "source",
+                            "state"
+                        ],
+                        "toneFrom": [
+                            "source",
+                            "stateTone"
+                        ]
                     },
                     {
                         "kind": "metric",
                         "label": "已发布模型",
                         "value": "—",
-                        "valueFrom": ["source", "modelCount"],
+                        "valueFrom": [
+                            "source",
+                            "modelCount"
+                        ],
                         "unit": "个"
                     },
                     {
                         "kind": "text",
                         "text": "尚无探测结果",
-                        "textFrom": ["source", "probeStatus"]
+                        "textFrom": [
+                            "source",
+                            "probeStatus"
+                        ]
                     }
                 ]
             }
@@ -116,14 +128,6 @@
                                 "label": "图像生成与编辑"
                             }
                         ]
-                    },
-                    {
-                        "type": "string",
-                        "name": "modelMap",
-                        "label": "模型映射",
-                        "format": "string-map",
-                        "default": "{}",
-                        "help": "填写 JSON 对象，例如 {\"对外模型名\":\"上游模型名\"}。"
                     },
                     {
                         "type": "string",

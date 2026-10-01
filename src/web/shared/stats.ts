@@ -142,7 +142,9 @@ export function readStatsTrend(value: unknown): StatsTrendDto {
     if (typeof source.fallback !== "boolean") {
         throw new TypeError("趋势回退标记无效。");
     }
-    if (!Array.isArray(source.series)) throw new TypeError("用量趋势格式无效。");
+    if (!Array.isArray(source.series)) {
+        throw new TypeError("用量趋势格式无效。");
+    }
     let previous = "";
     const series = source.series.map((value) => {
         const point = record(value);

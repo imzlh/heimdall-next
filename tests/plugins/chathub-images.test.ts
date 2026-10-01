@@ -400,7 +400,107 @@ Deno.test("ChatHub surfaces reasoning, search activity and citations as parts", 
     assert(!answer.includes("先查一下"), "reasoning leaked into the answer");
 });
 
-Deno.test("ChatHub surfaces the account quota on the usage event", async () => {
+Deno.test("ChatHub resumes a truncated turn via AttachToSession without re-streaming delivered text", async () => {
+    // A long/reasoning turn is truncated by Copilot before the type:3
+    // Completion: the first socket streams a partial snapshot then drops; the
+    // client must re-attach and finish the same turn, streaming only the tail.
+    let sockets = 0;
+    class ResumingSocket extends EventTarget implements WebSocketLike {
+        readyState = 0;
+        #sends = 0;
+        readonly #which: number;
+        constructor(which: number) {
+            super();
+            this.#which = which;
+            queueMicrotask(() => {
+                this.readyState = 1;
+                this.dispatchEvent(new Event("open"));
+            });
+        }
+        #emit(data: string): void {
+            queueMicrotask(() => {
+                if (this.readyState !== 1) return;
+                this.dispatchEvent(new MessageEvent("message", { data }));
+            });
+        }
+        send(): void {
+            if (++this.#sends === 1) {
+                this.#emit(encodeRecord({}));
+                return;
+            }
+            if (this.#which === 0) {
+                // First turn: a partial snapshot, then a mid-stream drop with no
+                // Completion. setTimeout lets the partial finish publishing (so
+                // the resume gate sees streamed content) before the close lands.
+                this.#emit(
+                    encodeRecord({
+                        type: 2,
+                        item: {
+                            messages: [{ author: "bot", text: "北京今天" }],
+                        },
+                    }),
+                );
+                setTimeout(() => {
+                    this.readyState = 3;
+                    this.dispatchEvent(
+                        new CloseEvent("close", { code: 1006 }),
+                    );
+                }, 0);
+                return;
+            }
+            // Resumed turn: the full snapshot (a superset of the partial) plus
+            // the Completion. The prefix-monotonic accumulator streams only "晴。".
+            this.#emit(
+                encodeRecord({
+                    type: 2,
+                    item: {
+                        messages: [{ author: "bot", text: "北京今天晴。" }],
+                    },
+                }) + encodeRecord({ type: 3 }),
+            );
+        }
+        close(): void {
+            this.readyState = 3;
+        }
+    }
+    const source = createChatHubSource(config, {
+        webSocketFactory: () => new ResumingSocket(sockets++),
+    });
+    const request: OperationRequest<GenerationRequest> = {
+        version: 1,
+        requestId: "chathub-resume-test",
+        operation: "generation.create",
+        traits: {},
+        payload: {
+            model: "test-model",
+            messages: [{
+                id: "u1",
+                role: "user",
+                parts: [{ id: "t", type: "text", text: "北京天气如何" }],
+            }],
+        },
+    };
+    const events = await run(source, request);
+    assertEquals(events.at(-1)?.kind, "run.completed");
+    assert(sockets >= 2, "expected an AttachToSession resume socket");
+    const answer = events
+        .filter((event) =>
+            event.kind === "part.delta" &&
+            typeof event.delta === "string" &&
+            events.some((started) =>
+                started.kind === "part.started" &&
+                started.part.type === "text" &&
+                started.messageId === event.messageId &&
+                started.part.id === event.partId
+            )
+        )
+        .map((event) => (event as { delta: string }).delta)
+        .join("");
+    // The full answer arrives exactly once — the partial is not double-written.
+    assertEquals(answer, "北京今天晴。");
+});
+
+Deno.test("ChatHub keeps account quota in its own public UI snapshot", async () => {
     class ScriptedSocket extends EventTarget implements WebSocketLike {
         readyState = 0;
         #sends = 0;
@@ -445,6 +545,10 @@ Deno.test("ChatHub surfaces the account quota on the usage event", async () => {
     const source = createChatHubSource(config, {
         webSocketFactory: () => new ScriptedSocket(),
     });
+    assertEquals(
+        (source.uiSnapshot().account as Record<string, unknown>).meters,
+        [],
+    );
     const events = await run(source, {
         version: 1,
         requestId: "chathub-quota-test",
@@ -462,13 +566,19 @@ Deno.test("ChatHub surfaces the account quota on the usage event", async () => {
     assertEquals(events.at(-1)?.kind, "run.completed");
     const usage = events.find((event) => event.kind === "usage");
     assert(usage && usage.kind === "usage", "expected a usage event");
-    const quota = usage.usage.extensions?.quota as {
-        meters: { name: string; remaining?: number; blocked?: boolean }[];
-    };
-    assertEquals(quota.meters, [
+    assertEquals(usage.usage.extensions, { estimated: true });
+    const account = source.uiSnapshot().account as Record<string, unknown>;
+    assertEquals(account.meters, [
         { name: "LLMOnly", remaining: 100 },
         { name: "ImageGeneration", remaining: 0, blocked: true },
     ]);
+    assertEquals(typeof account.updatedAt, "string");
+    assert(!JSON.stringify(source.uiSnapshot()).includes(config.accessToken));
+    (account.meters as unknown[]).length = 0;
+    assertEquals(
+        (source.uiSnapshot().account as { meters: unknown[] }).meters.length,
+        2,
+    );
 });
 
 Deno.test("ChatHub reports a metering soft-reject as an error, not a blank reply", async () => {

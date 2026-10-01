@@ -7,7 +7,6 @@ import type {
 import {
     type OpenAICompatibleSourceConfig,
     upstreamHeaders,
-    upstreamModel,
 } from "./config.ts";
 import {
     invalidUpstreamResponse,
@@ -86,10 +85,20 @@ export async function* executePassthrough(
     const contentType = response.headers.get("content-type")?.toLowerCase() ??
         "";
     if (call.stream && contentType.includes("text/event-stream")) {
-        return yield* completionStream(response, emit, signal);
+        return yield* completionStream(
+            response,
+            emit,
+            signal,
+            publicModel(input),
+        );
     }
     const body = await parseJsonResponse(response);
-    for (const event of passthroughEvents(input.operation, body)) {
+    for (
+        const event of passthroughEvents(
+            input.operation,
+            withPublicModel(body, publicModel(input)),
+        )
+    ) {
         yield emit(event);
     }
     return undefined;
@@ -115,14 +124,14 @@ export function buildUpstreamCall(
         return {
             url,
             headers: multipartHeaders(config),
-            body: imageEditBody(value, config),
+            body: imageEditBody(value, input.traits.model),
             stream: false,
         };
     }
     const model = typeof value.model === "string" ? value.model : undefined;
     const body: WireObject = {
         ...value,
-        model: upstreamModel(config, model),
+        model: input.traits.model ?? model ?? "",
     };
     const stream = input.operation === "completion.create" &&
         value.stream === true;
@@ -167,6 +176,7 @@ async function* completionStream(
     response: Response,
     emit: FrameEmitter,
     signal: AbortSignal,
+    model: string | undefined,
 ): AsyncGenerator<StreamFrame, "cancelled" | undefined> {
     if (response.body === null) {
         throw invalidUpstreamResponse(
@@ -200,7 +210,11 @@ async function* completionStream(
         if (isRecord(item.usage)) {
             yield emit({ kind: "usage", usage: parseUsage(item.usage) });
         }
-        yield emit({ kind: "custom", name: "openai.sse", value: item });
+        yield emit({
+            kind: "custom",
+            name: "openai.sse",
+            value: withPublicModel(item, model) as JsonValue,
+        });
     }
     return undefined;
 }
@@ -226,11 +240,11 @@ function payloadValue(
 
 function imageEditBody(
     value: WireObject,
-    config: OpenAICompatibleSourceConfig,
+    executionModel: string | undefined,
 ): FormData {
     const form = new FormData();
     const model = typeof value.model === "string" ? value.model : "";
-    form.set("model", upstreamModel(config, model));
+    form.set("model", executionModel ?? model);
     if (typeof value.prompt === "string") form.set("prompt", value.prompt);
     if (isRecord(value.fields)) {
         for (const [key, field] of Object.entries(value.fields)) {
@@ -246,6 +260,22 @@ function imageEditBody(
         form.append(file.field, blob(file), file.filename);
     }
     return form;
+}
+
+/** Provider responses use the public request identity, independent of routing. */
+function publicModel(input: OperationRequest): string | undefined {
+    const payload = input.payload;
+    return "value" in payload && isRecord(payload.value) &&
+            typeof payload.value.model === "string"
+        ? payload.value.model
+        : undefined;
+}
+
+function withPublicModel(value: unknown, model: string | undefined): unknown {
+    return model !== undefined && isRecord(value) &&
+            typeof value.model === "string"
+        ? { ...value, model }
+        : value;
 }
 
 function multipartHeaders(config: OpenAICompatibleSourceConfig): Headers {

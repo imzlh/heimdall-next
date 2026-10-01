@@ -2,7 +2,12 @@ import type {
     DashboardData,
     ListedSource,
 } from "@heimdall/admin-contracts/console.ts";
-import type { UiContext, UiTone } from "@heimdall/admin-contracts/ui.ts";
+import {
+    isUiJsonObject,
+    type UiContext,
+    type UiJsonObject,
+    type UiTone,
+} from "@heimdall/admin-contracts/ui.ts";
 import { sourceState } from "./catalog-presentation.ts";
 
 /** Deliberate projection: plugins receive counts, never entire API responses. */
@@ -50,12 +55,14 @@ export function sourceUiContext(
     sourcePluginId: string | undefined = source.sourcePluginId,
 ): UiContext {
     const state = sourceState(source);
+    const plugin = sourcePluginData(source);
     return {
         locale: "zh",
         theme: context.theme,
         ...(source.id ? { sourceId: source.id } : {}),
         ...(sourcePluginId ? { sourcePluginId } : {}),
         data: {
+            ...(plugin === undefined ? {} : { plugin }),
             source: {
                 enabled: source.enabled === true,
                 state: state.label,
@@ -77,4 +84,15 @@ export function sourceUiContext(
             },
         },
     };
+}
+
+function sourcePluginData(source: ListedSource): UiJsonObject | undefined {
+    try {
+        const snapshot = source.ui;
+        if (!isUiJsonObject(snapshot)) return undefined;
+        const copy: unknown = JSON.parse(JSON.stringify(snapshot));
+        return isUiJsonObject(copy) ? copy : undefined;
+    } catch {
+        return undefined;
+    }
 }

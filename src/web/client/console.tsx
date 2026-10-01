@@ -155,7 +155,9 @@ export function Console(
     useEffect(() => {
         const key = activePage === "plugin"
             ? activeTab ?? "plugin"
-            : activePage === "requests" ? "overview" : activePage;
+            : activePage === "requests"
+            ? "overview"
+            : activePage;
         for (const link of document.querySelectorAll("a")) {
             const classes = (link.getAttribute("class") ?? "")
                 .split(/\s+/)
@@ -387,7 +389,9 @@ export function Console(
                         <OverviewPanel
                             dashboard={dashboard}
                             revision={revision}
-                            initialActivity={page === "overview" ? initialPanels : undefined}
+                            initialActivity={page === "overview"
+                                ? initialPanels
+                                : undefined}
                             proxyPool={proxyPool}
                             onRefresh={refresh}
                             widgets={
@@ -403,7 +407,9 @@ export function Console(
                         {!dashboard.authRequired && (
                             <ActivityPanel
                                 revision={revision}
-                                initial={page === "overview" ? initialPanels : undefined}
+                                initial={page === "overview"
+                                    ? initialPanels
+                                    : undefined}
                             />
                         )}
                     </>
@@ -416,7 +422,10 @@ export function Console(
                     />
                 )}
                 {activePage === "requests" && !dashboard.authRequired && (
-                    <RequestJournalPage revision={revision} initial={initialPanels?.journal} />
+                    <RequestJournalPage
+                        revision={revision}
+                        initial={initialPanels?.journal}
+                    />
                 )}
                 {activePage === "channels" && !dashboard.authRequired && (
                     <>

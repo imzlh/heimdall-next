@@ -1,11 +1,11 @@
 import { assertEquals } from "@std/assert";
 import type { InferenceSource, OperationRequest } from "@heimdall/contracts";
-import type { StreamFrame } from "@heimdall/hip";
+import type { GenerationRequest, StreamFrame } from "@heimdall/hip";
 import { createServer } from "../main.ts";
 import { openSqliteChatStore } from "@heimdall/core/storage/sqlite-chat.ts";
 import { createClockToolPlugin } from "../plugins/tool-clock/mod.ts";
 
-function source(): InferenceSource {
+function source(captured: OperationRequest[]): InferenceSource {
     return {
         id: "chat-source",
         capabilities: [{
@@ -14,13 +14,16 @@ function source(): InferenceSource {
             streaming: false,
         }],
         execute(input) {
+            captured.push(input);
             return (async function* (): AsyncIterable<StreamFrame> {
                 yield frame(input, 1, { kind: "run.started", request: input });
                 yield frame(input, 2, {
                     kind: "part.delta",
                     messageId: "m",
                     partId: "p",
-                    delta: "hello from chat",
+                    delta: input.metadata?.purpose === "chat.title"
+                        ? "初次问候"
+                        : "hello from chat",
                 });
                 yield frame(input, 3, { kind: "run.completed" });
             })();
@@ -47,9 +50,10 @@ function frame(
 Deno.test("chat stores a user turn and the kernel reply", async () => {
     const directory = await Deno.makeTempDir({ prefix: "heimdall-chat-" });
     const store = openSqliteChatStore(`${directory}/chat.sqlite`);
+    const captured: OperationRequest[] = [];
     try {
         const app = createServer({
-            sources: [source()],
+            sources: [source(captured)],
             chat: { store },
         });
         const created = await app.request(
@@ -89,12 +93,30 @@ Deno.test("chat stores a user turn and the kernel reply", async () => {
                 ["assistant", "hello from chat"],
             ],
         );
-        assertEquals(body.conversation.title, "hi there");
+        assertEquals(body.conversation.title, "初次问候");
+        assertEquals(captured.map((request) => request.metadata?.purpose), [
+            "chat",
+            "chat.title",
+        ]);
+        const [turn, title] = captured;
+        assertEquals(title!.requestId, `${turn!.requestId}:title`);
+        for (const request of captured) {
+            assertEquals(request.metadata?.conversationId, conversationId);
+            assertEquals(request.metadata?.sessionId, conversationId);
+            assertEquals(request.metadata?.traceId, turn!.requestId);
+            assertEquals(request.metadata?.command, "send");
+            assertEquals(
+                (request.payload as GenerationRequest).metadata,
+                undefined,
+            );
+        }
 
         const loaded = await app.request(
             `http://localhost/api/chat/conversation?id=${conversationId}`,
         );
-        assertEquals((await loaded.json()).messages.length, 2);
+        const reloaded = await loaded.json();
+        assertEquals(reloaded.messages.length, 2);
+        assertEquals(reloaded.conversation.title, "初次问候");
     } finally {
         store.close();
         await Deno.remove(directory, { recursive: true });
@@ -379,6 +401,7 @@ Deno.test("chat regenerate selects a new reply while preserving the previous var
     });
     const store = openSqliteChatStore(`${directory}/chat.sqlite`);
     let runs = 0;
+    const captured: OperationRequest[] = [];
     const server = Deno.serve(
         { port: 0, hostname: "127.0.0.1", onListen() {} },
         createServer({
@@ -390,8 +413,10 @@ Deno.test("chat regenerate selects a new reply while preserving the previous var
                     streaming: true,
                 }],
                 execute(input) {
-                    runs += 1;
-                    const text = `reply-${runs}`;
+                    captured.push(input);
+                    const text = input.metadata?.purpose === "chat.title"
+                        ? "重生成测试"
+                        : `reply-${++runs}`;
                     return (async function* (): AsyncIterable<StreamFrame> {
                         yield frame(input, 1, {
                             kind: "run.started",
@@ -431,6 +456,7 @@ Deno.test("chat regenerate selects a new reply while preserving the previous var
             }),
         });
         assertEquals(sent.status, 200);
+        assertEquals((await sent.json()).conversation.title, "重生成测试");
 
         const again = await fetch(`${base}/api/chat/regenerate`, {
             method: "POST",
@@ -489,6 +515,29 @@ Deno.test("chat regenerate selects a new reply while preserving the previous var
         assertEquals(
             store.listMessages(conversationId).map((item) => item.text),
             ["ask", "reply-3"],
+        );
+        assertEquals(
+            store.listAllMessages(conversationId).map((item) => item.text)
+                .sort(),
+            ["ask", "reply-1", "reply-2", "reply-3"],
+        );
+        assertEquals(
+            store.getConversation(conversationId)?.title,
+            "重生成测试",
+        );
+        assertEquals(runs, 3);
+        assertEquals(
+            captured.map((request) => [
+                request.metadata?.purpose,
+                request.metadata?.command,
+                request.metadata?.transport,
+            ]),
+            [
+                ["chat", "send", "http"],
+                ["chat.title", "send", "http"],
+                ["chat", "regenerate", "http"],
+                ["chat", "regenerate", "websocket"],
+            ],
         );
     } finally {
         await server.shutdown();
@@ -662,19 +711,37 @@ Deno.test("chat conversation settings inject a system prompt and reasoning effor
             }),
         });
         assertEquals(sent.status, 200);
-        assertEquals(captured.length, 1);
-        const payload = captured[0]!.payload as unknown as {
-            messages: readonly {
-                role: string;
-                parts: readonly { type: string; text?: string }[];
-            }[];
-            extensions?: { raw?: { reasoning_effort?: string } };
-        };
+        assertEquals(captured.map((request) => request.metadata?.purpose), [
+            "chat",
+            "chat.title",
+        ]);
+        const payload = captured[0]!.payload as GenerationRequest;
         const messages = payload.messages;
         assertEquals(messages[0]!.role, "system");
-        assertEquals(messages[0]!.parts[0]!.text, "Always answer in Chinese.");
+        assertEquals(
+            messages[0]!.parts.map((part) =>
+                part.type === "text" ? part.text : part.type
+            ),
+            ["Always answer in Chinese."],
+        );
         assertEquals(messages[1]!.role, "user");
-        assertEquals(payload.extensions?.raw?.reasoning_effort, "high");
+        assertEquals(payload.extensions?.raw, { reasoning_effort: "high" });
+        const titleRequest = captured[1]!;
+        const titlePayload = titleRequest.payload as GenerationRequest;
+        assertEquals(titleRequest.requestId, `${captured[0]!.requestId}:title`);
+        assertEquals(
+            titleRequest.metadata?.traceId,
+            captured[0]!.metadata?.traceId,
+        );
+        assertEquals(titleRequest.metadata?.conversationId, conversationId);
+        assertEquals(titlePayload.messages.map((message) => message.role), [
+            "user",
+        ]);
+        assertEquals(titlePayload.stream, false);
+        assertEquals(titlePayload.tools, undefined);
+        assertEquals(titlePayload.extensions, undefined);
+        assertEquals(titlePayload.metadata, undefined);
+        assertEquals(payload.metadata, undefined);
 
         const cleared = await app.request(
             `http://localhost/api/chat/conversation?id=${conversationId}`,

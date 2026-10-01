@@ -9,6 +9,30 @@ import type {
     UpdateSourceInput,
 } from "@heimdall/admin-contracts";
 import type { SourceDraftProbeResult } from "@heimdall/admin-contracts/source-probe.ts";
+import type { SourceHealthResetDto } from "@heimdall/admin-contracts/source-health.ts";
+
+/** Restore routing eligibility while preserving the last actual probe result. */
+export async function clearSourceCooldown(
+    sourceId: string,
+): Promise<SourceHealthResetDto> {
+    const result = await request<{ source: SourceHealthResetDto }>(
+        "/api/admin/source-health/reset",
+        {
+            method: "POST",
+            body: JSON.stringify({ sourceId }),
+        },
+    );
+    if (
+        result?.source?.sourceId !== sourceId ||
+        result.source.health !== "ready" ||
+        typeof result.source.cleared !== "boolean"
+    ) {
+        throw new AdminApiError("渠道恢复结果无效，请刷新状态后重试。", {
+            code: "invalid_response",
+        });
+    }
+    return result.source;
+}
 
 /** Read the current revision before resolving an edit conflict. */
 export async function loadSourceMetadata(
@@ -42,6 +66,9 @@ export function updateSource(
                 : {}),
             ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
             ...(input.proxy !== undefined ? { proxy: input.proxy } : {}),
+            ...(input.modelMap !== undefined
+                ? { modelMap: input.modelMap }
+                : {}),
         }),
     });
 }
@@ -69,6 +96,9 @@ export function createSource(input: CreateSourceInput): Promise<unknown> {
             sourcePluginId: input.sourcePluginId,
             ...(input.presetId ? { presetId: input.presetId } : {}),
             ...(input.proxy !== undefined ? { proxy: input.proxy } : {}),
+            ...(input.modelMap !== undefined
+                ? { modelMap: input.modelMap }
+                : {}),
             config: input.config,
         }),
     });

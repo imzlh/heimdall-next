@@ -16,6 +16,11 @@ import type {
     SourceDto,
     UpdateSourceInput,
 } from "@heimdall/admin-contracts";
+import type { MaintenanceStatusView } from "@heimdall/admin-contracts/console.ts";
+import {
+    isUiJsonObject,
+    type UiJsonObject,
+} from "@heimdall/admin-contracts/ui.ts";
 import type {
     ConfigStore,
     StorageKey,
@@ -44,9 +49,14 @@ import { createProxyPool } from "./proxy-pool.ts";
 import { SourceProxyBindings } from "./source-proxy.ts";
 import { BuiltinMiddlewarePlugins } from "./middleware-plugins.ts";
 import {
-    applySourcePriority,
+    applySourceSettings,
     type StoredSourceConfig,
 } from "./source-records.ts";
+import {
+    publicSourceModels,
+    sourceModelSettings,
+} from "./source-model-mapping.ts";
+import { parseSourceModelMap } from "@heimdall/admin-contracts/source-model-map.ts";
 import {
     hydrateRuntimeSettings,
     redactRuntimeSettings,
@@ -85,6 +95,7 @@ export interface BuiltinCompositionOptions {
     readonly pluginHost?: PluginHost;
     /** Live gate settings. Stored values replace this handle during load. */
     readonly runtimeSettings?: RuntimeSettingsHandle;
+    readonly maintenanceStatus?: () => MaintenanceStatusView | undefined;
 }
 
 /**
@@ -131,7 +142,31 @@ export async function loadBuiltinComposition(
     const pluginErrors = new Map<string, string>();
     const pluginStates = new Map<string, boolean>();
     const managedPlugins = options.pluginHost === undefined
-        ? createManagedPlugins(store, () => [...toolPlugins.values()], () => [...manifests.keys()])
+        ? createManagedPlugins(
+            store,
+            () => [...toolPlugins.values()],
+            () => [...manifests.keys()],
+            () =>
+                [...manifests.values()].map((manifest) => ({
+                    manifest,
+                    enabled: !pluginErrors.has(manifest.id) &&
+                        pluginStates.get(manifest.id) !== false && (
+                            protocols.some((plugin) =>
+                                plugin.manifest.id === manifest.id
+                            ) ||
+                            apis.some((plugin) =>
+                                plugin.manifest.id === manifest.id
+                            ) ||
+                            sourceFactories.has(manifest.id) ||
+                            toolPlugins.has(manifest.id) ||
+                            middlewarePlugins.registry.get(manifest.id) !==
+                                undefined ||
+                            presets.some((plugin) =>
+                                plugin.manifest.id === manifest.id
+                            )
+                        ),
+                })),
+        )
         : undefined;
     const pluginHost = options.pluginHost ?? managedPlugins!.host;
 
@@ -278,21 +313,28 @@ export async function loadBuiltinComposition(
         middlewarePlugins,
         proxyBindings,
         options.runtimeSettings,
+        options.maintenanceStatus,
     );
     return {
         protocols,
         apis,
         toolPlugins: () =>
-            [...toolPlugins.values(), ...(managedPlugins?.tools() ?? [])].filter((plugin) =>
-                pluginStates.get(plugin.manifest.id) !== false
-            ),
+            [...toolPlugins.values(), ...(managedPlugins?.tools() ?? [])]
+                .filter((plugin) =>
+                    pluginStates.get(plugin.manifest.id) !== false
+                ),
         sources,
         middleware: middlewarePlugins.registry,
         sourcePluginIds: () => readSourcePluginIds(store, sourceFactories),
         catalog,
         management: {
             ...management,
-            ...(managedPlugins === undefined ? {} : { installPlugin: (_context: AdminRouteContext, input: unknown) => managedPlugins.install(input) }),
+            ...(managedPlugins === undefined ? {} : {
+                installPlugin: (
+                    _context: AdminRouteContext,
+                    input: unknown,
+                ) => managedPlugins.install(input),
+            }),
         },
         pluginHost,
         close: () => pluginHost.close?.() ?? Promise.resolve(),
@@ -408,13 +450,15 @@ function createCatalog(
                 record?: StoredSourceConfig,
                 versionstamp?: string,
             ): SourceDto => {
-                const probe = sources.get(source.id) === undefined
+                const active = sources.get(source.id);
+                const ui = sourceUiSnapshot(active);
+                const probe = active === undefined
                     ? undefined
                     : sources.probeOf(source.id);
                 const declared = source.capabilities.flatMap((capability) => [
                     ...(capability.models ?? []),
                 ]);
-                const discovered = sources.get(source.id) === undefined
+                const discovered = active === undefined
                     ? []
                     : sources.discoveredModels(source.id);
                 const models = [...new Set([...declared, ...discovered])]
@@ -436,16 +480,22 @@ function createCatalog(
                         ...(record.priority === undefined
                             ? {}
                             : { priority: record.priority }),
+                        modelMap: record.modelMap ?? {},
                     }),
                     enabled,
                     models,
-                    capabilities: source.capabilities.map((capability) =>
-                        capability.operation
-                    ),
-                    ...(sources.healthOf(source.id) === "cooldown"
-                        ? { health: "cooldown" as const }
+                    capabilities: [
+                        ...new Set(
+                            source.capabilities.map((capability) =>
+                                capability.operation
+                            ),
+                        ),
+                    ],
+                    ...(active && sources.healthOf(source.id) === "cooldown"
+                        ? sources.healthSnapshot(source.id)
                         : {}),
                     ...(probe === undefined ? {} : { probe }),
+                    ...(ui === undefined ? {} : { ui }),
                 };
             };
             for (const source of sources.list()) {
@@ -460,7 +510,11 @@ function createCatalog(
                 const factory = sourceFactories.get(entry.value.sourcePluginId);
                 if (sourceId.length === 0 || factory === undefined) continue;
                 try {
-                    const configured = factory.create(entry.value.config);
+                    const configured = sources.get(sourceId) ??
+                        applySourceSettings(
+                            factory.create(entry.value.config),
+                            entry.value,
+                        );
                     result.set(
                         sourceId,
                         dto(
@@ -491,6 +545,21 @@ function createCatalog(
     };
 }
 
+function sourceUiSnapshot(
+    source: InferenceSource | undefined,
+): UiJsonObject | undefined {
+    try {
+        const snapshot = source?.uiSnapshot?.();
+        if (!isUiJsonObject(snapshot)) return undefined;
+        // Detach plugin-owned objects and validate the actual serialized result.
+        const copy: unknown = JSON.parse(JSON.stringify(snapshot));
+        return isUiJsonObject(copy) ? copy : undefined;
+    } catch {
+        // Optional plugin UI state must not make the source catalog unavailable.
+        return undefined;
+    }
+}
+
 function createManagement(
     store: ConfigStore,
     sourceFactories: Map<string, SourceFactory>,
@@ -503,6 +572,7 @@ function createManagement(
     middlewarePlugins: BuiltinMiddlewarePlugins,
     proxyBindings: SourceProxyBindings,
     runtimeSettings?: RuntimeSettingsHandle,
+    maintenanceStatus?: () => MaintenanceStatusView | undefined,
 ): AdminManagementOptions {
     const sourceStore = store.namespace("heimdall", "source-config");
     const pluginStateStore = store.namespace("heimdall", "plugin-state");
@@ -558,7 +628,12 @@ function createManagement(
                 "channel was deleted; create a new channel",
             );
         }
-        const merged = mergeSourceConfig(input, current?.value.config, factory);
+        const settings = sourceModelSettings(input, current?.value.modelMap);
+        const merged = mergeSourceConfig(
+            settings.config,
+            current?.value.config,
+            factory,
+        );
         const config = factory.validate(withSourceId(merged, sourceId));
         const value: StoredSourceConfig = {
             ...(current?.value.name === undefined
@@ -574,10 +649,11 @@ function createManagement(
             config,
             enabled: current?.value.enabled !== false,
             instanceStateVersion: 1,
+            modelMap: settings.modelMap,
         };
-        const source = applySourcePriority(
+        const source = applySourceSettings(
             factory.create(config),
-            value.priority,
+            value,
         );
         const versionstamp = await sourceStore.set(
             [sourceId],
@@ -679,7 +755,11 @@ function createManagement(
                         "source plugin is not available",
                     );
                 }
-                let raw = input.config;
+                const submitted = sourceModelSettings(
+                    input.config,
+                    input.modelMap,
+                );
+                let raw = submitted.config;
                 if (input.presetId !== undefined) {
                     const preset = presets.find((item) =>
                         item.manifest.id === input.presetId
@@ -698,7 +778,7 @@ function createManagement(
                             "preset does not belong to this source plugin",
                         );
                     }
-                    const application = preset.apply(input.config);
+                    const application = preset.apply(submitted.config);
                     if (application.sourcePluginId !== input.sourcePluginId) {
                         throw new ManagementError(
                             400,
@@ -708,7 +788,10 @@ function createManagement(
                     }
                     raw = application.config;
                 }
-                const config = factory.validate(withSourceId(raw, input.id));
+                const settings = sourceModelSettings(raw, submitted.modelMap);
+                const config = factory.validate(
+                    withSourceId(settings.config, input.id),
+                );
                 const value: StoredSourceConfig = {
                     sourcePluginId: factory.manifest.id,
                     name: input.name.trim(),
@@ -717,10 +800,11 @@ function createManagement(
                     config,
                     enabled: true,
                     instanceStateVersion: 1,
+                    modelMap: settings.modelMap,
                 };
-                const source = applySourcePriority(
+                const source = applySourceSettings(
                     factory.create(config),
-                    value.priority,
+                    value,
                 );
                 if (source.id !== input.id) {
                     throw new ManagementError(
@@ -765,7 +849,8 @@ function createManagement(
             if (
                 !input || Object.keys(input).length === 0 ||
                 Object.keys(input).some((key) =>
-                    !["name", "priority", "enabled", "proxy"].includes(key)
+                    !["name", "priority", "enabled", "proxy", "modelMap"]
+                        .includes(key)
                 ) ||
                 (Object.hasOwn(input, "name") &&
                     (typeof input.name !== "string" || !input.name.trim() ||
@@ -797,6 +882,11 @@ function createManagement(
                 ...(input.proxy === undefined ? {} : {
                     proxy: proxyBindings.pool.validateSelection(input.proxy),
                 }),
+                ...(Object.hasOwn(input, "modelMap")
+                    ? {
+                        modelMap: parseSourceModelMap(input.modelMap),
+                    }
+                    : {}),
             };
             const factory = sourceFactories.get(value.sourcePluginId);
             if (factory === undefined) {
@@ -814,12 +904,13 @@ function createManagement(
             const source = !eligible
                 ? undefined
                 : active === undefined
-                ? applySourcePriority(
+                ? applySourceSettings(
                     factory.create(value.config),
-                    value.priority,
+                    value,
                 )
-                : value.priority !== current.value.priority
-                ? applySourcePriority(active, value.priority)
+                : value.priority !== current.value.priority ||
+                        Object.hasOwn(input, "modelMap")
+                ? applySourceSettings(active, value)
                 : active;
             const versionstamp = await sourceStore.set([sourceId], value, {
                 expectedVersionstamp: expectedVersionstamp ??
@@ -828,7 +919,25 @@ function createManagement(
             proxyBindings.set(sourceId, value.proxy);
             if (source === undefined) sources.unregister(sourceId);
             else if (source !== active) {
-                sources.upsert(source, { preserveDiscovery: true });
+                sources.upsert(source, {
+                    preserveDiscovery: true,
+                    ...(active && Object.hasOwn(input, "modelMap")
+                        ? {
+                            discoveredModels: publicSourceModels(
+                                sources.discoveredModels(sourceId).map((
+                                    model,
+                                ) => Object.hasOwn(
+                                        current.value.modelMap ?? {},
+                                        model,
+                                    )
+                                    ? current.value.modelMap![model]!
+                                    : model
+                                ),
+                                value.modelMap ?? {},
+                            ),
+                        }
+                        : {}),
+                });
             }
             const listed = await resolveProvider(catalog.sources, context);
             return {
@@ -958,6 +1067,45 @@ function createManagement(
         }),
         setPluginEnabled: (context, pluginId, enabled) =>
             sourceWrite(async () => {
+                const pluginCatalog = await resolveProvider(
+                    catalog.plugins,
+                    context,
+                );
+                if (!enabled) {
+                    const dependents = pluginCatalog?.filter((plugin) =>
+                        plugin.enabled &&
+                        plugin.dependencies?.includes(pluginId)
+                    ) ?? [];
+                    if (dependents.length) {
+                        throw new ManagementError(
+                            409,
+                            "plugin_dependency_in_use",
+                            `请先停用依赖插件：${
+                                dependents.map((plugin) =>
+                                    plugin.name
+                                ).join(
+                                    "、",
+                                )
+                            }`,
+                        );
+                    }
+                } else {
+                    const plugin = pluginCatalog?.find((plugin) =>
+                        plugin.id === pluginId
+                    );
+                    const missing = plugin?.dependencies?.filter((id) =>
+                        !pluginCatalog?.some((candidate) =>
+                            candidate.id === id && candidate.enabled
+                        )
+                    ) ?? [];
+                    if (missing.length) {
+                        throw new ManagementError(
+                            409,
+                            "plugin_dependency_unavailable",
+                            `请先启用依赖插件：${missing.join("、")}`,
+                        );
+                    }
+                }
                 const installed = await pluginHost.get(pluginId);
                 if (installed !== undefined) {
                     try {
@@ -994,9 +1142,9 @@ function createManagement(
                         if (!enabled || entry.value.enabled === false) {
                             sources.unregister(sourceId);
                         } else {sources.upsert(
-                                applySourcePriority(
+                                applySourceSettings(
                                     source.create(entry.value.config),
-                                    entry.value.priority,
+                                    entry.value,
                                 ),
                             );}
                     }
@@ -1008,26 +1156,44 @@ function createManagement(
                     "built-in protocol and preset plugins are immutable",
                 );
             }),
-        uninstallPlugin: async (_context, pluginId) => {
-            if (await pluginHost.get(pluginId) !== undefined) {
-                try {
-                    return await pluginHost.uninstall(pluginId);
-                } catch (error) {
-                    throw pluginManagementError(error, pluginId);
+        uninstallPlugin: (_context, pluginId) =>
+            sourceWrite(async () => {
+                if (await pluginHost.get(pluginId) !== undefined) {
+                    try {
+                        return await pluginHost.uninstall(pluginId);
+                    } catch (error) {
+                        throw pluginManagementError(error, pluginId);
+                    }
                 }
-            }
-            throw new ManagementError(
-                409,
-                "plugin_immutable",
-                "built-in plugins cannot be uninstalled",
-            );
-        },
-        probeSourceDraft: (context, input) => probeSourceDraft(input, context.request.signal, {
-            factories: sourceFactories,
-            presets,
-            enabled: (id) => pluginStates.get(id) !== false,
-            proxies: proxyBindings.pool,
-        }),
+                throw new ManagementError(
+                    409,
+                    "plugin_immutable",
+                    "built-in plugins cannot be uninstalled",
+                );
+            }),
+        probeSourceDraft: (context, input) =>
+            probeSourceDraft(input, context.request.signal, {
+                factories: sourceFactories,
+                presets,
+                enabled: (id) => pluginStates.get(id) !== false,
+                proxies: proxyBindings.pool,
+            }),
+        clearSourceCooldown: (_context, sourceId) =>
+            sourceWrite(() => {
+                if (!sources.get(sourceId)) {
+                    throw new ManagementError(
+                        404,
+                        "source_not_found",
+                        "source is missing or disabled",
+                    );
+                }
+                const cleared = sources.healthOf(sourceId) === "cooldown";
+                return Promise.resolve({
+                    sourceId,
+                    cleared,
+                    ...sources.clearCooldown(sourceId),
+                });
+            }),
         probeSource: async (context, sourceId) => {
             const source = sources.get(sourceId);
             if (source === undefined || source.probe === undefined) {
@@ -1058,6 +1224,9 @@ function createManagement(
             getSettings: () => ({
                 data: {
                     settings: redactRuntimeSettings(runtimeSettings.get()),
+                    ...(maintenanceStatus?.()
+                        ? { maintenance: maintenanceStatus() }
+                        : {}),
                 },
                 versionstamp: runtimeSettings.versionstamp(),
             }),
@@ -1068,7 +1237,12 @@ function createManagement(
                     patch,
                     expectedVersionstamp,
                 ).then((saved) => ({
-                    data: { settings: saved.settings },
+                    data: {
+                        settings: saved.settings,
+                        ...(maintenanceStatus?.()
+                            ? { maintenance: maintenanceStatus() }
+                            : {}),
+                    },
                     versionstamp: saved.versionstamp,
                 })),
         }),
@@ -1088,7 +1262,7 @@ async function restoreSources(
         const sourceId = String(entry.key.at(-1) ?? "");
         const factory = factories.get(entry.value.sourcePluginId);
         if (factory === undefined) continue;
-        const value: StoredSourceConfig = entry.value.instanceStateVersion === 1
+        let value: StoredSourceConfig = entry.value.instanceStateVersion === 1
             ? entry.value
             : {
                 ...entry.value,
@@ -1099,6 +1273,14 @@ async function restoreSources(
                     pluginStates.get(entry.value.sourcePluginId) === false,
                 instanceStateVersion: 1,
             };
+        const settings = sourceModelSettings(value.config, value.modelMap);
+        if (isRecord(value.config) && Object.hasOwn(value.config, "modelMap")) {
+            value = {
+                ...value,
+                config: settings.config,
+                modelMap: settings.modelMap,
+            };
+        }
         if (value !== entry.value) {
             await sourceStore.set([sourceId], value, {
                 expectedVersionstamp: entry.versionstamp,
@@ -1110,9 +1292,9 @@ async function restoreSources(
         ) continue;
         try {
             sources.upsert(
-                applySourcePriority(
+                applySourceSettings(
                     factory.create(value.config),
-                    value.priority,
+                    value,
                 ),
             );
             pluginStates.set(
@@ -1316,6 +1498,13 @@ function pluginManagementError(
     error: unknown,
     pluginId: string,
 ): ManagementError {
+    if (error instanceof StorageConflictError) {
+        return new ManagementError(
+            409,
+            "plugin_revision_conflict",
+            "插件状态已变更，请刷新后重试",
+        );
+    }
     if (error instanceof PluginLifecycleError) {
         const status = error.code === "runtime_required" ? 501 : 409;
         return new ManagementError(
@@ -1374,14 +1563,23 @@ class MemoryConfigStore implements ConfigStore {
         ) {
             throw new StorageConflictError("configuration changed");
         }
-        const versionstamp = String(
-            (Number(previous?.versionstamp ?? "0") || 0) + 1,
-        );
+        const versionstamp = crypto.randomUUID();
         this.#values.set(key, { value, versionstamp });
         return Promise.resolve(versionstamp);
     }
-    delete(path: StorageKey): Promise<void> {
-        this.#values.delete(this.key(path));
+    delete(
+        path: StorageKey,
+        expectedVersionstamp?: string | null,
+    ): Promise<void> {
+        const key = this.key(path);
+        if (
+            expectedVersionstamp !== undefined &&
+            expectedVersionstamp !==
+                (this.#values.get(key)?.versionstamp ?? null)
+        ) {
+            throw new StorageConflictError("configuration changed");
+        }
+        this.#values.delete(key);
         return Promise.resolve();
     }
     async *list<T = unknown>(

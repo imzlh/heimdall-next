@@ -9,6 +9,7 @@ import {
 } from "../shared/chat-view.ts";
 import { Icon } from "../shared/icons.tsx";
 import { ChatMarkdown } from "../components/chat-markdown.tsx";
+import { ChatSlots } from "../components/chat-slots.tsx";
 
 function MessageView({ message }: { message: ChatMessage }) {
     const branch = !message.callId &&
@@ -251,6 +252,7 @@ export function ChatPageView({ initial }: { initial: ChatInitial }) {
                         <li class="chat-history-empty">暂无历史会话</li>
                     )}
                 </ul>
+                <ChatSlots initial={initial} slot="chat.sidebar" />
                 <footer class="chat-sidebar-footer">
                     <a href="/admin">返回管理面板</a>
                     <button
@@ -333,6 +335,7 @@ export function ChatPageView({ initial }: { initial: ChatInitial }) {
                         : <EmptyState initial={initial} />}
                 </div>
                 <div class="chat-composer-region">
+                    <ChatSlots initial={initial} slot="chat.composer" />
                     <form
                         class="chat-composer"
                         data-sending="false"

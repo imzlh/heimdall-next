@@ -263,15 +263,6 @@ export interface ChatMessageRecord {
         readonly url?: string;
         readonly ref?: string;
     }[];
-    /** Per-turn account quota snapshot shown with the reply. */
-    readonly quota?: {
-        readonly meters: readonly {
-            readonly name: string;
-            readonly remaining?: number;
-            readonly blocked?: boolean;
-            readonly error?: string;
-        }[];
-    };
 }
 
 /** Single-tenant chat history. The kernel does not depend on this port. */

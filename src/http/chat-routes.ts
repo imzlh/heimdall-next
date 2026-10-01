@@ -188,8 +188,9 @@ export function createChatRoutes(options: ChatRouteOptions): ServerApp {
                 );
             }
             const assetIds = options.store.assetIdsForConversation(id);
+            options.assets?.queueReclaim(assetIds);
             options.store.deleteConversation(id);
-            options.assets?.reclaim(assetIds, options.store);
+            options.assets?.sweep(options.store);
             return json(requestId, { deleted: true, id });
         });
     });
@@ -229,8 +230,9 @@ export function createChatRoutes(options: ChatRouteOptions): ServerApp {
             ) end++;
             const ids = messages.slice(start, end).map((message) => message.id);
             const assetIds = options.store.assetIdsForMessages(ids);
+            options.assets?.queueReclaim(assetIds);
             options.store.deleteMessages(ids, now().toISOString());
-            options.assets?.reclaim(assetIds, options.store);
+            options.assets?.sweep(options.store);
             return json(requestId, { deleted: true, ids });
         });
     });

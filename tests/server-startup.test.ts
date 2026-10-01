@@ -32,6 +32,8 @@ Deno.test("server environment has explicit storage and process defaults", () => 
         limitPerMinute: 120,
         probeIntervalMs: 300_000,
         titleModel: "",
+        requestRetentionDays: 0,
+        chatRetentionDays: 0,
     });
     assertEquals(environment.adminAuthToken, undefined);
     assertEquals(environment.adminAssetsRoot, undefined);
@@ -73,6 +75,8 @@ Deno.test("server environment parses deployment overrides and optional assets", 
             limitPerMinute: 0,
             probeIntervalMs: 0,
             titleModel: "",
+            requestRetentionDays: 30,
+            chatRetentionDays: 0,
         },
         adminAuthToken: "admin-token",
         adminAssetsRoot: "/application/assets",
@@ -100,6 +104,7 @@ Deno.test("server environment rejects invalid process settings before startup", 
         ["HEIMDALL_RATE_LIMIT", "-1"],
         ["HEIMDALL_PROBE_INTERVAL_MS", "invalid"],
         ["HEIMDALL_REQUEST_RETENTION_DAYS", "1.5"],
+        ["HEIMDALL_CHAT_RETENTION_DAYS", "-1"],
         ["HEIMDALL_TIMEZONE", "Mars/Olympus"],
     ] as const;
     for (const [setting, value] of invalidSettings) {

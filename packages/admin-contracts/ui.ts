@@ -14,7 +14,9 @@ export type UiSlot =
     | "dashboard.widget"
     | "source.status"
     | "settings.section"
-    | "nav.tab";
+    | "nav.tab"
+    | "chat.composer"
+    | "chat.sidebar";
 export type UiTone = "neutral" | "success" | "warning" | "danger";
 
 export interface UiAction {
@@ -51,6 +53,16 @@ export type UiBlock =
         readonly kind: "action";
         readonly label: string;
         readonly action: UiAction;
+    }
+    | {
+        readonly kind: "toggle";
+        readonly label: string;
+        readonly checked: boolean;
+        readonly checkedFrom?: UiValuePath;
+        readonly disabled?: boolean;
+        readonly disabledFrom?: UiValuePath;
+        /** The host appends the requested boolean `checked` to this payload. */
+        readonly action: UiAction;
     };
 
 /** Every extension includes a useful schema fallback, including executable UIs. */
@@ -74,6 +86,7 @@ export interface UiContext {
     readonly theme: "light" | "dark" | "system";
     readonly sourceId?: string;
     readonly sourcePluginId?: string;
+    readonly conversationId?: string;
     /** Host-selected, redacted data only. Never include admin credentials. */
     readonly data: UiJsonObject;
 }
@@ -107,6 +120,8 @@ const slots: readonly UiSlot[] = [
     "source.status",
     "settings.section",
     "nav.tab",
+    "chat.composer",
+    "chat.sidebar",
 ];
 const tones: readonly UiTone[] = ["neutral", "success", "warning", "danger"];
 
@@ -236,6 +251,15 @@ function validBlock(value: unknown): value is UiBlock {
             return safeUiHref(value.href);
         case "action":
             return isUiAction(value.action);
+        case "toggle":
+            return typeof value.checked === "boolean" &&
+                (value.checkedFrom === undefined ||
+                    validValuePath(value.checkedFrom)) &&
+                (value.disabled === undefined ||
+                    typeof value.disabled === "boolean") &&
+                (value.disabledFrom === undefined ||
+                    validValuePath(value.disabledFrom)) &&
+                isUiAction(value.action);
         default:
             return false;
     }
@@ -253,6 +277,20 @@ function validValuePath(value: unknown): value is UiValuePath {
 
 /** Resolve a scalar only; missing/invalid data keeps the manifest's SSR fallback. */
 export function resolveUiBlock(block: UiBlock, context: UiContext): UiBlock {
+    if (block.kind === "toggle") {
+        const checked = block.checkedFrom && validValuePath(block.checkedFrom)
+            ? resolveScalar(context, block.checkedFrom)
+            : undefined;
+        const disabled =
+            block.disabledFrom && validValuePath(block.disabledFrom)
+                ? resolveScalar(context, block.disabledFrom)
+                : undefined;
+        return {
+            ...block,
+            ...(typeof checked === "boolean" ? { checked } : {}),
+            ...(typeof disabled === "boolean" ? { disabled } : {}),
+        };
+    }
     const path = block.kind === "metric"
         ? block.valueFrom
         : block.kind === "text"

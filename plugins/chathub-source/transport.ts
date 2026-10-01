@@ -2,6 +2,7 @@ import type {
     CanonicalError,
     GenerationRequest,
     InferenceSource,
+    JsonObject,
     OperationRequest,
     ResolvedSourceProxy,
     SourceCapability,
@@ -9,7 +10,12 @@ import type {
     StreamEvent,
     StreamFrame,
 } from "@heimdall/contracts";
-import type { JsonValue } from "@heimdall/hip";
+import {
+    buildChatHubQuota,
+    chatHubAccountSnapshot,
+    type ChatHubQuota,
+    redactChatHubAccount,
+} from "./account.ts";
 import {
     type ChatHubSourceConfig,
     type ChatHubSourceOptions,
@@ -21,18 +27,22 @@ import { estimateTokens } from "@heimdall/tokens";
 import {
     ChatHubClient,
     type ChatHubEvent,
-    type ChatHubMeterError,
     type ChatHubReference,
     type ChatHubSessionIds,
     ChatHubTextAccumulator,
-    type ChatHubThrottling,
     ChatHubTimeoutError,
+    ChatHubTransportError,
     type ChatHubUrlOptions,
     createSessionIds,
     type MessageAnnotation,
     nextChatSessionId,
+    resumeChatHubSession,
 } from "./protocol/mod.ts";
-import { conversationMessages, generationPayload } from "./request.ts";
+import {
+    conversationMessages,
+    generationPayload,
+    reasoningEffortOf,
+} from "./request.ts";
 import {
     collectImages,
     downloadGeneratedImages,
@@ -61,6 +71,8 @@ export class ChatHubSource implements InferenceSource {
     #config: ChatHubSourceConfig;
     readonly #options: ChatHubSourceOptions;
     #refreshing?: Promise<void>;
+    #quota?: ChatHubQuota;
+    #quotaUpdatedAt?: string;
     readonly #sessions = new Map<string, Session>();
 
     constructor(input: unknown, options: ChatHubSourceOptions = {}) {
@@ -73,6 +85,35 @@ export class ChatHubSource implements InferenceSource {
             streaming: true,
             features: ["tools", "image.input"],
         }];
+    }
+
+    uiSnapshot(): JsonObject {
+        const label = this.#config.accountEmail
+            ? redactChatHubAccount(this.#config.accountEmail, this.#config)
+            : undefined;
+        const now = this.#sessionTime();
+        let warmContexts = 0;
+        let busyContexts = 0;
+        for (const session of this.#sessions.values()) {
+            if (session.expiresAt <= now) continue;
+            if (session.busy) busyContexts++;
+            else warmContexts++;
+        }
+        return {
+            ...chatHubAccountSnapshot(label, this.#quota, this.#quotaUpdatedAt),
+            runtime: { warmContexts, busyContexts },
+        };
+    }
+
+    #sessionTime(): number {
+        return (this.#options.clock?.() ?? new Date()).getTime();
+    }
+
+    #rememberQuota(quota: ChatHubQuota | undefined) {
+        if (!quota) return;
+        this.#quota = quota;
+        this.#quotaUpdatedAt = (this.#options.clock?.() ?? new Date())
+            .toISOString();
     }
 
     async #credentials(
@@ -178,6 +219,7 @@ export class ChatHubSource implements InferenceSource {
             if (!this.#config.models.includes(model!)) {
                 throw new TypeError("ChatHub model is not configured");
             }
+            const tone = toneForModel(model, reasoningEffortOf(request));
             const config = await this.#credentials(signal, transport.selection);
             const messages = conversationMessages(request);
             const fullText = flattenConversation(messages);
@@ -203,7 +245,7 @@ export class ChatHubSource implements InferenceSource {
             });
             const upstream = (text: string) => ({
                 text,
-                tone: toneForModel(model),
+                tone,
                 locale: config.locale ?? "en-us",
                 timezone: config.timezone ?? "UTC",
                 licenseType: config.licenseType,
@@ -229,6 +271,16 @@ export class ChatHubSource implements InferenceSource {
                     makeConnection(),
                     upstream(modelToolRouterPrompt(fullText, tools, choice)),
                     { signal },
+                );
+                this.#rememberQuota(
+                    buildChatHubQuota(
+                        result.throttling,
+                        result.meteringInformation,
+                        (text) =>
+                            transport!.redact(
+                                redactChatHubAccount(text, config),
+                            ),
+                    ),
                 );
                 const routerText = result.finalText ?? result.text;
                 if (isContentPolicyBlock(routerText)) {
@@ -299,7 +351,9 @@ export class ChatHubSource implements InferenceSource {
             }
             const key = sessionKey(request, context);
             for (const [id, session] of this.#sessions) {
-                if (session.expiresAt <= Date.now()) this.#sessions.delete(id);
+                if (session.expiresAt <= this.#sessionTime()) {
+                    this.#sessions.delete(id);
+                }
             }
             const existing = key ? this.#sessions.get(key) : undefined;
             const reuse = existing && !existing.busy &&
@@ -359,16 +413,24 @@ export class ChatHubSource implements InferenceSource {
             let suggestions: string[] = [];
             let generatedImageUrls: string[] = [];
             let references: ChatHubReference[] = [];
-            // Per-turn account quota snapshot (message/image allowances) plus any
-            // reliable soft-reject signal; shown as an info card and stored for
-            // the account probe. See buildQuota / copilot2api docs 07 §1.
-            let quota: ChatQuota | undefined;
+            // Keep provider metering in the account snapshot; the inference
+            // stream only receives generic usage and failure events.
+            let quota: ChatHubQuota | undefined;
             let turnState = "";
             let resultValue = "";
             // Cloud search activity, surfaced live as status parts before the
             // first answer token so the wait is explained rather than blank.
             const searchSeen = new Set<string>();
             let statusCount = 0;
+            // AttachToSession resume only makes sense once a turn has started
+            // producing content; a bare connect failure has no session to
+            // re-attach to and must surface as-is.
+            let streamedContent = false;
+            const onEvent = (event: ChatHubEvent): void => {
+                if (event.text || event.reasoning) streamedContent = true;
+                queue.push(event);
+                wake?.();
+            };
             const run = client.chat(
                 makeConnection(ids),
                 imageAnnotations.length
@@ -377,14 +439,27 @@ export class ChatHubSource implements InferenceSource {
                         messageAnnotations: imageAnnotations,
                     }
                     : upstream(prompt),
-                {
+                { signal, onEvent },
+            ).catch((error) => {
+                // Long / reasoning turns are truncated by Copilot before the
+                // type:3 Completion arrives (copilot2api SPEC 06 "长对话截断").
+                // Resume the same session with AttachToSession (O4) instead of
+                // failing: the turn-scoped text/reasoning accumulators are
+                // prefix-monotonic, so the re-sent snapshot only streams its new
+                // tail and never double-writes what already reached the client.
+                if (
+                    signal.aborted || !streamedContent ||
+                    !(error instanceof ChatHubTransportError)
+                ) {
+                    throw error;
+                }
+                return resumeChatHubSession(client, makeConnection(ids), {
                     signal,
-                    onEvent(event) {
-                        queue.push(event);
-                        wake?.();
-                    },
-                },
-            ).then((result) => {
+                    onEvent,
+                    maxReconnectAttempts: 3,
+                    reconnectDelayMs: 500,
+                });
+            }).then((result) => {
                 answer = result.finalText ?? result.text;
                 // The authoritative reply can arrive only on `item.result.message`
                 // (no messages[] answer entry); fall back to it before treating
@@ -398,10 +473,13 @@ export class ChatHubSource implements InferenceSource {
                 references = result.references ?? [];
                 turnState = result.turnState ?? "";
                 resultValue = result.resultValue ?? "";
-                quota = buildQuota(
+                quota = buildChatHubQuota(
                     result.throttling,
                     result.meteringInformation,
+                    (text) =>
+                        transport!.redact(redactChatHubAccount(text, config)),
                 );
+                this.#rememberQuota(quota);
                 // Each suggestion's clickable prompt is its commandText (the text
                 // sent when tapped), falling back to the displayed text.
                 suggestions = [
@@ -524,10 +602,14 @@ export class ChatHubSource implements InferenceSource {
                 !answer.trim() && !generatedImageUrls.length &&
                 !reasoningText.trim()
             ) {
-                const denied = quota?.meters.find((meter) => meter.error);
+                const denied = quota?.meters.find((meter) =>
+                    meter.name === "access" && meter.blocked
+                );
                 if (denied) {
                     throw new Error(
-                        `ChatHub denied the request (${denied.error}); the account's quota for this capability may be throttled or exhausted`,
+                        `ChatHub denied the request (${
+                            denied.error || "capability access denied"
+                        }); the account's quota for this capability may be throttled or exhausted`,
                     );
                 }
                 if (turnState && turnState !== "Completed") {
@@ -561,7 +643,7 @@ export class ChatHubSource implements InferenceSource {
                     ids,
                     history: JSON.stringify(history),
                     length: history.length,
-                    expiresAt: Date.now() + 3_600_000,
+                    expiresAt: this.#sessionTime() + 3_600_000,
                     busy: false,
                 });
             }
@@ -583,12 +665,7 @@ export class ChatHubSource implements InferenceSource {
                         ...(reasoningTokens > 0 ? { reasoningTokens } : {}),
                         ...(cachedInputTokens > 0 ? { cachedInputTokens } : {}),
                         totalTokens,
-                        extensions: {
-                            estimated: true,
-                            ...(quota
-                                ? { quota: quota as unknown as JsonValue }
-                                : {}),
-                        },
+                        extensions: { estimated: true },
                     },
                 });
             }
@@ -764,58 +841,6 @@ function citationOf(
         ...(label !== undefined ? { label } : {}),
         ...(url !== undefined ? { url } : {}),
     };
-}
-
-/** One capability's remaining allowance, as shown in the account quota card. */
-interface ChatQuotaMeter {
-    name: string;
-    remaining?: number;
-    blocked?: boolean;
-    error?: string;
-}
-
-/** Per-turn account quota snapshot surfaced in the chat info card. */
-interface ChatQuota {
-    meters: ChatQuotaMeter[];
-}
-
-/**
- * Build the quota card data from the terminal frame. Only the two
- * consumer-facing meters (message = LLMOnly, image = ImageGeneration) are shown
- * — the rest of the metering table is unauthorized-capability noise. The cached
- * `throttling.metering` allowance is an unreliable snapshot (copilot2api docs 07
- * §1.2: it can read 100 while the turn is throttled), so a `meterError` /
- * `hasAccess:false` from `meteringInformation` is added as the authoritative
- * blocked signal on top of the raw numbers.
- */
-function buildQuota(
-    throttling: ChatHubThrottling | undefined,
-    meteringInformation: ChatHubMeterError[] | undefined,
-): ChatQuota | undefined {
-    const meters: ChatQuotaMeter[] = [];
-    const metering = throttling?.metering;
-    for (const name of ["LLMOnly", "ImageGeneration"] as const) {
-        const remaining = metering?.[name]?.remainingAllowance;
-        if (typeof remaining === "number") {
-            meters.push({
-                name,
-                remaining,
-                ...(remaining === 0 ? { blocked: true } : {}),
-            });
-        }
-    }
-    for (const info of meteringInformation ?? []) {
-        if (info.hasAccess === false || typeof info.meterError === "string") {
-            meters.push({
-                name: info.meterError ?? "access",
-                blocked: true,
-                ...(typeof info.meterError === "string"
-                    ? { error: info.meterError }
-                    : {}),
-            });
-        }
-    }
-    return meters.length > 0 ? { meters } : undefined;
 }
 
 function sessionKey(

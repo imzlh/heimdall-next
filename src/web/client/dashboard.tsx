@@ -3,7 +3,11 @@ import { useEffect, useRef, useState } from "hono/jsx/dom";
 import type { DashboardData, ListedSource } from "./api/admin.ts";
 import type { ProxyPoolView } from "@heimdall/admin-contracts/proxies.ts";
 import type { ConsoleSnapshot } from "@heimdall/admin-contracts/console.ts";
-import { updateSource } from "./api/admin.ts";
+import { clearSourceCooldown, updateSource } from "./api/admin.ts";
+import {
+    SOURCE_RECOVERY_NOTE,
+    SourceHealthDetails,
+} from "../shared/source-health.tsx";
 import type { Child } from "hono/jsx";
 import { PluginsPanel } from "./plugins.tsx";
 import { ModelDirectory, SourceCard } from "./catalog.tsx";
@@ -374,6 +378,16 @@ export function ChannelsPanel(
     const { sources, plugins } = dashboard.status;
     const [selected, setSelected] = useState<ListedSource | null>(null);
     const [pendingId, setPendingId] = useState("");
+    const [healthClock, setHealthClock] = useState<number | undefined>(
+        undefined,
+    );
+    const hasCooldown = sources.some((source) => source.health === "cooldown");
+    useEffect(() => {
+        if (!hasCooldown) return;
+        setHealthClock(Date.now());
+        const timer = setInterval(() => setHealthClock(Date.now()), 1_000);
+        return () => clearInterval(timer);
+    }, [hasCooldown]);
     const [actionError, setActionError] = useState("");
     const pending = useRef(false);
     const mounted = useRef(true);
@@ -455,6 +469,29 @@ export function ChannelsPanel(
                     }`,
                 );
             }
+        }
+    }
+
+    async function resetCooldown(source: ListedSource) {
+        if (pending.current || !source.id) return;
+        pending.current = true;
+        setPendingId(source.id);
+        setActionError("");
+        try {
+            const result = await clearSourceCooldown(source.id);
+            await refreshAfterChange(
+                `${source.name || source.id}${
+                    result.cleared ? " 的冷却已解除" : " 当前未处于冷却"
+                }。${SOURCE_RECOVERY_NOTE}`,
+            );
+        } catch (caught) {
+            if (mounted.current) {
+                setActionError(sourceManagementError(caught));
+                onNotify?.("warn", sourceManagementError(caught));
+            }
+        } finally {
+            pending.current = false;
+            if (mounted.current) setPendingId("");
         }
     }
 
@@ -666,6 +703,17 @@ export function ChannelsPanel(
                                                                     )}
                                                                 </small>
                                                             )}
+                                                            <SourceHealthDetails
+                                                                source={source}
+                                                                now={healthClock}
+                                                                pending={Boolean(
+                                                                    pendingId,
+                                                                )}
+                                                                onReset={() =>
+                                                                    void resetCooldown(
+                                                                        source,
+                                                                    )}
+                                                            />
                                                         </td>
                                                         <td class="channel-plugin-col">
                                                             {sourceStatus
@@ -795,6 +843,9 @@ export function ChannelsPanel(
                                         onManage={setSelected}
                                         onToggle={(item) => void toggle(item)}
                                         pending={Boolean(pendingId)}
+                                        now={healthClock}
+                                        onResetCooldown={(source) =>
+                                            void resetCooldown(source)}
                                         status={sourceStatus?.(source)}
                                         statusInline
                                         configurable={Boolean(

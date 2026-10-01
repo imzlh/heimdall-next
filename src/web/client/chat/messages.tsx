@@ -5,7 +5,6 @@ import type {
     ChatAttachment,
     ChatCitation,
     ChatMessage,
-    ChatQuota,
 } from "@heimdall/admin-contracts/chat.ts";
 import {
     chatAttachmentUrl,
@@ -128,47 +127,6 @@ function ChatCitations(
                 })}
             </ol>
         </details>
-    );
-}
-
-/** Capability labels shown in the quota card; unknown meters fall back to raw. */
-const QUOTA_LABELS: Record<string, string> = {
-    LLMOnly: "消息",
-    ImageGeneration: "图片",
-};
-
-/**
- * Per-turn account quota, shown as a compact info card under the reply: the
- * remaining message/image allowance ChatHub reported this turn, plus any
- * hard-block reason (a `meterError`, the reliable signal).
- */
-function ChatQuotaCard({ quota }: { quota: ChatQuota }) {
-    const numeric = quota.meters.filter((meter) =>
-        typeof meter.remaining === "number"
-    );
-    const errors = quota.meters.filter((meter) => meter.error);
-    if (!numeric.length && !errors.length) return null;
-    return (
-        <div class="chat-quota" role="group" aria-label="额度">
-            {numeric.map((meter) => (
-                <span
-                    key={meter.name}
-                    class={`chat-quota-meter${
-                        meter.blocked ? " is-blocked" : ""
-                    }`}
-                >
-                    <span class="chat-quota-label">
-                        {QUOTA_LABELS[meter.name] ?? meter.name}
-                    </span>
-                    <span class="chat-quota-value">{meter.remaining}</span>
-                </span>
-            ))}
-            {errors.map((meter, index) => (
-                <span key={`error-${index}`} class="chat-quota-error">
-                    ⚠️ {meter.error}
-                </span>
-            ))}
-        </div>
     );
 }
 
@@ -321,8 +279,6 @@ function Message(
                     !!message.citations?.length && (
                     <ChatCitations items={message.citations} />
                 )}
-                {message.role === "assistant" && !message.callId &&
-                    message.quota && <ChatQuotaCard quota={message.quota} />}
                 {!!message.attachments?.length && (
                     <div class="chat-attachments">
                         {message.attachments.map((attachment, index) => {
@@ -569,7 +525,7 @@ function EmptyState(
                         </div>
                         <p class="chat-empty-hint">
                             <kbd>Enter</kbd> 发送 · <kbd>Shift / Ctrl / ⌘</kbd>
-                            {" + "} <kbd>Enter</kbd> 换行
+                            + <kbd>Enter</kbd> 换行
                         </p>
                     </>
                 )}
@@ -699,9 +655,6 @@ export function ChatMessages(
                             )}
                         {!!state.streamCitations.length && (
                             <ChatCitations items={state.streamCitations} />
-                        )}
-                        {state.streamQuota && (
-                            <ChatQuotaCard quota={state.streamQuota} />
                         )}
                     </div>
                 </article>

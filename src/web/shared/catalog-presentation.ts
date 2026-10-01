@@ -22,10 +22,7 @@ export function sourceState(source: ListedSource): CatalogState {
     if (source.probe?.ok === false) {
         return { label: "探测异常", tone: "amber" };
     }
-    if (
-        source.probe?.ok ||
-        ["ready", "ok", "available"].includes(source.health ?? "")
-    ) return { label: "可用", tone: "green" };
+    if (source.probe?.ok) return { label: "可用", tone: "green" };
     return { label: "已启用", tone: "muted" };
 }
 
@@ -72,6 +69,20 @@ export function pluginState(plugin: ListedPlugin): CatalogState {
 
 export function canTogglePlugin(plugin: ListedPlugin): boolean {
     return plugin.canToggle === true && typeof plugin.enabled === "boolean";
+}
+
+/** Only the host's managed marker grants package removal; built-ins stay installed. */
+export function canUninstallPlugin(plugin: ListedPlugin): boolean {
+    return plugin.managed === true;
+}
+
+export function pluginDependents(
+    plugin: ListedPlugin,
+    plugins: readonly ListedPlugin[],
+): ListedPlugin[] {
+    return plugins.filter((entry) =>
+        entry.id !== plugin.id && entry.dependencies?.includes(plugin.id)
+    );
 }
 
 export function pluginManagementText(plugin: ListedPlugin): string {

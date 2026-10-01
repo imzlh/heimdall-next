@@ -95,6 +95,7 @@ Deno.test("source plugin lifecycle state survives composition restart", async ()
             proxySummary: { mode: "direct", selectedBy: "global" },
             versionstamp: saved?.versionstamp,
             models: [],
+            modelMap: {},
             capabilities: [
                 "generation.create",
                 "completion.create",

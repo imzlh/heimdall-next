@@ -9,6 +9,16 @@ import type {
 import { controlValue } from "./dom.ts";
 import { Icon } from "../shared/icons.tsx";
 import { SourceProxySelect } from "./source-proxy-select.tsx";
+import {
+    parseSourceModelMap,
+    type SourceModelMap,
+} from "@heimdall/admin-contracts/source-model-map.ts";
+import {
+    readSourceModelMapRows,
+    SourceModelMapEditor,
+    type SourceModelMapRow,
+    sourceModelMapRows,
+} from "./forms/source-model-map.tsx";
 import { sourceProxyLabel } from "../shared/proxy-presentation.ts";
 import { describeError, type ListedPreset } from "./api/admin.ts";
 import {
@@ -26,8 +36,12 @@ export type AddSourceStep = "details" | "choice" | "configure";
 
 export interface PresetFlowControls {
     readonly busy: boolean;
-    readonly onSave: (config: PresetJsonObject) => Promise<void>;
+    readonly onSave: (
+        config: PresetJsonObject,
+        modelMap?: SourceModelMap,
+    ) => Promise<void>;
     readonly onBusyChange: (busy: boolean) => void;
+    readonly onModelMapChange: (modelMap: SourceModelMap) => void;
 }
 
 export interface AddSourceFlowProps {
@@ -88,12 +102,17 @@ export function AddSourceFlow(
     const [proxy, setProxy] = useState<SourceProxySelection>(
         initialDraft?.proxy ?? { mode: "inherit" },
     );
+    const [modelRows, setModelRows] = useState<readonly SourceModelMapRow[]>(
+        sourceModelMapRows(initialDraft?.modelMap),
+    );
     const configurable = sources.filter((source) => source.schema);
     const [sourcePluginId, setSourcePluginId] = useState(
         configurable.length === 1 ? configurable[0]!.id : "",
     );
     const [error, setError] = useState("");
-    const [errorField, setErrorField] = useState<"name" | "priority" | null>(
+    const [errorField, setErrorField] = useState<
+        "name" | "priority" | "modelMap" | null
+    >(
         null,
     );
 
@@ -176,7 +195,7 @@ export function AddSourceFlow(
         setStep(to);
     }
 
-    function clearError(field: "name" | "priority") {
+    function clearError(field: "name" | "priority" | "modelMap") {
         if (errorField !== field) return;
         setError("");
         setErrorField(null);
@@ -195,6 +214,13 @@ export function AddSourceFlow(
             setError("优先级必须是安全范围内的整数。");
             setErrorField("priority");
             priorityInput.current?.focus();
+            return;
+        }
+        try {
+            readSourceModelMapRows(modelRows);
+        } catch (cause) {
+            setError(describeError(cause));
+            setErrorField("modelMap");
             return;
         }
         setError("");
@@ -221,6 +247,7 @@ export function AddSourceFlow(
                 name,
                 priority: Number(priority),
                 proxy,
+                modelMap: readSourceModelMapRows(modelRows),
                 mode: presetId ? "preset" : "custom",
                 ...(presetId ? { presetId } : {}),
             }, draft?.id));
@@ -258,6 +285,14 @@ export function AddSourceFlow(
         closed.current = true;
         closeResult.current = input.draft;
         setClosing(true);
+    }
+
+    function updateModelMap(mapping: SourceModelMap) {
+        const normalized = parseSourceModelMap(mapping);
+        setModelRows(sourceModelMapRows(normalized));
+        setDraft((current) =>
+            current ? { ...current, modelMap: normalized } : current
+        );
     }
 
     const selectedPreset = draft?.mode === "preset"
@@ -370,6 +405,16 @@ export function AddSourceFlow(
                             pool={proxyPool}
                             disabled={busy}
                             onChange={setProxy}
+                        />
+                        <SourceModelMapEditor
+                            rows={modelRows}
+                            idPrefix="source-create-model-map"
+                            disabled={busy}
+                            invalid={errorField === "modelMap"}
+                            onChange={(rows) => {
+                                setModelRows(rows);
+                                clearError("modelMap");
+                            }}
                         />
                         {error && (
                             <p
@@ -491,7 +536,8 @@ export function AddSourceFlow(
                             >
                                 {renderPreset?.(draft, {
                                     busy,
-                                    onSave: (config) => {
+                                    onModelMapChange: updateModelMap,
+                                    onSave: (config, modelMap) => {
                                         if (!selectedPreset?.sourcePluginId) {
                                             return Promise.reject(
                                                 new Error(
@@ -500,7 +546,15 @@ export function AddSourceFlow(
                                             );
                                         }
                                         return save({
-                                            draft,
+                                            draft: modelMap === undefined
+                                                ? draft
+                                                : {
+                                                    ...draft,
+                                                    modelMap:
+                                                        parseSourceModelMap(
+                                                            modelMap,
+                                                        ),
+                                                },
                                             sourcePluginId:
                                                 selectedPreset.sourcePluginId,
                                             config,
@@ -542,6 +596,7 @@ export function AddSourceFlow(
                                 onSelectSource={setSourcePluginId}
                                 onSave={save}
                                 onProbe={onProbe}
+                                onModelMapChange={updateModelMap}
                                 onBack={() => back("choice")}
                             />
                         )}

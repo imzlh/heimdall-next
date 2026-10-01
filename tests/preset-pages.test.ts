@@ -59,6 +59,8 @@ Deno.test("built-in preset page grants cover reviewed modules and permit explici
     const merged = withBuiltinPresetPages(inheritedPolicy);
     assertEquals(merged.trustedModules, {
         ...BUILTIN_PRESET_MODULES,
+        "heimdall.source.chathub:account-information":
+            "/admin/assets/plugins/chathub-account.js",
         ...inheritedPolicy.trustedModules,
     });
     assertEquals(merged.sandboxDocuments, inheritedPolicy.sandboxDocuments);

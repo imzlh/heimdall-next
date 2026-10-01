@@ -1,7 +1,11 @@
 import { useEffect, useState } from "hono/jsx/dom";
 import type { StatsTrendDto, StatsTrendMode } from "@heimdall/admin-contracts";
 import type { ConsoleSnapshot } from "@heimdall/admin-contracts/console.ts";
-import { loadStatsOverview, loadStatsSeries, loadStatsTrend } from "./api/stats.ts";
+import {
+    loadStatsOverview,
+    loadStatsSeries,
+    loadStatsTrend,
+} from "./api/stats.ts";
 import { describeError } from "./api/transport.ts";
 
 export type { StatsTrendMode };
@@ -59,11 +63,11 @@ export function useStats(revision: number, initial?: ConsoleSnapshot["stats"]) {
             ? loadStatsSeries().then((value) => ({
                 kind: "day" as const,
                 value,
-              }))
+            }))
             : loadStatsTrend(mode).then((value) => ({
                 kind: "interval" as const,
                 value,
-              }));
+            }));
         trend.then(
             (result) => {
                 if (!active) return;

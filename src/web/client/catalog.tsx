@@ -8,6 +8,7 @@ import {
     sourceProxySummaryLabel,
 } from "../shared/proxy-presentation.ts";
 import { Icon } from "../shared/icons.tsx";
+import { SourceHealthDetails } from "../shared/source-health.tsx";
 import {
     shortSourceId,
     sourceAvailabilityText,
@@ -22,6 +23,8 @@ export function SourceCard(
         onConfigure,
         onManage,
         onToggle,
+        onResetCooldown,
+        now,
         pending = false,
         status,
         statusInline = false,
@@ -32,6 +35,8 @@ export function SourceCard(
         onConfigure?: (id: string) => void;
         onManage?: (source: ListedSource) => void;
         onToggle?: (source: ListedSource) => void;
+        onResetCooldown?: (source: ListedSource) => void;
+        now?: number;
         pending?: boolean;
         status?: Child;
         /** Render plugin channel info directly; no fold-out. */
@@ -76,6 +81,14 @@ export function SourceCard(
             <p class="source-probe" title={sourceAvailabilityText(source)}>
                 {sourceAvailabilityText(source)}
             </p>
+            <SourceHealthDetails
+                source={source}
+                now={now}
+                pending={pending}
+                onReset={onResetCooldown
+                    ? () => onResetCooldown(source)
+                    : undefined}
+            />
             <p class="source-proxy-summary" title={PROXY_IMPLEMENTATION_NOTE}>
                 代理：{proxyPool
                     ? sourceProxyLabel(source.proxy, proxyPool)

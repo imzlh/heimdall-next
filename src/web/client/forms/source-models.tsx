@@ -26,7 +26,7 @@ export function SourceModels({ result, selected = [], disabled, onSelect }: {
                             发现 {result.models.length}{" "}
                             个模型{onSelect ? "，点击加入模型映射。" : "。"}
                         </p>
-                        <div class="source-model-list" aria-label="上游模型">
+                        <div class="source-model-list" aria-label="可用模型">
                             {result.models.map((model) =>
                                 onSelect
                                     ? (
@@ -62,26 +62,4 @@ export function SourceModels({ result, selected = [], disabled, onSelect }: {
                 )}
         </div>
     );
-}
-
-/** Preserve aliases already supplied by the operator while adding direct names. */
-export function addDiscoveredModel(raw: unknown, model: string): string {
-    const mapping = readModelMap(raw);
-    if (!Object.hasOwn(mapping, model)) mapping[model] = model;
-    return JSON.stringify(mapping, null, 2);
-}
-
-export function readModelMap(raw: unknown): Record<string, string> {
-    const parsed: unknown = typeof raw === "string"
-        ? JSON.parse(raw || "{}")
-        : raw ?? {};
-    if (
-        !parsed || typeof parsed !== "object" || Array.isArray(parsed) ||
-        Object.entries(parsed).some(([key, value]) =>
-            !key || typeof value !== "string" || !value
-        )
-    ) {
-        throw new TypeError("请先修正模型映射，再添加发现的模型。");
-    }
-    return Object.assign(Object.create(null), parsed);
 }

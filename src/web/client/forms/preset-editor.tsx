@@ -6,6 +6,7 @@ import type {
 } from "@heimdall/admin-contracts/preset-ui.ts";
 import { safeUiAssetPath } from "@heimdall/admin-contracts/ui.ts";
 import { sourceProxyValue } from "../../shared/proxy-presentation.ts";
+import type { SourceModelMap } from "@heimdall/admin-contracts/source-model-map.ts";
 import {
     mountPresetEditor,
     type PresetEditorActions,
@@ -46,11 +47,16 @@ export function PresetEditor(props: PresetEditorProps) {
                 context,
                 () => import(moduleUrl) as Promise<PresetUiModule>,
                 {
-                    onSubmit: (config) => handlers.current!.onSubmit(config),
+                    onModelMapChange: (modelMap) =>
+                        handlers.current!.onModelMapChange?.(modelMap),
+                    onSubmit: (config, modelMap) =>
+                        handlers.current!.onSubmit(config, modelMap),
                     ...(props.onPreview
                         ? {
-                            onPreview: (config: PresetJsonObject) =>
-                                handlers.current!.onPreview!(config),
+                            onPreview: (
+                                config: PresetJsonObject,
+                                modelMap?: SourceModelMap,
+                            ) => handlers.current!.onPreview!(config, modelMap),
                         }
                         : {}),
                     ...(props.onProbe
@@ -58,7 +64,12 @@ export function PresetEditor(props: PresetEditorProps) {
                             onProbe: (
                                 config: PresetJsonObject,
                                 signal: AbortSignal,
-                            ) => handlers.current!.onProbe!(config, signal),
+                                modelMap?: SourceModelMap,
+                            ) => handlers.current!.onProbe!(
+                                config,
+                                signal,
+                                modelMap,
+                            ),
                         }
                         : {}),
                 },

@@ -110,12 +110,15 @@ export interface SourceContext {
 export interface InferenceSource {
     readonly id: string;
     readonly capabilities: readonly SourceCapability[];
+    /** traits.model is the host-resolved execution model; payload remains public. */
     execute(
         input: OperationRequest,
         context: SourceContext,
     ): AsyncIterable<StreamFrame>;
     /** Optional reachability check. The plugin owns any network I/O. */
     probe?(signal: AbortSignal): Promise<SourceProbeResult>;
+    /** Redacted, plugin-owned UI state. Reads cached state without network I/O. */
+    uiSnapshot?(): JsonObject;
 }
 
 /** Result of a source reachability check. Model ids are optional catalog data. */

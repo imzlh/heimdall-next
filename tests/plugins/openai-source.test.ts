@@ -26,7 +26,7 @@ Deno.test("OpenAI source config rejects unsafe transport overrides", () => {
     assertThrows(() =>
         validateOpenAICompatibleSourceConfig({
             baseUrl: "https://provider.example/v1",
-            modelMap: JSON.parse('{"__proto__":"polluted"}'),
+            ...{ modelMap: { public: "upstream" } },
         })
     );
 });

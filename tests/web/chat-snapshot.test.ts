@@ -55,6 +55,26 @@ Deno.test("chat SSR snapshots retain all leaf choices while excluding private br
     assertFalse(JSON.stringify(snapshot).includes("private-"));
 });
 
+Deno.test("chat SSR snapshots ignore legacy provider quota metadata", async () => {
+    const snapshot = await loadChatSnapshot({
+        authorized: true,
+        available: true,
+        conversationId: conversation.id,
+        dispatch: () =>
+            Promise.resolve(Response.json({
+                conversations: [conversation],
+                conversation,
+                messages: [{
+                    ...message,
+                    quota: { meters: [{ name: "sample", remaining: 50 }] },
+                }],
+                data: [],
+            })),
+    });
+    assertEquals(snapshot.messages, [message]);
+    assertEquals(snapshot.error, undefined);
+});
+
 Deno.test("chat SSR snapshots preserve 10000 bounded leaf choices even when no branch is selected", async () => {
     const branches = Array.from({ length: 10_000 }, (_, index) => ({
         messageId: index === 0 ? "m".repeat(512) : `leaf-${index}`,
@@ -238,7 +258,8 @@ Deno.test("chat snapshots project only display records, keep tools generic, and 
                     {
                         ...message,
                         text: "host-secret reply",
-                        reasoning: "must-stay-private",
+                        reasoning: "host-secret 上游返回的思考内容",
+                        raw: { credentials: "must-stay-private" },
                         attachments: [{
                             mediaType: "image/png",
                             dataBase64: "YQ==",
@@ -286,6 +307,10 @@ Deno.test("chat snapshots project only display records, keep tools generic, and 
         dataBase64: "YQ==",
     }]);
     assertEquals(snapshot.messages[2]?.name, "plugin.operation");
+    assertEquals(
+        snapshot.messages[0]?.reasoning,
+        "[已隐藏] 上游返回的思考内容",
+    );
     assertFalse(JSON.stringify(snapshot).includes("host-secret"));
     assertFalse(JSON.stringify(snapshot).includes("must-stay-private"));
     assertEquals(requests.length, 4);

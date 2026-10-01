@@ -7,6 +7,45 @@
     "kind": "tool",
     "trust": "trusted",
     "capabilities": ["fetch_url", "web_search"],
+    "ui": [
+        {
+            "pluginId": "heimdall.tool.web",
+            "id": "capability",
+            "slot": "chat.composer",
+            "title": "联网检索",
+            "schema": {
+                "blocks": [
+                    {
+                        "kind": "toggle",
+                        "label": "联网检索",
+                        "checked": true,
+                        "checkedFrom": ["tool", "enabled"],
+                        "disabledFrom": ["chat", "busy"],
+                        "action": { "id": "chat.tool.toggle", "payload": {} }
+                    }
+                ]
+            }
+        },
+        {
+            "pluginId": "heimdall.tool.web",
+            "id": "conversation",
+            "slot": "chat.sidebar",
+            "title": "网页搜索与阅读",
+            "schema": {
+                "blocks": [
+                    {
+                        "kind": "text",
+                        "text": "助手可按需搜索网页、读取正文；引用随回复展示。"
+                    },
+                    {
+                        "kind": "badge",
+                        "label": "可用",
+                        "labelFrom": ["tool", "state"]
+                    }
+                ]
+            }
+        }
+    ],
     "permissions": {
         "network": true,
         "filesystem": "none",

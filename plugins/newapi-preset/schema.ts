@@ -14,8 +14,6 @@ export interface NewApiPresetConfig {
     readonly baseUrl: string;
     /** Secret; never returned by the redaction functions. */
     readonly apiKey?: string;
-    /** Client model name -> upstream model name. */
-    readonly modelMap?: Readonly<Record<string, string>>;
     /** Absolute path below `baseUrl`. */
     readonly endpoint?: string;
     /** Additional non-secret headers. */
@@ -30,7 +28,6 @@ export interface OpenAICompatibleSourceConfig {
     readonly id: string;
     readonly baseUrl: string;
     readonly apiKey?: string;
-    readonly modelMap?: Readonly<Record<string, string>>;
     readonly endpoint: string;
     readonly headers?: Readonly<Record<string, string>>;
 }
@@ -67,13 +64,6 @@ export const newApiPresetSchema = {
             minLength: 1,
             default: DEFAULT_ENDPOINT,
         },
-        modelMap: {
-            type: "object",
-            additionalProperties: {
-                type: "string",
-                minLength: 1,
-            },
-        },
         headers: {
             type: "object",
             additionalProperties: {
@@ -90,7 +80,6 @@ const ALLOWED_FIELDS = new Set([
     "id",
     "baseUrl",
     "apiKey",
-    "modelMap",
     "endpoint",
     "headers",
 ]);
@@ -138,14 +127,12 @@ export function validateNewApiPresetConfig(
     const endpoint = record.endpoint === undefined
         ? DEFAULT_ENDPOINT
         : normalizeEndpoint(record.endpoint);
-    const modelMap = normalizeModelMap(record.modelMap);
     const headers = normalizeHeaders(record.headers);
 
     return {
         id,
         baseUrl,
         ...(apiKey === undefined ? {} : { apiKey }),
-        ...(modelMap === undefined ? {} : { modelMap }),
         endpoint,
         ...(headers === undefined ? {} : { headers }),
     };
@@ -202,22 +189,6 @@ function normalizeEndpoint(value: unknown): string {
         throw new TypeError("endpoint cannot contain path traversal segments");
     }
     return segments.length === 0 ? "/" : `/${segments.join("/")}`;
-}
-
-function normalizeModelMap(
-    value: unknown,
-): Readonly<Record<string, string>> | undefined {
-    if (value === undefined) return undefined;
-    const record = asPlainRecord(value, "modelMap");
-    const entries: [string, string][] = [];
-    for (const [rawKey, rawValue] of Object.entries(record)) {
-        const key = nonEmptyString(rawKey, "modelMap key");
-        rejectPrototypeKey(key, "modelMap key");
-        entries.push([key, nonEmptyString(rawValue, `modelMap.${key}`)]);
-    }
-    if (entries.length === 0) return undefined;
-    entries.sort(([left], [right]) => left.localeCompare(right));
-    return Object.fromEntries(entries);
 }
 
 function normalizeHeaders(

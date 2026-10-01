@@ -108,6 +108,32 @@ export class TestElement extends TestNode {
     get disabled(): boolean {
         return this.hasAttribute("disabled");
     }
+    set disabled(value: boolean) {
+        if (value) this.setAttribute("disabled", "");
+        else this.removeAttribute("disabled");
+    }
+    get hidden(): boolean {
+        return this.hasAttribute("hidden");
+    }
+    set hidden(value: boolean) {
+        if (value) this.setAttribute("hidden", "");
+        else this.removeAttribute("hidden");
+    }
+    get dataset(): Record<string, string> {
+        return Object.fromEntries(
+            [...this.attributes].filter(([key]) => key.startsWith("data-")).map(
+                (
+                    [key, value],
+                ) => [
+                    key.slice(5).replace(
+                        /-([a-z])/g,
+                        (_match, letter: string) => letter.toUpperCase(),
+                    ),
+                    value,
+                ],
+            ),
+        );
+    }
 
     get open(): boolean {
         return this.hasAttribute("open");
@@ -204,7 +230,8 @@ export class TestElement extends TestNode {
 
 class TestSvgElement extends TestElement {}
 
-class TestDocument {
+class TestDocument extends EventTarget {
+    visibilityState: "visible" | "hidden" = "visible";
     readonly body = new TestElement("body", this);
     readonly head = new TestElement("head", this);
     activeElement: TestElement | null = this.body;

@@ -313,6 +313,37 @@
     color: var(--subtle);
     font-size: 11px;
 }
+.source-health-details {
+    display: grid;
+    gap: 0.35rem;
+    margin: 0.65rem 0;
+    padding: 0.75rem;
+    border: 1px solid color-mix(in srgb, var(--warning) 30%, transparent);
+    border-radius: 10px;
+    background: var(--warning-soft);
+    color: var(--muted);
+    font-size: 0.75rem;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+}
+.source-health-details strong {
+    font-weight: 500;
+    color: var(--text);
+}
+.source-health-details p {
+    margin: 0.15rem 0;
+}
+.source-health-details time {
+    font-variant-numeric: tabular-nums;
+}
+.source-recovery-button {
+    justify-self: start;
+    font-size: inherit;
+}
+.channels-state .source-health-details {
+    min-width: 170px;
+    max-width: 280px;
+}
 .catalog-section {
     min-width: 0;
 }
@@ -546,6 +577,142 @@
 }
 .plugin-card.disabled .plugin-card-title h3 {
     color: var(--muted);
+}
+.plugin-heading-actions,
+.plugin-operation-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+.plugin-heading-actions {
+    justify-content: flex-end;
+}
+.plugin-operation-buttons {
+    flex-shrink: 0;
+}
+.plugin-card-actions {
+    flex-wrap: wrap;
+}
+.plugin-card-actions .plugin-remove-button {
+    color: var(--danger);
+    min-height: 30px;
+    padding: 5px 8px;
+    font-size: 11px;
+}
+.plugin-dialog {
+    width: min(560px, calc(100vw - 32px));
+}
+.plugin-dialog form,
+.plugin-package-picker,
+.plugin-package-preview {
+    display: grid;
+    gap: 14px;
+    min-width: 0;
+}
+.plugin-dialog .plugin-install-description,
+.plugin-dialog .plugin-remove-description {
+    font-size: 13px;
+    line-height: 1.8;
+}
+.plugin-package-picker {
+    gap: 8px;
+    padding: 18px;
+    border: 1px dashed var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface-muted);
+}
+.plugin-package-picker > label {
+    color: var(--text);
+    font-size: 13px;
+    font-weight: 600;
+}
+.plugin-package-picker input {
+    max-width: 100%;
+    min-width: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+.plugin-package-picker input::file-selector-button {
+    margin-inline-end: 12px;
+    padding: 8px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-control);
+    color: var(--text);
+    background: var(--surface);
+    cursor: pointer;
+    font: inherit;
+}
+.plugin-package-picker > small {
+    color: var(--subtle);
+}
+.plugin-package-preview {
+    padding: 18px;
+    gap: 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+.plugin-package-preview header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 10px;
+}
+.plugin-package-preview code,
+.plugin-package-preview h3,
+.plugin-package-preview p,
+.plugin-dialog > code,
+.plugin-remove-blocked code {
+    overflow-wrap: anywhere;
+}
+.plugin-package-preview p,
+.plugin-preview-section h4,
+.plugin-checksum {
+    font-size: 12px;
+}
+.plugin-preview-section h4 {
+    margin: 0 0 8px;
+    color: var(--muted);
+    font-weight: 500;
+}
+.plugin-checksum code {
+    display: block;
+    font-size: 11px;
+}
+.plugin-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 18px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border);
+}
+.plugin-dialog .form-error,
+.plugin-remove-blocked {
+    margin-top: 12px;
+}
+.plugin-remove-blocked {
+    padding: 12px 14px;
+    border-radius: var(--radius-sm);
+    background: var(--warning-soft);
+    font-size: 12px;
+}
+.plugin-remove-blocked p {
+    color: var(--warning);
+}
+.plugin-remove-blocked ul {
+    margin: 8px 0 0;
+    padding-left: 18px;
+}
+.plugin-dialog .plugin-confirm-remove {
+    background: var(--danger);
+    color: var(--surface);
+}
+.plugin-dialog .plugin-confirm-remove:hover:not(:disabled) {
+    filter: brightness(.92);
 }
 .preset-cards {
     grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));

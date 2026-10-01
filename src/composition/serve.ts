@@ -5,7 +5,7 @@ import { openSqliteRequestStore } from "../storage/sqlite-requests.ts";
 import { DenoKvConfigStore } from "../storage/deno-kv.ts";
 import { loadBuiltinComposition } from "./builtins.ts";
 import { apiPluginTarget } from "../http/manifest-routes.ts";
-import { loadUiContributions } from "./ui-contributions.ts";
+import { loadRuntimeUiContributions } from "./ui-contributions.ts";
 import { loadSourceSchemas } from "./source-schemas.ts";
 import { loadUiPolicy } from "./ui-policy.ts";
 import { loadPresetPages, withBuiltinPresetPages } from "./preset-pages.ts";
@@ -14,6 +14,10 @@ import { createServer } from "./server.ts";
 import { createRequestLifecycle } from "./request-lifecycle.ts";
 import { createRuntimeSettings } from "./runtime-settings.ts";
 import { startBackgroundTasks } from "./background-tasks.ts";
+import {
+    type RetentionRuntime,
+    startRetentionMaintenance,
+} from "./retention-runtime.ts";
 import {
     readServerEnvironment,
     type ServerEnvironment,
@@ -37,8 +41,16 @@ export async function serve(options: ServeOptions = {}): Promise<void> {
     await using resources = new AsyncDisposableStack();
     const kv = await Deno.openKv(environment.kvPath);
     resources.defer(() => kv.close());
-    const requests = openSqliteRequestStore(environment.requestsPath);
+    const requests = openSqliteRequestStore(environment.requestsPath, {
+        recoverInterrupted: true,
+    });
     resources.defer(() => requests.close());
+    if (requests.recoveredRequests > 0) {
+        log.warn(
+            "startup",
+            `已将上次进程中断遗留的 ${requests.recoveredRequests} 条请求标记为失败。`,
+        );
+    }
     const chat = openSqliteChatStore(environment.chatPath);
     resources.defer(() => chat.close());
     const assetStore = openSqliteChatAssetStore(
@@ -57,12 +69,30 @@ export async function serve(options: ServeOptions = {}): Promise<void> {
         );
     }
 
-    const runtimeSettings = createRuntimeSettings(environment.runtimeSettings);
+    const runtimeSettings = createRuntimeSettings({
+        ...environment.runtimeSettings,
+        requestRetentionDays:
+            environment.runtimeSettings.requestRetentionDays ??
+                environment.retentionDays,
+    });
+    const configStore = new DenoKvConfigStore(kv);
+    const maintenance: { current?: RetentionRuntime } = {};
     const builtins = await loadBuiltinComposition({
-        configStore: new DenoKvConfigStore(kv),
+        configStore,
         runtimeSettings,
+        maintenanceStatus: () => maintenance.current?.snapshot(),
     });
     resources.defer(() => builtins.close());
+    maintenance.current = resources.use(
+        await startRetentionMaintenance({
+            store: configStore,
+            settings: runtimeSettings,
+            requests,
+            chat,
+            assets: chatAssets,
+            logger: log,
+        }),
+    );
     const adminUiPolicy = withBuiltinPresetPages(
         await loadUiPolicy(
             environment.adminUiPolicyPath,
@@ -82,7 +112,8 @@ export async function serve(options: ServeOptions = {}): Promise<void> {
         adminManagement: builtins.management,
         adminAuthToken: environment.adminAuthToken,
         adminAssetsRoot: environment.adminAssetsRoot,
-        adminUiContributions: loadUiContributions,
+        adminUiContributions: () =>
+            loadRuntimeUiContributions(builtins.pluginHost),
         adminUiSourcePlugins: builtins.sourcePluginIds,
         adminUiSchemas: loadSourceSchemas,
         adminUiPolicy,
@@ -121,8 +152,6 @@ export async function serve(options: ServeOptions = {}): Promise<void> {
     resources.use(startBackgroundTasks(
         builtins.sources,
         runtimeSettings,
-        requests,
-        environment.retentionDays,
         log,
     ));
 

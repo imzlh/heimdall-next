@@ -12,6 +12,7 @@ import type {
     UsageTotals,
 } from "@heimdall/storage";
 import { StorageConflictError, StorageNotFoundError } from "@heimdall/storage";
+import { basename, dirname, join, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { queryModelStats, queryWindowStats } from "./sqlite-request-stats.ts";
 
@@ -143,10 +144,20 @@ interface RunResult {
  */
 export class SqliteRequestStore implements RequestStore {
     readonly #db: DatabaseSync;
+    readonly #resources: DisposableStack;
+    /** Records finalized by this open's explicitly requested startup recovery. */
+    readonly recoveredRequests: number;
     #closed = false;
 
-    constructor(db: DatabaseSync) {
+    constructor(
+        db: DatabaseSync,
+        resources?: DisposableStack,
+        recoveredRequests = 0,
+    ) {
         this.#db = db;
+        this.#resources = resources ?? new DisposableStack();
+        if (resources === undefined) this.#resources.defer(() => db.close());
+        this.recoveredRequests = recoveredRequests;
     }
 
     createRequest(record: NewRequestRecord): void {
@@ -489,7 +500,7 @@ export class SqliteRequestStore implements RequestStore {
         }
         const rows = this.#db.prepare(
             `SELECT request_id FROM requests
-             WHERE received_at < ?
+             WHERE received_at < ? AND status IN ('completed', 'error', 'cancelled')
              ORDER BY received_at ASC, request_id ASC
              LIMIT ?`,
         ).all(before, maxDeletes) as unknown as { request_id: string }[];
@@ -518,7 +529,7 @@ export class SqliteRequestStore implements RequestStore {
     close(): void {
         if (this.#closed) return;
         this.#closed = true;
-        this.#db.close();
+        this.#resources.dispose();
     }
 
     #alive(): void {
@@ -526,15 +537,45 @@ export class SqliteRequestStore implements RequestStore {
     }
 }
 
-/** Open or create the request journal. Parent directories are created. */
-export function openSqliteRequestStore(path: string): SqliteRequestStore {
-    const file = path.trim();
-    if (file.length === 0) {
+export interface SqliteRequestStoreOptions {
+    /**
+     * Finalize unfinished records from a previous process before accepting new
+     * work. Disabled for ordinary opens; executable startup opts in explicitly.
+     */
+    readonly recoverInterrupted?: boolean;
+}
+
+/**
+ * Open the single writer for a request journal, creating parent directories.
+ * File-backed stores retain a nonblocking OS lock until close (or process exit).
+ */
+export function openSqliteRequestStore(
+    path: string,
+    options: SqliteRequestStoreOptions = {},
+): SqliteRequestStore {
+    const input = path.trim();
+    if (input.length === 0) {
         throw new TypeError("request store path is required");
     }
-    const parent = parentDirectory(file);
-    if (parent !== undefined) Deno.mkdirSync(parent, { recursive: true });
+    const file = input === ":memory:" ? input : requestDatabasePath(input);
+    using resources = new DisposableStack();
+    if (file !== ":memory:") {
+        const ownership = resources.use(Deno.openSync(`${file}.lock`, {
+            read: true,
+            write: true,
+            create: true,
+        }));
+        if (!ownership.tryLockSync(true)) {
+            throw new StorageConflictError(
+                "request journal is already open for writing",
+            );
+        }
+        // Keep the sidecar on disk. Removing it can let another process lock a
+        // replacement file while an existing owner still holds the old handle.
+    }
     const db = new DatabaseSync(file);
+    // Registered after ownership so the database closes before the lock releases.
+    resources.defer(() => db.close());
     db.exec("PRAGMA journal_mode = WAL");
     db.exec("PRAGMA foreign_keys = ON");
     db.exec("PRAGMA busy_timeout = 5000");
@@ -542,7 +583,6 @@ export function openSqliteRequestStore(path: string): SqliteRequestStore {
         user_version: number;
     };
     if (version.user_version > 1) {
-        db.close();
         throw new Error(
             `unsupported request journal schema version ${version.user_version}`,
         );
@@ -553,7 +593,61 @@ export function openSqliteRequestStore(path: string): SqliteRequestStore {
         db.exec("ALTER TABLE requests ADD COLUMN first_token_at TEXT");
     }
     if (version.user_version < 1) db.exec("PRAGMA user_version = 1");
-    return new SqliteRequestStore(db);
+    const recoveredRequests = options.recoverInterrupted === true
+        ? recoverInterruptedRequests(db)
+        : 0;
+    return new SqliteRequestStore(db, resources.move(), recoveredRequests);
+}
+
+function requestDatabasePath(path: string): string {
+    const absolute = resolve(path);
+    const name = basename(absolute);
+    if (Deno.build.os === "windows" && /[. ]$/.test(name)) {
+        throw new TypeError(
+            "request journal filename must not end in a dot or space",
+        );
+    }
+    const parent = dirname(absolute);
+    Deno.mkdirSync(parent, { recursive: true });
+    try {
+        const canonical = Deno.realPathSync(absolute);
+        const info = Deno.statSync(canonical);
+        if (!info.isFile) {
+            throw new TypeError("request journal path must be a file");
+        }
+        if (info.nlink !== null && info.nlink > 1) {
+            throw new TypeError("request journal must not use hard links");
+        }
+        return canonical;
+    } catch (error) {
+        if (!(error instanceof Deno.errors.NotFound)) throw error;
+    }
+    try {
+        if (Deno.lstatSync(absolute).isSymlink) {
+            throw new TypeError(
+                "request journal symbolic link must target an existing file",
+            );
+        }
+    } catch (error) {
+        if (!(error instanceof Deno.errors.NotFound)) throw error;
+    }
+    // Resolving the physical parent also unifies aliases before a DB exists.
+    return join(Deno.realPathSync(parent), name);
+}
+
+/** A single UPDATE is atomic; callers have sole writer ownership at this point. */
+function recoverInterruptedRequests(db: DatabaseSync): number {
+    const result = db.prepare(
+        `UPDATE requests SET status = 'error', completed_at = ?, error_json = ?
+         WHERE status IN ('pending', 'running')`,
+    ).run(
+        new Date().toISOString(),
+        encodeJson({
+            code: "process_interrupted",
+            message: "服务进程已中断，请重新发起请求。",
+        }),
+    ) as RunResult;
+    return Number(result.changes);
 }
 
 function columns(db: DatabaseSync, table: string): Set<string> {
@@ -669,13 +763,6 @@ function clampLimit(
 
 function numberOrZero(value: number | null): number {
     return value ?? 0;
-}
-
-function parentDirectory(path: string): string | undefined {
-    const normalized = path.replaceAll("\\", "/");
-    const index = normalized.lastIndexOf("/");
-    if (index <= 0) return undefined;
-    return path.slice(0, index);
 }
 
 function isConstraint(error: unknown, kind: string): boolean {

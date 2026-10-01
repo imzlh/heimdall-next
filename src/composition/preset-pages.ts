@@ -13,10 +13,19 @@ export const BUILTIN_PRESET_MODULES: Readonly<Record<string, string>> = {
     "heimdall.preset.chathub:setup": "/admin/assets/plugins/chathub-setup.js",
 };
 
+const BUILTIN_SLOT_MODULES: Readonly<Record<string, string>> = {
+    "heimdall.source.chathub:account-information":
+        "/admin/assets/plugins/chathub-account.js",
+};
+
 export function withBuiltinPresetPages(policy: UiPolicy): UiPolicy {
     return {
         ...policy,
-        trustedModules: { ...BUILTIN_PRESET_MODULES, ...policy.trustedModules },
+        trustedModules: {
+            ...BUILTIN_PRESET_MODULES,
+            ...BUILTIN_SLOT_MODULES,
+            ...policy.trustedModules,
+        },
     };
 }
 

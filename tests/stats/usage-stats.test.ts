@@ -196,7 +196,9 @@ Deno.test("stats trend serves wall-clock hour buckets", async () => {
     assertEquals(first.label, "12:00");
     // r1 (15:59:59.999Z) lands in the 23:00 Shanghai bucket; r2 (16:00Z) in midnight's.
     const buckets = trend.series.map(
-        (point: { label: string; requestCount: number; totalTokens: number }) => [
+        (
+            point: { label: string; requestCount: number; totalTokens: number },
+        ) => [
             point.label,
             point.requestCount,
             point.totalTokens,
@@ -208,7 +210,8 @@ Deno.test("stats trend serves wall-clock hour buckets", async () => {
     assertEquals(buckets[21], ["09:00", 1, 0]);
     assertEquals(buckets[22], ["10:00", 1, 10]);
     assertEquals(
-        buckets.filter((entry: [string, number, number]) => entry[1] > 0).length,
+        buckets.filter((entry: [string, number, number]) => entry[1] > 0)
+            .length,
         5,
     );
 });

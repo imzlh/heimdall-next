@@ -52,6 +52,13 @@ export function readServerEnvironment(
                 env("HEIMDALL_PROBE_INTERVAL_MS"),
             ),
             titleModel: optional("HEIMDALL_CHAT_TITLE_MODEL") ?? "",
+            requestRetentionDays: readRetentionDays(
+                env("HEIMDALL_REQUEST_RETENTION_DAYS"),
+            ),
+            chatRetentionDays: readRetentionDays(
+                env("HEIMDALL_CHAT_RETENTION_DAYS"),
+                "HEIMDALL_CHAT_RETENTION_DAYS",
+            ),
         },
         adminAuthToken: optional("HEIMDALL_ADMIN_TOKEN"),
         adminAssetsRoot: optional("HEIMDALL_ADMIN_ASSETS"),

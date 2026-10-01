@@ -31,7 +31,12 @@ export function generationPayload(input: OperationRequest): GenerationRequest {
             }
         }
     }
-    return request;
+    return {
+        ...request,
+        ...(input.traits.model === undefined
+            ? {}
+            : { model: input.traits.model }),
+    };
 }
 
 export function conversationMessages(
@@ -85,4 +90,14 @@ export function conversationMessages(
 
 export function conversationText(request: GenerationRequest): string {
     return flattenConversation(conversationMessages(request));
+}
+
+/** The thinking level the chat plane rides in on `extensions.raw.reasoning_effort`. */
+export function reasoningEffortOf(
+    request: GenerationRequest,
+): string | undefined {
+    const raw = (request.extensions as Record<string, unknown> | undefined)
+        ?.raw as Record<string, unknown> | undefined;
+    const effort = raw?.reasoning_effort;
+    return typeof effort === "string" ? effort : undefined;
 }

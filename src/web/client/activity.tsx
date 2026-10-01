@@ -128,7 +128,10 @@ export function ActivityPanel({ revision, initial }: {
             <div class="panel-heading">
                 <div>
                     <h2 id="activity-title">最近请求</h2>
-                    <p>最近 20 条请求 · <a href="/admin?view=requests">查看全部</a></p>
+                    <p>
+                        最近 20 条请求 ·{" "}
+                        <a href="/admin?view=requests">查看全部</a>
+                    </p>
                 </div>
                 <span class="status-chip chip-muted">
                     {usage
@@ -201,7 +204,11 @@ function RequestTableRows(
                                     <a
                                         class="request-id-inline"
                                         title={request.requestId}
-                                        href={`/admin?view=requests&id=${encodeURIComponent(request.requestId ?? "")}`}
+                                        href={`/admin?view=requests&id=${
+                                            encodeURIComponent(
+                                                request.requestId ?? "",
+                                            )
+                                        }`}
                                     >
                                         {request.requestId}
                                     </a>

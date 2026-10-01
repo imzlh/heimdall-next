@@ -2,13 +2,16 @@ import {
     parsePresetUiAction,
     parsePresetUiContext,
     parsePresetUiFeedback,
+    parsePresetUiModelMap,
     PRESET_UI_ACTION_EVENT,
     PRESET_UI_FEEDBACK_EVENT,
+    PRESET_UI_MODEL_MAP_EVENT,
     type PresetJsonObject,
     type PresetUiContext,
     type PresetUiFeedback,
 } from "@heimdall/admin-contracts/preset-ui.ts";
 import type { SourceDraftProbeResult } from "@heimdall/admin-contracts/source-probe.ts";
+import type { SourceModelMap } from "@heimdall/admin-contracts/source-model-map.ts";
 
 export type PresetUiCleanup = () => void | Promise<void>;
 export interface PresetUiModule {
@@ -19,13 +22,19 @@ export interface PresetUiModule {
 }
 
 export interface PresetEditorActions {
-    readonly onSubmit: (config: PresetJsonObject) => Promise<void>;
+    readonly onModelMapChange?: (modelMap: SourceModelMap) => void;
+    readonly onSubmit: (
+        config: PresetJsonObject,
+        modelMap?: SourceModelMap,
+    ) => Promise<void>;
     readonly onPreview?: (
         config: PresetJsonObject,
+        modelMap?: SourceModelMap,
     ) => Promise<PresetJsonObject | void>;
     readonly onProbe?: (
         config: PresetJsonObject,
         signal: AbortSignal,
+        modelMap?: SourceModelMap,
     ) => Promise<SourceDraftProbeResult>;
 }
 
@@ -91,14 +100,15 @@ export function mountPresetEditor(
             try {
                 let probe: SourceDraftProbeResult | undefined;
                 if (action.kind === "save") {
-                    await actions.onSubmit(action.config);
+                    await actions.onSubmit(action.config, action.modelMap);
                     saved = true;
                 } else if (action.kind === "probe") {
                     probe = await actions.onProbe!(
                         action.config,
                         lifetime.signal,
+                        action.modelMap,
                     );
-                } else await actions.onPreview!(action.config);
+                } else await actions.onPreview!(action.config, action.modelMap);
                 feedback({
                     kind: action.kind,
                     status: "success",
@@ -128,7 +138,23 @@ export function mountPresetEditor(
             await callback?.();
         } catch { /* Plugin cleanup cannot interrupt the host page. */ }
     };
+    const receiveModelMap = (event: Event) => {
+        if (
+            disposed || failed || busy || saved || event.target !== element ||
+            !(event instanceof CustomEvent)
+        ) return;
+        try {
+            actions.onModelMapChange?.(parsePresetUiModelMap(event.detail));
+        } catch {
+            feedback({
+                kind: "save",
+                status: "error",
+                errors: { _form: "模型映射无效，请检查模型名称后重试。" },
+            });
+        }
+    };
     element.addEventListener(PRESET_UI_ACTION_EVENT, receive);
+    element.addEventListener(PRESET_UI_MODEL_MAP_EVENT, receiveModelMap);
     void Promise.resolve().then(load).then(async (module) => {
         if (disposed) return;
         if (typeof module.mount !== "function") {
@@ -142,6 +168,7 @@ export function mountPresetEditor(
         if (disposed) return;
         failed = true;
         element.removeEventListener(PRESET_UI_ACTION_EVENT, receive);
+        element.removeEventListener(PRESET_UI_MODEL_MAP_EVENT, receiveModelMap);
         report();
     });
     return async () => {
@@ -149,6 +176,7 @@ export function mountPresetEditor(
         disposed = true;
         lifetime.abort();
         element.removeEventListener(PRESET_UI_ACTION_EVENT, receive);
+        element.removeEventListener(PRESET_UI_MODEL_MAP_EVENT, receiveModelMap);
         await release();
     };
 }

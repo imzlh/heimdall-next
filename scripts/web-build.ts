@@ -15,22 +15,32 @@ export async function browserBuildCommands(watch = false): Promise<string[][]> {
             if (error instanceof Deno.errors.NotFound) continue;
             throw error;
         }
+        const addModule = (path: unknown, kind: string) => {
+            if (
+                typeof path !== "string" ||
+                !/^\/admin\/assets\/plugins\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.js$/
+                    .test(path)
+            ) throw new Error(`Invalid ${kind} build output in ${entry.name}`);
+            const output = path.slice("/admin/assets/".length, -3);
+            const input = `plugins/${entry.name}/ui.tsx`;
+            if (entries.has(output) && entries.get(output) !== input) {
+                throw new Error(`Duplicate browser output ${output}`);
+            }
+            entries.set(output, input);
+        };
         const page = manifest.presetPage as
             | { modulePath?: unknown }
             | undefined;
-        if (manifest.kind !== "preset" || !page) continue;
-        if (
-            typeof page.modulePath !== "string" ||
-            !/^\/admin\/assets\/plugins\/(?:[a-zA-Z0-9_-]+\/)*[a-zA-Z0-9_-]+\.js$/
-                .test(page.modulePath)
+        if (manifest.kind === "preset" && page) {
+            addModule(page.modulePath, "preset");
+        }
+        for (
+            const contribution of Array.isArray(manifest.ui) ? manifest.ui : []
         ) {
-            throw new Error(`Invalid preset build output in ${entry.name}`);
+            if (contribution?.render?.kind === "trusted") {
+                addModule(contribution.render.modulePath, "UI module");
+            }
         }
-        const output = page.modulePath.slice("/admin/assets/".length, -3);
-        if (entries.has(output)) {
-            throw new Error(`Duplicate browser output ${output}`);
-        }
-        entries.set(output, `plugins/${entry.name}/ui.tsx`);
     }
     return [...entries].map(([name, entry]) => [
         "bundle",

@@ -1,5 +1,9 @@
 import { payloadRecord, performRequest } from "./transport.ts";
 import type { RuntimeSettingsEnvelope } from "./types.ts";
+import {
+    readMaintenanceStatus,
+    readRetentionDays,
+} from "../../shared/retention-settings.ts";
 
 export async function loadRuntimeSettings(): Promise<RuntimeSettingsEnvelope> {
     const result = await performRequest("/api/admin/settings");
@@ -12,6 +16,8 @@ export async function saveRuntimeSettings(
         limitPerMinute?: number;
         probeIntervalMs?: number;
         titleModel?: string;
+        requestRetentionDays?: number;
+        chatRetentionDays?: number;
     },
     versionstamp = "",
 ): Promise<RuntimeSettingsEnvelope> {
@@ -32,10 +38,19 @@ function readRuntimeSettings(
         limitPerMinute?: number;
         probeIntervalMs?: number;
         titleModel?: string;
+        requestRetentionDays?: number;
+        chatRetentionDays?: number;
     } = {},
 ): RuntimeSettingsEnvelope {
     const body = payloadRecord(data);
     const settings = payloadRecord(body?.settings);
+    const requestRetentionDays = readRetentionDays(
+        settings?.requestRetentionDays ?? fallback.requestRetentionDays,
+    );
+    const chatRetentionDays = readRetentionDays(
+        settings?.chatRetentionDays ?? fallback.chatRetentionDays,
+    );
+    const maintenance = readMaintenanceStatus(body?.maintenance);
     return {
         settings: {
             proxyKeyConfigured: settings?.proxyKeyConfigured === true,
@@ -48,7 +63,12 @@ function readRuntimeSettings(
             titleModel: typeof settings?.titleModel === "string"
                 ? settings.titleModel
                 : fallback.titleModel ?? "",
+            ...(requestRetentionDays === undefined
+                ? {}
+                : { requestRetentionDays }),
+            ...(chatRetentionDays === undefined ? {} : { chatRetentionDays }),
         },
         etag,
+        ...(maintenance ? { maintenance } : {}),
     };
 }

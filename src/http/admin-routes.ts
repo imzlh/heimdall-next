@@ -10,11 +10,19 @@ import type {
     UpdateSourceInput,
 } from "@heimdall/admin-contracts";
 import { StorageConflictError } from "@heimdall/storage";
+import {
+    parseSourceModelMap,
+    type SourceModelMap,
+} from "@heimdall/admin-contracts/source-model-map.ts";
 import type { RequestStore } from "@heimdall/storage";
 import type { MountableApp, ServerApp, ServerEnv } from "./app.ts";
 import type { ModelsResponse } from "./public-routes.ts";
 import { createRequestJournalRoutes } from "./request-journal.ts";
 import { createSystemLogRoutes } from "./system-log-routes.ts";
+import {
+    createPluginPackageRoutes,
+    type InstallPluginHandler,
+} from "./plugin-package-routes.ts";
 import type { SystemLog } from "@heimdall/core/observability/system-log.ts";
 import { assertNoRouteConflicts, mountRouteGroup } from "./route-validation.ts";
 import { createStatsRoutes } from "./stats-routes.ts";
@@ -220,6 +228,7 @@ export interface AdminManagementOptions {
         context: AdminRouteContext,
         pluginId: string,
     ) => MaybePromise<unknown>;
+    readonly installPlugin?: InstallPluginHandler;
     readonly probeSource?: (
         context: AdminRouteContext,
         sourceId: string,
@@ -229,6 +238,12 @@ export interface AdminManagementOptions {
         readonly message: string;
         readonly health: "ready" | "cooldown";
     }>;
+    readonly clearSourceCooldown?: (
+        context: AdminRouteContext,
+        sourceId: string,
+    ) => MaybePromise<
+        import("@heimdall/admin-contracts/source-health.ts").SourceHealthResetDto
+    >;
     readonly getSettings?: (
         context: AdminRouteContext,
     ) => MaybePromise<AdminWriteResult>;
@@ -239,6 +254,8 @@ export interface AdminManagementOptions {
             readonly limitPerMinute?: number;
             readonly probeIntervalMs?: number;
             readonly titleModel?: string;
+            readonly requestRetentionDays?: number;
+            readonly chatRetentionDays?: number;
         },
         expectedVersionstamp?: string,
     ) => MaybePromise<AdminWriteResult>;
@@ -443,9 +460,11 @@ export function createAdminRoutes(
             "渠道",
             input.name !== undefined
                 ? `更新渠道「${input.name}」`
-                : `更新渠道 ${
-                    await narrateSourceLabel(options, adminContext, sourceId)
-                }`,
+                : `更新渠道 ${await narrateSourceLabel(
+                    options,
+                    adminContext,
+                    sourceId,
+                )}`,
             `id=${sourceId} · 字段=${Object.keys(input).join(" / ")}`,
         );
         return writeJson(
@@ -525,9 +544,11 @@ export function createAdminRoutes(
         recordAction(
             options.systemLog,
             "渠道",
-            `保存渠道配置 ${
-                await narrateSourceLabel(options, adminContext, sourceId)
-            }`,
+            `保存渠道配置 ${await narrateSourceLabel(
+                options,
+                adminContext,
+                sourceId,
+            )}`,
             `id=${sourceId}`,
         );
         return writeJson(
@@ -566,9 +587,11 @@ export function createAdminRoutes(
         recordAction(
             options.systemLog,
             "预设",
-            `应用预设 ${
-                await narratePresetLabel(options, adminContext, presetId)
-            }`,
+            `应用预设 ${await narratePresetLabel(
+                options,
+                adminContext,
+                presetId,
+            )}`,
             `id=${presetId}`,
         );
         return writeJson(
@@ -640,6 +663,8 @@ export function createAdminRoutes(
             limitPerMinute?: number;
             probeIntervalMs?: number;
             titleModel?: string;
+            requestRetentionDays?: number;
+            chatRetentionDays?: number;
         } = {};
         if (body.proxyKey !== undefined) {
             if (typeof body.proxyKey !== "string") {
@@ -680,6 +705,23 @@ export function createAdminRoutes(
                 );
             }
             patch.titleModel = body.titleModel;
+        }
+        for (
+            const key of ["requestRetentionDays", "chatRetentionDays"] as const
+        ) {
+            if (body[key] === undefined) continue;
+            const value = body[key];
+            if (
+                typeof value !== "number" || !Number.isInteger(value) ||
+                value < 0 || value > 3650
+            ) {
+                throw new AdminRouteError(
+                    400,
+                    "invalid_request",
+                    `${key} must be an integer from 0 to 3650`,
+                );
+            }
+            patch[key] = value;
         }
         const result = await invokeManagement(() =>
             handler(adminContext, patch, expectedVersion(context))
@@ -745,13 +787,39 @@ export function createAdminRoutes(
         recordAction(
             options.systemLog,
             "渠道",
-            `探测渠道 ${
-                await narrateSourceLabel(options, adminContext, sourceId)
-            }`,
+            `探测渠道 ${await narrateSourceLabel(
+                options,
+                adminContext,
+                sourceId,
+            )}`,
             result.ok ? "成功" : result.message,
             result.ok ? "info" : "warn",
         );
         return json(context, { probe: result }, adminContext.requestId);
+    });
+
+    app.post("/source-health/reset", async (context) => {
+        const adminContext = toAdminContext(context);
+        const body = await readJsonBody(context);
+        const sourceId = requiredString(body.sourceId, "sourceId");
+        const handler = options.management?.clearSourceCooldown;
+        if (!handler) return unavailable(adminContext.requestId);
+        const result = await invokeManagement(() =>
+            handler(adminContext, sourceId)
+        );
+        if (result.cleared) {
+            recordAction(
+                options.systemLog,
+                "渠道",
+                `手动解除渠道冷却 ${await narrateSourceLabel(
+                    options,
+                    adminContext,
+                    sourceId,
+                )}`,
+                "仅恢复调度资格，未验证上游",
+            );
+        }
+        return json(context, { source: result }, adminContext.requestId);
     });
 
     app.delete("/plugin", async (context) => {
@@ -781,6 +849,23 @@ export function createAdminRoutes(
             app,
             "/",
             createStatsRoutes(options.requestJournal, clock),
+        );
+    }
+
+    const installPlugin = options.management?.installPlugin;
+    if (installPlugin !== undefined) {
+        mountRouteGroup(
+            app,
+            "/",
+            createPluginPackageRoutes(async (context, input) => {
+                const result = await installPlugin(context, input);
+                recordAction(
+                    options.systemLog,
+                    "插件",
+                    "已安装本地插件包，等待启用",
+                );
+                return result;
+            }),
         );
     }
 
@@ -1099,6 +1184,9 @@ function parseCreateSource(body: Record<string, unknown>): CreateSourceInput {
         ...(body.proxy === undefined
             ? {}
             : { proxy: parseSourceProxy(body.proxy) }),
+        ...(body.modelMap === undefined
+            ? {}
+            : { modelMap: parseModelMap(body.modelMap) }),
         sourcePluginId,
         ...(presetId === undefined ? {} : { presetId }),
         config: body.config,
@@ -1108,13 +1196,13 @@ function parseCreateSource(body: Record<string, unknown>): CreateSourceInput {
 function parseUpdateSource(body: Record<string, unknown>): UpdateSourceInput {
     if (
         Object.keys(body).some((key) =>
-            !["name", "priority", "enabled", "proxy"].includes(key)
+            !["name", "priority", "enabled", "proxy", "modelMap"].includes(key)
         )
     ) {
         throw new AdminRouteError(
             400,
             "invalid_request",
-            "only name, priority, enabled and proxy can be updated",
+            "only name, priority, enabled, proxy and modelMap can be updated",
         );
     }
     if (Object.keys(body).length === 0) {
@@ -1129,9 +1217,13 @@ function parseUpdateSource(body: Record<string, unknown>): UpdateSourceInput {
         priority?: number;
         enabled?: boolean;
         proxy?: SourceProxySelection;
+        modelMap?: SourceModelMap;
     } = {};
     if (Object.hasOwn(body, "proxy")) {
         input.proxy = parseSourceProxy(body.proxy);
+    }
+    if (Object.hasOwn(body, "modelMap")) {
+        input.modelMap = parseModelMap(body.modelMap);
     }
     if (Object.hasOwn(body, "name")) {
         input.name = boundedString(body.name, "name", 120);
@@ -1184,6 +1276,18 @@ function parseSourceProxy(input: unknown): SourceProxySelection {
         "invalid_request",
         "invalid source proxy selection",
     );
+}
+
+function parseModelMap(input: unknown): SourceModelMap {
+    try {
+        return parseSourceModelMap(input);
+    } catch (error) {
+        throw new AdminRouteError(
+            400,
+            "invalid_source_model_map",
+            error instanceof Error ? error.message : "模型映射无效。",
+        );
+    }
 }
 
 function expectedVersion(context: Context<ServerEnv>): string | undefined {

@@ -74,3 +74,14 @@ Deno.test("unknown source names cannot select a guessed plugin or configuration 
         "heimdall.source.anthropic",
     );
 });
+
+Deno.test("provider connection schemas do not render the host model mapping as raw JSON", () => {
+    for (const sourceId of ["openai-compatible", "anthropic"]) {
+        assertEquals(
+            formControls(sourceConfigSchema(sourceId)).some((field) =>
+                field.name === "modelMap"
+            ),
+            false,
+        );
+    }
+});

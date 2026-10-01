@@ -7,6 +7,7 @@ import { loadUiCatalog } from "./ui-catalog.ts";
 import "./style.css";
 import "./shell.css";
 import "./cards.css";
+import "./extensions/slots.css";
 import "./preset-auth.css";
 import "./journal.css";
 

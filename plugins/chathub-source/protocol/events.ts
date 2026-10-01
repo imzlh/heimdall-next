@@ -52,8 +52,11 @@ function collectMessages(
  * object in the payload — search cards, image tiles and the like are not
  * citations, and scanning the whole tree is what bloated the source list. Each
  * dictionary is keyed by the id the inline `cite` markers point at (e.g.
- * `turn1search42`); that key is stamped onto the reference as `id` when it has
- * none, so the source can tie a marker to the exact reference it cites.
+ * `turn1search42`); that key is stamped onto the reference as `id` so the
+ * source can tie a marker to the exact reference it cites. The key is
+ * authoritative and overrides any internal `id` the reference carries — the
+ * markers resolve against the key, so a shadowing internal id would break both
+ * the cited-only dedup and the inline hyperlink.
  */
 function collectReferences(value: unknown): ChatHubReference[] {
     const references: ChatHubReference[] = [];
@@ -63,7 +66,7 @@ function collectReferences(value: unknown): ChatHubReference[] {
             (typeof ref.targetLink !== "string" && typeof ref.url !== "string")
         ) return;
         references.push(
-            key !== undefined && typeof ref.id !== "string"
+            key !== undefined
                 ? { ...ref, id: key } as ChatHubReference
                 : ref as ChatHubReference,
         );
@@ -180,7 +183,13 @@ function isAnswerText(message: ChatMessage): boolean {
  * renderer turns into a badge, while the references travel as citation parts.
  */
 function normalizeCitations(text: string): string {
-    return text.replace(/[\u{e200}-\u{e20f}]/gu, "");
+    // Copilot also wraps grounded external entities (a searched title, a product
+    // name) in a literal `<External>…</External>` tag that carries no data we use
+    // — citations ride `result.references` and the `citeturn…` markers instead —
+    // so unwrap it, keeping the inner text, rather than leak the markup through.
+    return text
+        .replace(/[\u{e200}-\u{e20f}]/gu, "")
+        .replace(/<\/?External\b[^>]*>/gu, "");
 }
 
 function latestText(messages: ChatMessage[]): string | undefined {

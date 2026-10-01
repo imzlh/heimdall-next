@@ -10,6 +10,7 @@ import {
 import type { ChatController, ChatState } from "./types.ts";
 import { Icon } from "../../shared/icons.tsx";
 import type { IconName } from "../../shared/icons.tsx";
+import type { Child } from "hono/jsx";
 
 const EFFORT_OPTIONS = [
     {
@@ -38,7 +39,11 @@ const EFFORT_OPTIONS = [
 }[];
 
 export function ChatComposer(
-    { state, controller }: { state: ChatState; controller: ChatController },
+    { state, controller, capabilities }: {
+        state: ChatState;
+        controller: ChatController;
+        capabilities?: Child;
+    },
 ) {
     const fileInput = useRef<HTMLInputElement | null>(null);
     const draftInput = useRef<HTMLTextAreaElement | null>(null);
@@ -53,7 +58,7 @@ export function ChatComposer(
     const [assetsOpen, setAssetsOpen] = useState(false);
     const [effortOpen, setEffortOpen] = useState(false);
     const busy = state.loading || state.creating || state.sending ||
-        state.managing;
+        state.managing || state.toolsBusy;
     const disabled = !state.available || !state.authenticated || busy ||
         state.attachmentsBusy;
     const hasModel = !!state.model && state.models.includes(state.model);
@@ -217,6 +222,30 @@ export function ChatComposer(
 
     return (
         <div class="chat-composer-region">
+            {capabilities}
+            {state.suggestions.length > 0 && !state.sending && (
+                <div class="chat-suggestions" aria-label="推荐问题">
+                    {state.suggestions.map((text) => (
+                        <button
+                            key={text}
+                            type="button"
+                            class="chat-suggestion"
+                            title={text}
+                            onClick={() => {
+                                controller.setDraft(text);
+                                draftInput.current?.focus();
+                            }}
+                        >
+                            <Icon
+                                name="chat"
+                                size={14}
+                                class="chat-suggestion-icon"
+                            />
+                            <span>{text}</span>
+                        </button>
+                    ))}
+                </div>
+            )}
             <form
                 class="chat-composer"
                 data-sending={state.sending ? "true" : "false"}

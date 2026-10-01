@@ -10,6 +10,7 @@ import type {
     JsonValue,
     PluginManifest,
     PluginPermissions,
+    RequestContext,
 } from "../contracts/mod.ts";
 
 export interface PluginArtifact {
@@ -79,9 +80,16 @@ export interface PluginInvocation {
     /** Cancels admission and the caller's wait even if a runtime ignores abort.
      * Use AbortSignal.timeout() (or a combined signal) for a caller deadline. */
     readonly signal?: AbortSignal;
+    /** JSON-only request identity; HTTP credentials never cross the worker boundary. */
+    readonly request?: Pick<RequestContext, "requestId" | "metadata">;
 }
 
 export interface PluginRuntime {
+    /** Optional liveness probe for workers that can terminate outside host lifecycle calls. */
+    isActive?(): boolean;
+    /** Report unexpected termination after releasing runtime resources. Observers
+     * are synchronous; intentional stop/restart must not emit a failure. */
+    onFailure?(listener: (error: Error) => void): () => void;
     start(artifact: PluginArtifact): Promise<void>;
     invoke(invocation: PluginInvocation): Promise<JsonValue | undefined>;
     /** Release all resources, including active invocations. Must allow retry
@@ -91,6 +99,8 @@ export interface PluginRuntime {
 }
 
 export interface PluginRecord {
+    /** Opaque store revision used to reject stale lifecycle writes. */
+    readonly revision?: string;
     readonly manifest: PluginManifest;
     readonly digest?: string;
     readonly signerKeyId?: string;
@@ -103,8 +113,10 @@ export interface PluginRecord {
 /** Runtime-neutral persistence port for installed plugin metadata. */
 export interface PluginRecordStore {
     get(id: string): Promise<PluginRecord | undefined>;
+    /** Create if revision is absent; otherwise compare the read revision before updating. */
     put(record: PluginRecord): Promise<void>;
-    delete(id: string): Promise<void>;
+    /** Compare the expected read revision when supplied. */
+    delete(id: string, expectedRevision?: string): Promise<void>;
     list(): Promise<readonly PluginRecord[]>;
     /** Commit metadata only after the complete immutable artifact is durable. */
     install?(record: PluginRecord, artifact: PluginArtifact): Promise<void>;
@@ -112,6 +124,11 @@ export interface PluginRecordStore {
 }
 
 export interface PluginHostOptions {
+    /** Capabilities provided by the composition root outside this lifecycle host. */
+    readonly externalDependencies?: () => readonly Pick<
+        PluginRecord,
+        "manifest" | "enabled"
+    >[];
     readonly verifier?: PluginVerifier;
     readonly policy?: PluginSecurityPolicy;
     readonly store?: PluginRecordStore;
@@ -132,7 +149,8 @@ export interface PluginHost {
     list(): Promise<readonly PluginRecord[]>;
     /** Re-verify persisted packages and restart previously enabled runtimes. */
     restore?(): Promise<readonly PluginRecord[]>;
-    /** Stop runtimes without changing durable enable preferences. */
+    /** Stop runtimes without changing durable enable preferences. New mutations
+     * and invocations are rejected once shutdown starts; failed cleanup is retryable. */
     close?(): Promise<void>;
     /** Invoke only an enabled plugin through its host-managed runtime.
      * Successful durable disable/uninstall cancels active invocation waits. */
@@ -160,6 +178,9 @@ export type PluginLifecycleErrorCode =
     | "already_disabled"
     | "runtime_required"
     | "runtime_failed"
+    | "revision_conflict"
+    | "dependency_unavailable"
+    | "dependency_in_use"
     | "policy_denied";
 
 export class PluginLifecycleError extends Error {

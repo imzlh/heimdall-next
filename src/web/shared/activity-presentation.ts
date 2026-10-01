@@ -77,3 +77,12 @@ export function requestTimings(
         total: total === null ? null : formatDuration(total),
     };
 }
+import type { RequestStatusDto } from "@heimdall/admin-contracts";
+
+export const REQUEST_STATUSES: readonly RequestStatusDto[] = [
+    "pending",
+    "running",
+    "completed",
+    "error",
+    "cancelled",
+];

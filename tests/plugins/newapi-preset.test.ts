@@ -1,6 +1,5 @@
 import { assertEquals, assertThrows } from "@std/assert";
 import {
-    mapNewApiModel,
     newApiPreset,
     newApiPresetManifest,
     newApiPresetSchema,
@@ -14,13 +13,11 @@ Deno.test("NewAPI preset normalizes into an OpenAI-compatible source config", ()
     const config = validateNewApiPresetConfig({
         baseUrl: "https://newapi.example/v1/",
         apiKey: "newapi-secret",
-        modelMap: { local: "provider-model" },
     });
     assertEquals(config, {
         id: "newapi",
         baseUrl: "https://newapi.example/v1",
         apiKey: "newapi-secret",
-        modelMap: { local: "provider-model" },
         endpoint: "/chat/completions",
     });
     assertEquals(toOpenAICompatibleSourceConfig(config), config);
@@ -82,31 +79,28 @@ Deno.test("NewAPI schema is closed and rejects malformed nested values", () => {
     );
 });
 
-Deno.test("NewAPI preset normalizes endpoint and model mappings", () => {
+Deno.test("NewAPI preset normalizes endpoints and leaves model mapping to the host", () => {
     const config = validateNewApiPresetConfig({
         baseUrl: "https://newapi.example///",
         endpoint: "//v1///chat/completions/",
-        modelMap: {
-            " local-fast ": " provider-fast ",
-            "local": "provider-default",
-        },
     });
     assertEquals(config.baseUrl, "https://newapi.example");
     assertEquals(config.endpoint, "/v1/chat/completions");
-    assertEquals(config.modelMap, {
-        local: "provider-default",
-        "local-fast": "provider-fast",
-    });
-    assertEquals(mapNewApiModel(config, "local-fast"), "provider-fast");
-    assertEquals(mapNewApiModel(config, "unmapped"), "unmapped");
-    assertEquals(mapNewApiModel(config, undefined), "");
+    assertThrows(
+        () =>
+            validateNewApiPresetConfig({
+                baseUrl: "https://newapi.example",
+                modelMap: { public: "upstream" },
+            }),
+        TypeError,
+        "unknown NewAPI preset field",
+    );
 });
 
 Deno.test("NewAPI output is accepted by the OpenAI source validator", () => {
     const generated = toOpenAICompatibleSourceConfig({
         baseUrl: "https://newapi.example/v1",
         apiKey: "source-secret",
-        modelMap: { local: "provider-local" },
     });
     assertEquals(validateOpenAICompatibleSourceConfig(generated), {
         ...generated,
@@ -166,14 +160,12 @@ Deno.test("NewAPI preset redaction never exposes the API key", () => {
         baseUrl: "https://newapi.example/v1/",
         apiKey: "newapi-super-secret",
         headers: { "x-channel": "primary" },
-        modelMap: { local: "provider-local" },
     });
     const safe = newApiPreset.redact!(application);
     assertEquals(safe, {
         id: "newapi",
         baseUrl: "https://newapi.example/v1",
         endpoint: "/chat/completions",
-        modelMap: { local: "provider-local" },
         headers: { "x-channel": "primary" },
         apiKeyConfigured: true,
     });

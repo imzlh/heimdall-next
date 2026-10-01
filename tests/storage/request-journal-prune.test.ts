@@ -25,6 +25,7 @@ function seed(store: Store, id: string, receivedAt: string): void {
         totalTokens: 1,
         updatedAt: receivedAt,
     });
+    store.updateRequest(id, { status: "completed", completedAt: receivedAt });
 }
 
 Deno.test("pruneOlderThan removes aged requests with their frames and usage", () => {
@@ -69,5 +70,35 @@ Deno.test("pruneOlderThan honors the delete budget across sweeps", () => {
     } finally {
         store.close();
         Deno.removeSync(directory, { recursive: true });
+    }
+});
+
+Deno.test("retention skips running and pending requests even beyond the cutoff", () => {
+    const store = openSqliteRequestStore(":memory:");
+    try {
+        for (
+            const id of [
+                "running",
+                "pending",
+                "completed",
+                "error",
+                "cancelled",
+            ] as const
+        ) {
+            seed(store, id, "2020-01-01T00:00:00.000Z");
+            store.updateRequest(id, { status: id });
+        }
+        assertEquals(
+            store.pruneOlderThan("2025-01-01T00:00:00.000Z", 10).deleted,
+            3,
+        );
+        assertEquals(store.listRequests().map((row) => row.requestId).sort(), [
+            "pending",
+            "running",
+        ]);
+        assertEquals(store.listFrames("running").length, 1);
+        assertEquals(store.getUsage("pending")?.totalTokens, 1);
+    } finally {
+        store.close();
     }
 });

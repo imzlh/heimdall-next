@@ -13,8 +13,6 @@ export interface OpenAICompatibleSourceConfig {
     /** Origin or path prefix, for example `https://api.openai.com/v1`. */
     readonly baseUrl: string;
     readonly apiKey?: string;
-    /** Client model name -> upstream model name. */
-    readonly modelMap?: Readonly<Record<string, string>>;
     /** Defaults to `/chat/completions`; must be an absolute path. */
     readonly endpoint?: string;
     /** Additional non-secret headers sent to the upstream. */
@@ -103,20 +101,8 @@ export function validateOpenAICompatibleSourceConfig(
         ? DEFAULT_ENDPOINT
         : normalizeEndpoint(value.endpoint);
 
-    const modelMap: Record<string, string> = {};
-    if (value.modelMap !== undefined) {
-        if (!isPlainRecord(value.modelMap)) {
-            throw new TypeError("modelMap must be an object");
-        }
-        for (
-            const [clientModel, upstreamModel] of Object.entries(value.modelMap)
-        ) {
-            rejectReservedKey(clientModel, "modelMap key");
-            modelMap[nonEmpty(clientModel, "modelMap key")] = nonEmpty(
-                upstreamModel,
-                `modelMap.${clientModel}`,
-            );
-        }
+    if (Object.hasOwn(value, "modelMap")) {
+        throw new TypeError("modelMap belongs to host source settings");
     }
 
     const headers: Record<string, string> = {};
@@ -153,7 +139,6 @@ export function validateOpenAICompatibleSourceConfig(
         id,
         baseUrl,
         ...(apiKey === undefined ? {} : { apiKey }),
-        ...(Object.keys(modelMap).length === 0 ? {} : { modelMap }),
         endpoint,
         ...(Object.keys(headers).length === 0 ? {} : { headers }),
         compat,
@@ -163,8 +148,6 @@ export function validateOpenAICompatibleSourceConfig(
 export function advertisedCapabilities(
     config: OpenAICompatibleSourceConfig,
 ): readonly SourceCapability[] {
-    const models = Object.keys(config.modelMap ?? {}).sort();
-    const shared = models.length === 0 ? {} : { models };
     const profile = config.compat ?? "full";
     const allowed = COMPAT_OPERATIONS[profile];
     if (allowed === undefined || allowed.length === 0) {
@@ -173,25 +156,17 @@ export function advertisedCapabilities(
     const capabilities: SourceCapability[] = [
         {
             operation: "generation.create",
-            ...shared,
             streaming: true,
             features: ["tools", "structured_output", "image.input"],
         },
-        { operation: "completion.create", ...shared, streaming: true },
-        { operation: "embedding.create", ...shared, streaming: false },
-        { operation: "image.generate", ...shared, streaming: false },
-        { operation: "image.edit", ...shared, streaming: false },
+        { operation: "completion.create", streaming: true },
+        { operation: "embedding.create", streaming: false },
+        { operation: "image.generate", streaming: false },
+        { operation: "image.edit", streaming: false },
     ];
     return capabilities.filter((capability) =>
         allowed.includes(capability.operation)
     );
-}
-
-export function upstreamModel(
-    config: OpenAICompatibleSourceConfig,
-    clientModel: string | undefined,
-): string {
-    return config.modelMap?.[clientModel ?? ""] ?? clientModel ?? "";
 }
 
 export function upstreamUrl(config: OpenAICompatibleSourceConfig): string {

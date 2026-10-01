@@ -1,6 +1,8 @@
 import type { Child } from "hono/jsx";
 import type { ProxyPoolView } from "@heimdall/admin-contracts/proxies.ts";
 import { Icon } from "../shared/icons.tsx";
+import { SourceHealthDetails } from "../shared/source-health.tsx";
+import { PluginCard } from "../shared/plugin-card.tsx";
 import type {
     ListedModel,
     ListedPlugin,
@@ -8,13 +10,6 @@ import type {
     ListedSource,
 } from "@heimdall/admin-contracts/console.ts";
 import {
-    canTogglePlugin,
-    pluginCapabilityLabel,
-    pluginDependencyState,
-    pluginKindLabel,
-    pluginManagementText,
-    pluginState,
-    pluginTrustLabel,
     shortSourceId,
     sourceAvailabilityText,
     sourceInstanceEnabled,
@@ -76,6 +71,7 @@ export function SourceCard(
             <p class="source-probe" title={sourceAvailabilityText(source)}>
                 {sourceAvailabilityText(source)}
             </p>
+            <SourceHealthDetails source={source} editing={editing} />
             <p class="source-proxy-summary" title={PROXY_IMPLEMENTATION_NOTE}>
                 代理：{proxyLabel}
             </p>
@@ -203,116 +199,6 @@ export function PresetCard({ preset }: { preset: ListedPreset }) {
     );
 }
 
-function PluginCard(
-    { plugin, plugins }: { plugin: ListedPlugin; plugins: ListedPlugin[] },
-) {
-    const state = pluginState(plugin);
-    const eligible = canTogglePlugin(plugin);
-    const label = plugin.name || plugin.id;
-    const action = plugin.enabled ? "停用" : "启用";
-    return (
-        <article
-            class={`plugin-card${plugin.enabled === false ? " disabled" : ""}`}
-        >
-            <header class="plugin-card-head">
-                <div class="plugin-card-title">
-                    <h3 title={label}>{label}</h3>
-                    <code title={plugin.id}>{plugin.id}</code>
-                </div>
-                <span class={`status-chip chip-${state.tone}`}>
-                    {state.label}
-                </span>
-            </header>
-            {plugin.description && (
-                <p class="plugin-card-desc">{plugin.description}</p>
-            )}
-            <div class="plugin-card-badges">
-                {typeof plugin.managed === "boolean" && (
-                    <span class="plugin-chip">
-                        {plugin.managed ? "托管" : "内置"}
-                    </span>
-                )}
-                <span class="plugin-chip accent">
-                    {pluginKindLabel(plugin.kind)}
-                </span>
-                {plugin.version && (
-                    <span class="plugin-chip">v{plugin.version}</span>
-                )}
-            </div>
-            <div class="plugin-card-meta">
-                <div class="plugin-meta-group">
-                    <span class="plugin-meta-label">运行方式</span>
-                    <span>{pluginTrustLabel(plugin.trust)}</span>
-                </div>
-                {Boolean(plugin.capabilities?.length) && (
-                    <details class="plugin-card-details">
-                        <summary>
-                            声明能力{" "}
-                            <span>{plugin.capabilities!.length} 项</span>
-                        </summary>
-                        <div class="plugin-card-badges">
-                            {plugin.capabilities!.map((capability) => (
-                                <span class="plugin-chip" title={capability}>
-                                    {pluginCapabilityLabel(capability)}
-                                </span>
-                            ))}
-                        </div>
-                    </details>
-                )}
-                {Boolean(plugin.dependencies?.length) && (
-                    <details class="plugin-card-details">
-                        <summary>
-                            声明依赖{" "}
-                            <span>{plugin.dependencies!.length} 项</span>
-                        </summary>
-                        <ul class="plugin-dependencies">
-                            {plugin.dependencies!.map((dependency) => {
-                                const state = pluginDependencyState(
-                                    dependency,
-                                    plugins,
-                                );
-                                return (
-                                    <li>
-                                        <code>{dependency}</code>
-                                        <span
-                                            class={`status-chip chip-${state.tone}`}
-                                        >
-                                            {state.label}
-                                        </span>
-                                    </li>
-                                );
-                            })}
-                        </ul>
-                    </details>
-                )}
-            </div>
-            {plugin.lastError && (
-                <p
-                    class="plugin-card-error"
-                    role="alert"
-                    title={plugin.lastError}
-                >
-                    最近错误：{plugin.lastError}
-                </p>
-            )}
-            <footer class="plugin-card-actions">
-                <span>{pluginManagementText(plugin)}</span>
-                {eligible && (
-                    <button
-                        class="secondary-button"
-                        type="button"
-                        disabled
-                        title="交互加载后可用"
-                        aria-label={`${action} ${label}`}
-                    >
-                        {action}
-                    </button>
-                )}
-            </footer>
-        </article>
-    );
-}
-
 export function PluginCards(
     { plugins, error }: { plugins: ListedPlugin[]; error?: string },
 ) {
@@ -324,10 +210,20 @@ export function PluginCards(
         >
             <div class="panel-heading">
                 <div>
-                    <h2 id="plugins-title">插件能力</h2>
+                    <h2 id="plugins-title" tabIndex={-1}>插件能力</h2>
                     <p>已注册插件的运行状态与可用操作</p>
                 </div>
-                <span class="panel-count">{plugins.length} 个插件</span>
+                <div class="plugin-heading-actions">
+                    <span class="panel-count">{plugins.length} 个插件</span>
+                    <button
+                        type="button"
+                        class="secondary-button"
+                        disabled
+                        title="交互加载后可用"
+                    >
+                        安装插件
+                    </button>
+                </div>
             </div>
             {error && <p class="form-error" role="alert">{error}</p>}
             {plugins.length

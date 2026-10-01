@@ -57,7 +57,6 @@ function state(
         streamReasoning: "",
         streamActivity: [],
         streamCitations: [],
-        streamQuota: null,
         suggestions: [],
         pendingEffort: "medium",
         error: "",

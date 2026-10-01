@@ -516,7 +516,8 @@ Deno.test("admin management maps validation failures to client errors", async ()
 });
 
 Deno.test("admin mutations narrate themselves into the system log", async () => {
-    const entries: Array<{ level: string; scope: string; message: string }> = [];
+    const entries: Array<{ level: string; scope: string; message: string }> =
+        [];
     const systemLog = {
         record(input: { level: string; scope: string; message: string }) {
             entries.push({
@@ -592,11 +593,14 @@ Deno.test("admin mutations narrate themselves into the system log", async () => 
     });
     assertEquals(probe.status, 200);
 
-    assertEquals(entries.map((entry) => [entry.scope, entry.level, entry.message]), [
-        ["渠道", "info", "添加渠道「测试渠道」"],
-        ["渠道", "info", "更新渠道 019834c2…"],
-        ["插件", "info", "启用插件 source.openai"],
-        ["渠道", "info", "删除渠道 019834c2…"],
-        ["渠道", "warn", "探测渠道 019834c2…"],
-    ]);
+    assertEquals(
+        entries.map((entry) => [entry.scope, entry.level, entry.message]),
+        [
+            ["渠道", "info", "添加渠道「测试渠道」"],
+            ["渠道", "info", "更新渠道 019834c2…"],
+            ["插件", "info", "启用插件 source.openai"],
+            ["渠道", "info", "删除渠道 019834c2…"],
+            ["渠道", "warn", "探测渠道 019834c2…"],
+        ],
+    );
 });

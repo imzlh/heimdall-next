@@ -82,6 +82,7 @@ Deno.test("chat history preserves branch metadata and projects attachments to lo
             messages: messages.map((message) => ({
                 ...message,
                 privateState: "private",
+                quota: { meters: [{ name: "sample", remaining: 12 }] },
                 ...(message.role === "user"
                     ? {
                         attachments: [{

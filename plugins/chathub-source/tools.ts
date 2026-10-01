@@ -1,18 +1,48 @@
-const TONE_BY_MODEL: Record<string, string> = {
-    "gpt-5.3-think-deeper": "Gpt_5_3_Chat",
-    "gpt-5.4": "Gpt_5_4_Chat",
-    "gpt-5.4-quick": "Gpt_5_4_Chat",
-    "gpt-5.4-reasoning": "Gpt_5_4_Reasoning",
-    "gpt-5.5": "Gpt_5_5_Chat",
-    "gpt-5.5-reasoning": "Gpt_5_5_Reasoning",
+// ChatHub picks the answering engine through its `tone` argument. Only the
+// values the model-selection menu actually enumerates are honored; an unknown
+// tone silently falls back to `Magic` (auto) upstream, which is why a stale
+// mapping produced answers with no reasoning under the wrong label.
+//
+// Two models are exposed: `auto` (→ `Magic`, Copilot decides how long to think)
+// and `gpt-5.6-sol`, whose engine is chosen from the request's thinking level —
+// "快速/low" answers fast (`Gpt_5_6_Chat`), medium/high (and unset → medium
+// default) think (`Gpt_5_6_Reasoning`, the engine that emits chain-of-thought).
+// `Gpt_5_6_Chat` follows the observed `Gpt_5_5_Chat` naming (SPEC §6.1 [F16]).
+const FIXED_TONE: Record<string, string> = {
+    // Generic picker modes (menu section 1).
+    "auto": "Magic", // 自动
+    "magic": "Magic",
+    "chat": "Chat", // 快速响应
+    "reasoning": "Reasoning", // 深度思考
+    // Explicit GPT 5.6 engines (level-independent).
     "gpt-5.6-reasoning": "Gpt_5_6_Reasoning",
-    "claude": "Claude_Sonnet",
-    "claude-sonnet": "Claude_Sonnet",
-    "claude-sonnet-reasoning": "Claude_Sonnet_Reasoning",
+    "gpt-5.6-think": "Gpt_5_6_Reasoning",
+    "gpt-5.6-chat": "Gpt_5_6_Chat",
+    "gpt-5.6-quick": "Gpt_5_6_Chat",
+    // Legacy ids kept working so an existing channel does not degrade to Magic.
+    "gpt-5.5": "Gpt_5_5_Chat",
+    "gpt-5.5-chat": "Gpt_5_5_Chat",
+    "gpt-5.5-reasoning": "Gpt_5_6_Reasoning",
+    "claude-sonnet-reasoning": "Gpt_5_6_Reasoning",
 };
 
-export function toneForModel(model: string | undefined): string {
-    return TONE_BY_MODEL[(model ?? "").trim().toLowerCase()] ?? "magic";
+// Smart ids whose engine follows the thinking level rather than being fixed.
+const LEVEL_DRIVEN = new Set(["gpt-5.6-sol", "gpt-5.6"]);
+
+export function toneForModel(
+    model: string | undefined,
+    reasoningEffort?: string,
+): string {
+    const id = (model ?? "").trim().toLowerCase();
+    if (LEVEL_DRIVEN.has(id)) {
+        // Only an explicit "快速/low" opts out of reasoning; medium/high and an
+        // unset level (UI default is medium) think.
+        return (reasoningEffort ?? "medium").trim().toLowerCase() === "low"
+            ? "Gpt_5_6_Chat"
+            : "Gpt_5_6_Reasoning";
+    }
+    // The default's casing is a protocol fact: capital `Magic`, not `magic`.
+    return FIXED_TONE[id] ?? "Magic";
 }
 
 // ---------------------------------------------------------------------------

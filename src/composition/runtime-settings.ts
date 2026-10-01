@@ -8,6 +8,10 @@ export interface RuntimeSettings {
     readonly probeIntervalMs: number;
     /** Model id used to auto-name chat conversations; "" / absent disables it. */
     readonly titleModel?: string;
+    /** 0 keeps request history indefinitely. */
+    readonly requestRetentionDays?: number;
+    /** 0 keeps conversations indefinitely; age is the last activity time. */
+    readonly chatRetentionDays?: number;
 }
 
 export interface RuntimeSettingsPatch {
@@ -15,6 +19,8 @@ export interface RuntimeSettingsPatch {
     readonly limitPerMinute?: number;
     readonly probeIntervalMs?: number;
     readonly titleModel?: string;
+    readonly requestRetentionDays?: number;
+    readonly chatRetentionDays?: number;
 }
 
 export interface PublicRuntimeSettings {
@@ -22,6 +28,8 @@ export interface PublicRuntimeSettings {
     readonly limitPerMinute: number;
     readonly probeIntervalMs: number;
     readonly titleModel: string;
+    readonly requestRetentionDays: number;
+    readonly chatRetentionDays: number;
 }
 
 export interface RuntimeSettingsHandle {
@@ -36,6 +44,8 @@ interface StoredRuntimeSettings {
     readonly limitPerMinute?: unknown;
     readonly probeIntervalMs?: unknown;
     readonly titleModel?: unknown;
+    readonly requestRetentionDays?: unknown;
+    readonly chatRetentionDays?: unknown;
 }
 
 const settingsKey = ["runtime"] as const;
@@ -75,6 +85,8 @@ export function redactRuntimeSettings(
         limitPerMinute: value.limitPerMinute,
         probeIntervalMs: value.probeIntervalMs,
         titleModel: value.titleModel ?? "",
+        requestRetentionDays: value.requestRetentionDays ?? 0,
+        chatRetentionDays: value.chatRetentionDays ?? 0,
     };
 }
 
@@ -95,6 +107,9 @@ export function applyRuntimeSettingsPatch(
         titleModel: patch.titleModel === undefined
             ? current.titleModel
             : patch.titleModel,
+        requestRetentionDays: patch.requestRetentionDays ??
+            current.requestRetentionDays,
+        chatRetentionDays: patch.chatRetentionDays ?? current.chatRetentionDays,
     });
 }
 
@@ -107,7 +122,10 @@ export async function hydrateRuntimeSettings(
         StoredRuntimeSettings
     >(settingsKey);
     if (stored === null) return;
-    handle.replace(storedSettings(stored.value), stored.versionstamp);
+    handle.replace(
+        storedSettings(stored.value, handle.get()),
+        stored.versionstamp,
+    );
 }
 
 export async function saveRuntimeSettings(
@@ -157,15 +175,26 @@ export function normalizeRuntimeSettings(
     if (titleModel.length > 200) {
         throw new TypeError("titleModel must be at most 200 characters");
     }
+    for (const key of ["requestRetentionDays", "chatRetentionDays"] as const) {
+        const days = value[key] ?? 0;
+        if (!Number.isInteger(days) || days < 0 || days > 3650) {
+            throw new TypeError(`${key} must be an integer from 0 to 3650`);
+        }
+    }
     return {
         proxyKey: value.proxyKey.trim(),
         limitPerMinute: value.limitPerMinute,
         probeIntervalMs: value.probeIntervalMs,
         titleModel,
+        requestRetentionDays: value.requestRetentionDays ?? 0,
+        chatRetentionDays: value.chatRetentionDays ?? 0,
     };
 }
 
-function storedSettings(value: StoredRuntimeSettings): RuntimeSettings {
+function storedSettings(
+    value: StoredRuntimeSettings,
+    seed: RuntimeSettings,
+): RuntimeSettings {
     return {
         proxyKey: typeof value.proxyKey === "string" ? value.proxyKey : "",
         limitPerMinute: typeof value.limitPerMinute === "number"
@@ -177,5 +206,11 @@ function storedSettings(value: StoredRuntimeSettings): RuntimeSettings {
         titleModel: typeof value.titleModel === "string"
             ? value.titleModel
             : "",
+        requestRetentionDays: typeof value.requestRetentionDays === "number"
+            ? value.requestRetentionDays
+            : seed.requestRetentionDays ?? 0,
+        chatRetentionDays: typeof value.chatRetentionDays === "number"
+            ? value.chatRetentionDays
+            : seed.chatRetentionDays ?? 0,
     };
 }

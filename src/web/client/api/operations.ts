@@ -1,4 +1,5 @@
 import { AdminApiError, payloadRecord, request } from "./transport.ts";
+import { notifyPluginCatalogChanged } from "../plugin-events.ts";
 import type {
     JournalResponse,
     SourceProbeResult,
@@ -64,6 +65,9 @@ export function setPluginEnabled(
     return request("/api/admin/plugin-state", {
         method: "POST",
         body: JSON.stringify({ pluginId, enabled }),
+    }).then((result) => {
+        notifyPluginCatalogChanged();
+        return result;
     });
 }
 
@@ -92,6 +96,9 @@ export function uninstallPlugin(pluginId: string): Promise<unknown> {
     return request("/api/admin/plugin", {
         method: "DELETE",
         body: JSON.stringify({ pluginId }),
+    }).then((result) => {
+        notifyPluginCatalogChanged();
+        return result;
     });
 }
 

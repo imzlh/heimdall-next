@@ -16,6 +16,7 @@ Deno.test("source form omits saved secrets and retains hidden preset parameters"
         apiKeyConfigured: true,
     });
     assertEquals(values.apiKey, "");
+    assertEquals(values.modelMap, undefined);
     const result = prepareSourceInput(
         schema,
         {
@@ -32,7 +33,6 @@ Deno.test("source form omits saved secrets and retains hidden preset parameters"
         id: "production-channel",
         baseUrl: "https://new.example/v1",
         endpoint: "/chat/completions",
-        modelMap: { fast: "upstream-model" },
         headers: { "x-region": "eu" },
     });
     assertEquals(Object.hasOwn(result.config!, "apiKey"), false);
@@ -57,8 +57,8 @@ Deno.test("source preset refuses to silently replace an existing compatibility m
 
 Deno.test("source form catches invalid JSON maps before issuing a management write", () => {
     const schema = sourceConfigSchema("anthropic");
-    const values = { ...sourceFormValues(schema), modelMap: '{"model":42}' };
+    const values = { ...sourceFormValues(schema), headers: '{"x-region":42}' };
     const result = prepareSourceInput(schema, values, "anthropic", []);
     assertEquals(result.config, undefined);
-    assertEquals(Boolean(result.errors.modelMap), true);
+    assertEquals(Boolean(result.errors.headers), true);
 });

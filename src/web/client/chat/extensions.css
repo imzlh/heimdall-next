@@ -1,0 +1,115 @@
+/* A slot owns its surface; executable content stays inside the same allocation. */
+.chat-plugin-slots {
+    min-width: 0;
+}
+.chat-plugin-slots .plugin-slot {
+    min-width: 0;
+    max-width: 100%;
+    overflow: auto;
+    overflow-wrap: anywhere;
+    color: var(--text);
+    font-size: 12px;
+    line-height: 1.6;
+}
+.chat-plugin-slots .slot-heading h3 {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+}
+.chat-plugin-slots .slot-attribution {
+    display: none;
+}
+.chat-plugin-slots .slot-description,
+.chat-plugin-slots .slot-text,
+.chat-plugin-slots .slot-notice,
+.chat-plugin-notice {
+    margin: 5px 0 0;
+    color: var(--muted);
+    font-size: 11px;
+}
+.chat-plugin-slots .slot-content {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+.chat-plugin-slots .slot-content[hidden],
+.chat-plugin-slots .slot-mount[hidden],
+.chat-plugin-slots .slot-notice[hidden] {
+    display: none;
+}
+.chat-plugin-slots .slot-text {
+    flex-basis: 100%;
+}
+.chat-plugin-slots .slot-mount {
+    min-width: 0;
+    max-width: 100%;
+    overflow: auto;
+}
+.chat-plugin-slots .slot-frame {
+    width: 100%;
+    display: block;
+    border: 0;
+}
+.chat-plugin-slots .slot-metrics {
+    margin: 0;
+}
+.chat-plugin-slots .slot-metric dt {
+    color: var(--muted);
+    font-size: 11px;
+}
+.chat-plugin-slots .slot-metric dd {
+    margin: 0;
+    font-size: 16px;
+}
+.chat-plugin-slots .slot-metric dd small {
+    margin-left: 4px;
+    font-size: 10px;
+}
+.chat-plugin-slots .slot-badge {
+    color: var(--muted);
+    font-size: 10px;
+}
+.plugin-slots-chat-composer {
+    width: min(720px, 100%);
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    margin: 0 auto 8px;
+    padding: 3px 1px;
+    overflow: auto;
+    max-height: 116px;
+    scrollbar-width: thin;
+    pointer-events: auto;
+}
+.plugin-slots-chat-composer .plugin-slot {
+    flex: 0 0 auto;
+    max-width: min(320px, 100%);
+    max-height: 104px;
+    padding: 6px 12px;
+    border-radius: 18px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: 0 2px 8px rgb(0 0 0 / 3%);
+}
+.plugin-slots-chat-composer .plugin-slot:has(.slot-toggle) {
+    padding: 0;
+    border: 0;
+}
+.plugin-slots-chat-composer .plugin-slot:has(.slot-toggle) .slot-heading {
+    display: none;
+}
+.plugin-slots-chat-sidebar {
+    flex: 0 1 auto;
+    max-height: 28dvh;
+    overflow: auto;
+    display: grid;
+    gap: 8px;
+}
+.plugin-slots-chat-sidebar .plugin-slot {
+    padding: 10px 12px;
+    border-radius: 12px;
+    background: var(--surface);
+    max-height: 240px;
+}

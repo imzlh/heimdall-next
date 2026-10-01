@@ -14,14 +14,6 @@ const apiKey: FormField = {
 const mappings: readonly FormField[] = [
     {
         type: "string",
-        name: "modelMap",
-        label: "模型映射",
-        format: "string-map",
-        default: "{}",
-        help: '填写 JSON 对象，例如 {"对外模型名":"上游模型名"}。',
-    },
-    {
-        type: "string",
         name: "headers",
         label: "附加请求头",
         format: "string-map",

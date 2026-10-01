@@ -86,6 +86,20 @@ function mixedSource(): InferenceSource {
                         partId: "f",
                         delta: ".",
                     },
+                    {
+                        kind: "usage",
+                        usage: {
+                            inputTokens: 10,
+                            outputTokens: 4,
+                            totalTokens: 14,
+                            extensions: {
+                                estimated: true,
+                                quota: {
+                                    meters: [{ name: "sample", remaining: 50 }],
+                                },
+                            },
+                        },
+                    },
                     { kind: "run.completed" },
                 ];
                 for (const [index, event] of events.entries()) {
@@ -133,6 +147,12 @@ Deno.test("chat HTTP and WebSocket expose only visible text and preserve tool ca
             name: "client_tool",
             argumentsText: '{"query":"hidden"}',
         }]);
+        assert(body.messages.every((item: object) => !("quota" in item)));
+        assert(
+            store.listMessages(conversation.id).every((item) =>
+                !("quota" in item)
+            ),
+        );
         assert(
             !JSON.stringify(store.listMessages(conversation.id)).includes(
                 "private",

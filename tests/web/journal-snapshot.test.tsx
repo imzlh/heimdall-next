@@ -125,7 +125,8 @@ Deno.test("request SSR renders native filters, safe details and links that keep 
     assertStringIncludes(html, 'name="view" value="requests"');
     assertStringIncludes(html, 'name="q"');
     assertStringIncludes(html, 'name="status"');
-    assertStringIncludes(html, '<option value="error" selected="">');
+    assertStringIncludes(html, 'name="status" value="error"');
+    assertFalse(html.includes("<select"));
     assertStringIncludes(html, "请求记录");
     assertStringIncludes(html, "example-model");
     for (const title of ["用量", "请求", "响应", "错误", "元数据", "事件帧"]) {
@@ -148,6 +149,13 @@ Deno.test("request SSR renders native filters, safe details and links that keep 
     assertEquals(detailLink.searchParams.get("q"), snapshot.q);
     assertEquals(detailLink.searchParams.get("status"), "error");
     assertEquals(detailLink.searchParams.get("cursor"), "current_cursor");
+    const completedFilter = links.find((url) =>
+        url.searchParams.get("status") === "completed"
+    );
+    assert(completedFilter);
+    assertEquals(completedFilter.searchParams.get("q"), snapshot.q);
+    assertEquals(completedFilter.searchParams.get("cursor"), null);
+    assertEquals(completedFilter.searchParams.get("id"), null);
     const next = links.find((url) =>
         url.searchParams.get("cursor") === "older_cursor"
     );

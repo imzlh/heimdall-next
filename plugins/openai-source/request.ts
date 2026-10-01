@@ -8,7 +8,6 @@ import { bytesToBase64 } from "@heimdall/contracts";
 import {
     type OpenAICompatibleSourceConfig,
     SAFE_FORWARD_FIELDS,
-    upstreamModel,
 } from "./config.ts";
 import { OpenAIUpstreamError } from "./errors.ts";
 import { isRecord, type WireObject } from "./types.ts";
@@ -32,16 +31,21 @@ export function generationPayload(input: OperationRequest): GenerateRequest {
             status: 500,
         });
     }
-    return payload as unknown as GenerateRequest;
+    return {
+        ...payload,
+        ...(input.traits.model === undefined
+            ? {}
+            : { model: input.traits.model }),
+    } as unknown as GenerateRequest;
 }
 
 /** Convert the canonical generation request to OpenAI Chat Completions JSON. */
 export function toWireRequest(
     request: GenerateRequest,
-    config: OpenAICompatibleSourceConfig,
+    _config: OpenAICompatibleSourceConfig,
 ): WireObject {
     const body: WireObject = {
-        model: upstreamModel(config, request.model),
+        model: request.model ?? "",
         messages: request.messages.map(toWireMessage),
         stream: request.stream === true,
     };

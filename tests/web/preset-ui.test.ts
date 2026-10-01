@@ -3,9 +3,11 @@ import {
     parsePresetUiAction,
     parsePresetUiContext,
     parsePresetUiFeedback,
+    parsePresetUiModelMap,
     PRESET_UI_ACTION_EVENT,
     PRESET_UI_FEEDBACK_EVENT,
     PRESET_UI_LIMITS,
+    PRESET_UI_MODEL_MAP_EVENT,
     type PresetJsonObject,
     type PresetUiContext,
     type PresetUiFeedback,
@@ -71,14 +73,104 @@ Deno.test("preset UI context is detached identity data and rejects host credenti
     ) assertThrows(() => parsePresetUiContext(value), TypeError);
 });
 
+Deno.test("preset mapping metadata is bounded and validated separately from provider inputs", () => {
+    const mapped = { ...context, modelMap: { " fast ": " provider-fast " } };
+    assertEquals(parsePresetUiContext(mapped).modelMap, {
+        fast: "provider-fast",
+    });
+    assertEquals(
+        parsePresetUiAction({ kind: "save", config: {}, modelMap: {} })
+            .modelMap,
+        {},
+    );
+    for (
+        const modelMap of [{ fast: "bad name" }, { "": "valid" }, {
+            a: "one",
+            " a ": "two",
+        }, JSON.parse('{"__proto__":"bad"}')]
+    ) {
+        assertThrows(
+            () => parsePresetUiContext({ ...context, modelMap }),
+            TypeError,
+        );
+        assertThrows(
+            () => parsePresetUiAction({ kind: "probe", config: {}, modelMap }),
+            TypeError,
+        );
+        assertThrows(() => parsePresetUiModelMap(modelMap), TypeError);
+    }
+    const many = Object.fromEntries(
+        Array.from(
+            { length: 256 },
+            (_, index) => [`${index}-${"模".repeat(240)}`, "型".repeat(256)],
+        ),
+    );
+    assertEquals(
+        Object.keys(
+            parsePresetUiContext({ ...context, modelMap: many }).modelMap!,
+        ).length,
+        256,
+    );
+    assertThrows(
+        () =>
+            parsePresetUiAction({
+                kind: "save",
+                config: { data: "x".repeat(PRESET_UI_LIMITS.configBytes) },
+                modelMap: {},
+            }),
+        TypeError,
+    );
+});
+
+Deno.test("preset model selection updates only host draft metadata and releases its event listener", async () => {
+    const target = element();
+    const ready = deferred<void>();
+    const received: unknown[] = [];
+    let saves = 0;
+    const dispose = mountPresetEditor(
+        target,
+        context,
+        () => Promise.resolve({ mount() {} }),
+        {
+            onSubmit: () => {
+                saves++;
+                return Promise.resolve();
+            },
+            onModelMapChange: (modelMap) => received.push(modelMap),
+        },
+        () => ready.resolve(),
+        () => {},
+    );
+    await ready.promise;
+    const modelMap = { fast: "provider" };
+    target.dispatchEvent(
+        new CustomEvent(PRESET_UI_MODEL_MAP_EVENT, { detail: modelMap }),
+    );
+    modelMap.fast = "changed";
+    assertEquals(received, [{ fast: "provider" }]);
+    assertEquals(saves, 0);
+    target.dispatchEvent(
+        new CustomEvent(PRESET_UI_MODEL_MAP_EVENT, {
+            detail: { fast: "bad name" },
+        }),
+    );
+    assertEquals(received.length, 1);
+    await dispose();
+    target.dispatchEvent(
+        new CustomEvent(PRESET_UI_MODEL_MAP_EVENT, { detail: {} }),
+    );
+    assertEquals(received.length, 1);
+});
+
 Deno.test("preset UI action copies JSON without invoking getters or toJSON", () => {
     const config = {
         baseUrl: "https://newapi.test/v1",
-        modelMap: { local: "upstream" },
     };
-    const action = parsePresetUiAction({ kind: "save", config });
-    config.modelMap.local = "changed";
-    assertEquals(action.config.modelMap, { local: "upstream" });
+    const modelMap = { local: "upstream" };
+    const action = parsePresetUiAction({ kind: "save", config, modelMap });
+    modelMap.local = "changed";
+    assertEquals(action.modelMap, { local: "upstream" });
+    assertEquals(action.config.modelMap, undefined);
     let calls = 0;
     const executable = {
         get apiKey() {

@@ -4,6 +4,10 @@ import type { PresetPlugin, SourcePluginFactory } from "@heimdall/contracts";
 import { SourceRegistry } from "@heimdall/kernel";
 import type { ProxyPoolHandle } from "./proxy-pool.ts";
 import { probeSource } from "./probe-loop.ts";
+import {
+    applySourceModelMap,
+    sourceModelSettings,
+} from "./source-model-mapping.ts";
 
 export interface DraftProbeDependencies {
     readonly factories: ReadonlyMap<string, SourcePluginFactory>;
@@ -29,7 +33,8 @@ export async function probeSourceDraft(
         );
     }
     const selection = dependencies.proxies.validateSelection(input.proxy);
-    let raw = input.config;
+    const submitted = sourceModelSettings(input.config, input.modelMap);
+    let raw = submitted.config;
     if (input.presetId) {
         const preset = dependencies.presets.find((item) =>
             item.manifest.id === input.presetId
@@ -71,8 +76,9 @@ export async function probeSourceDraft(
     }
     const id = crypto.randomUUID();
     let config;
+    const settings = sourceModelSettings(raw, submitted.modelMap);
     try {
-        config = factory.validate({ ...object(raw), id });
+        config = factory.validate({ ...object(settings.config), id });
     } catch {
         // Third-party validators may put credentials into exception messages.
         throw new DraftProbeError(
@@ -81,10 +87,23 @@ export async function probeSourceDraft(
             "配置校验失败，请检查连接参数。",
         );
     }
-    const source = factory.create(config, {
-        getProxy: () => dependencies.proxies.resolve(selection),
-        onConfigUpdate: () => Promise.resolve(),
-    });
+    let source;
+    try {
+        source = applySourceModelMap(
+            factory.create(config, {
+                getProxy: () => dependencies.proxies.resolve(selection),
+                onConfigUpdate: () => Promise.resolve(),
+            }),
+            settings.modelMap,
+        );
+    } catch {
+        // Initialization errors can contain credentials just like validators.
+        throw new DraftProbeError(
+            400,
+            "invalid_config",
+            "无法初始化源插件，请检查连接参数。",
+        );
+    }
     if (!source.probe) {
         throw new DraftProbeError(
             422,
@@ -105,12 +124,12 @@ export async function probeSourceDraft(
             ...secretStrings(dependencies.proxies.resolve(selection)),
         ];
         let modelBytes = 0;
-        const models = result?.ok && result.models
+        const models = result?.ok && Array.isArray(result.models)
             ? [
                 ...new Set(
                     result.models.filter((model) =>
                         typeof model === "string" && model.length <= 256 &&
-                        !/[\x00-\x1f\x7f]/.test(model) &&
+                        !/\p{Cc}/u.test(model) &&
                         !secrets.some((secret) => model.includes(secret))
                     ).map((model) => model.trim()).filter(Boolean),
                 ),

@@ -160,7 +160,8 @@ Deno.test("channel metadata edits affect routing, share config CAS and survive r
     );
     assertExists(restored);
     assertEquals(restored?.probe, undefined);
-    assertEquals({ ...restored, probe: current.probe }, current);
+    assertEquals(current.probe, undefined);
+    assertEquals(restored, current);
     assert(
         restarted.composition.sources.get(sourceId)?.capabilities.every((
             capability,

@@ -30,7 +30,6 @@ import {
     type ChatResponseActivity,
     type ChatResponseCitation,
     type ChatResponseImage,
-    type ChatResponseQuota,
     type ChatToolCall,
 } from "./response.ts";
 import { withConversationRun } from "./runs.ts";
@@ -73,8 +72,6 @@ interface CompletionOutcome {
     activity?: readonly ChatResponseActivity[];
     /** Sources the reply cited. */
     citations?: readonly ChatResponseCitation[];
-    /** Per-turn account quota snapshot, when the source reported one. */
-    quota?: ChatResponseQuota;
 }
 
 interface TurnSettings {
@@ -103,7 +100,6 @@ async function complete(
     reasoning: string;
     activity: readonly ChatResponseActivity[];
     citations: readonly ChatResponseCitation[];
-    quota?: ChatResponseQuota;
 }> {
     const { requestId, signal } = context;
     // The conversation-level system prompt joins the window before bounding so
@@ -165,7 +161,6 @@ async function complete(
             const reasoned = response.reasoning.length;
             const activities = response.activity.length;
             const cited = response.citations.length;
-            const hadQuota = response.quota !== undefined;
             const delta = response.append(event);
             if (delta.length > 0) onDelta?.(delta);
             if (onMeta) {
@@ -187,15 +182,6 @@ async function complete(
                     onMeta({
                         type: "citations",
                         items: newCitations.map((item) => ({ ...item })),
-                    });
-                }
-                const quota = response.quota;
-                if (!hadQuota && quota) {
-                    onMeta({
-                        type: "quota",
-                        quota: {
-                            meters: quota.meters.map((meter) => ({ ...meter })),
-                        },
                     });
                 }
             }
@@ -240,11 +226,6 @@ async function complete(
         reasoning: failure || cancelled ? "" : response.reasoning,
         activity: failure || cancelled ? [] : response.activity,
         citations: failure || cancelled ? [] : response.citations,
-        ...(failure || cancelled
-            ? {}
-            : response.quota
-            ? { quota: response.quota }
-            : {}),
         ...(failure ? { error: failure } : {}),
     };
 }
@@ -723,7 +704,6 @@ function storeReply(
     const reasoning = result.reasoning?.trim() ?? "";
     const activity = result.activity ?? [];
     const citations = result.citations ?? [];
-    const quota = result.quota;
     // Failed and stopped turns persist their visible output together with the
     // outcome status; an outcome with no text (a bare stop or a failure before
     // the first delta) leaves no empty row behind. Generated images, reasoning,
@@ -749,13 +729,6 @@ function storeReply(
                 : {}),
             ...(citations.length > 0
                 ? { citations: citations.map((item) => ({ ...item })) }
-                : {}),
-            ...(quota
-                ? {
-                    quota: {
-                        meters: quota.meters.map((item) => ({ ...item })),
-                    },
-                }
                 : {}),
             status: result.error
                 ? "failed"

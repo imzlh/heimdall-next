@@ -4,9 +4,8 @@ import manifest from "./manifest.json" with { type: "json" };
 
 export const sourceManifest = manifest as unknown as PluginManifest;
 export const DEFAULT_MODELS = [
-    "claude-sonnet-reasoning",
-    "gpt-5.6-reasoning",
-    "gpt-5.5-reasoning",
+    "gpt-5.6-sol",
+    "auto",
 ];
 export const DEFAULT_ENDPOINT =
     "wss://substrate.office.com/m365Copilot/Chathub";

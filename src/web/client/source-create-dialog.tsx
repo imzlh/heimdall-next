@@ -54,6 +54,7 @@ export function SourceCreateDialog(props: SourceCreateDialogProps) {
         name: draft.name,
         priority: draft.priority,
         proxy: draft.proxy,
+        modelMap: draft.modelMap,
         sourcePluginId,
         ...(draft.mode === "preset" ? { presetId: draft.presetId } : {}),
         config,
@@ -72,6 +73,7 @@ export function SourceCreateDialog(props: SourceCreateDialogProps) {
                     name: draft.name,
                     priority: draft.priority,
                     proxy: draft.proxy,
+                    modelMap: draft.modelMap,
                     sourcePluginId,
                     ...(draft.mode === "preset"
                         ? { presetId: draft.presetId }
@@ -107,15 +109,28 @@ export function SourceCreateDialog(props: SourceCreateDialogProps) {
                                 sourcePluginId: preset.sourcePluginId,
                                 presetId: preset.id,
                                 ...(draft.proxy ? { proxy: draft.proxy } : {}),
+                                ...(draft.modelMap
+                                    ? { modelMap: draft.modelMap }
+                                    : {}),
                             }}
                             onSubmit={controls.onSave}
-                            onProbe={(config, signal) =>
-                                probe({
-                                    draft,
+                            onModelMapChange={controls.onModelMapChange}
+                            onProbe={(config, signal, modelMap) => {
+                                if (modelMap !== undefined) {
+                                    controls.onModelMapChange(modelMap);
+                                }
+                                return probe({
+                                    draft: modelMap === undefined
+                                        ? draft
+                                        : { ...draft, modelMap },
                                     sourcePluginId: preset.sourcePluginId!,
                                     config,
-                                }, signal)}
-                            onPreview={async (config) => {
+                                }, signal);
+                            }}
+                            onPreview={async (config, modelMap) => {
+                                if (modelMap !== undefined) {
+                                    controls.onModelMapChange(modelMap);
+                                }
                                 controls.onBusyChange(true);
                                 try {
                                     await previewPreset(preset.id, config);
@@ -144,6 +159,7 @@ export function SourceCreateDialog(props: SourceCreateDialogProps) {
                         onSelectSource={() => {}}
                         onSave={({ config }) => controls.onSave(config)}
                         onProbe={probe}
+                        onModelMapChange={controls.onModelMapChange}
                     />
                 );
             }}

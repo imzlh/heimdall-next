@@ -53,6 +53,35 @@ class FailingStore extends InMemoryPluginRecordStore {
     }
 }
 
+function observableRuntime(overrides: Partial<PluginRuntime> = {}) {
+    const listeners = new Set<(error: Error) => void>();
+    let running = false;
+    const value = runtime({
+        isActive: () => running,
+        onFailure(listener) {
+            listeners.add(listener);
+            return () => listeners.delete(listener);
+        },
+        start() {
+            running = true;
+            return Promise.resolve();
+        },
+        stop() {
+            running = false;
+            return Promise.resolve();
+        },
+        ...overrides,
+    });
+    return {
+        runtime: value,
+        listeners,
+        fail(error = new Error("worker crashed")) {
+            running = false;
+            for (const listener of listeners) listener(error);
+        },
+    };
+}
+
 Deno.test("concurrent installs commit exactly one artifact and leave the queue usable", async () => {
     const host = createPluginHost({ policy: { allowUnsigned: true } });
     const results = await Promise.allSettled([
@@ -394,8 +423,11 @@ Deno.test("list reconciliation rereads metadata and cannot resurrect an uninstal
     const listed = deferred();
     const release = deferred();
     class DelayedListStore extends InMemoryPluginRecordStore {
+        delayed = false;
         override async list(): Promise<readonly PluginRecord[]> {
             const snapshot = await super.list();
+            if (this.delayed) return snapshot;
+            this.delayed = true;
             listed.resolve();
             await release.promise;
             return snapshot;
@@ -607,4 +639,251 @@ Deno.test("caller deadlines terminate runtime waits even when the runtime ignore
     results.resolve("late result");
     assertEquals((await host.get(artifact.manifest.id))?.enabled, true);
     await host.disable(artifact.manifest.id);
+});
+
+Deno.test("runtime failure persists without a host read and aborts all admitted invocations", async () => {
+    const persisted = deferred();
+    class ObservedStore extends InMemoryPluginRecordStore {
+        override async put(record: PluginRecord): Promise<void> {
+            await super.put(record);
+            if (record.lastError?.includes("worker crashed")) {
+                persisted.resolve();
+            }
+        }
+    }
+    const store = new ObservedStore();
+    const invoked = deferred();
+    const execution = deferred<string>();
+    let stopped = 0;
+    const worker = observableRuntime({
+        invoke() {
+            invoked.resolve();
+            return execution.promise;
+        },
+        stop() {
+            stopped++;
+            return Promise.resolve();
+        },
+    });
+    const host = createPluginHost({
+        store,
+        policy: { allowUnsigned: true },
+        runtimeFactory: () => worker.runtime,
+    });
+    try {
+        await host.install(artifact);
+        await host.enable(artifact.manifest.id);
+        const result = assertRejects(
+            () => host.invoke(artifact.manifest.id, { method: "wait" }),
+            DOMException,
+        );
+        await invoked.promise;
+        worker.fail();
+        await result;
+        await persisted.promise;
+        const saved = await store.get(artifact.manifest.id);
+        assertEquals(saved?.enabled, false);
+        assertEquals(saved?.lastError, "runtime_failed: worker crashed");
+        assertEquals(stopped, 1);
+        assertEquals(worker.listeners.size, 0);
+    } finally {
+        execution.resolve("late result");
+        await host.close();
+    }
+});
+
+Deno.test("runtime failure releases resources on storage failure and retries persistence on read", async () => {
+    const store = new FailingStore();
+    const stopped = deferred();
+    const worker = observableRuntime({
+        stop() {
+            stopped.resolve();
+            return Promise.resolve();
+        },
+    });
+    const host = createPluginHost({
+        store,
+        policy: { allowUnsigned: true },
+        runtimeFactory: () => worker.runtime,
+    });
+    try {
+        await host.install(artifact);
+        await host.enable(artifact.manifest.id);
+        store.rejectPut = true;
+        worker.fail();
+        await stopped.promise;
+        await assertRejects(
+            () => host.get(artifact.manifest.id),
+            Error,
+            "write failed",
+        );
+        store.rejectPut = false;
+        const saved = await host.get(artifact.manifest.id);
+        assertEquals(saved?.enabled, false);
+        assertEquals(saved?.lastError, "runtime_failed: worker crashed");
+    } finally {
+        store.rejectPut = false;
+        await host.close();
+    }
+});
+
+Deno.test("failure during enable persistence cannot publish an enabled success", async () => {
+    const worker = observableRuntime();
+    class CrashingStore extends InMemoryPluginRecordStore {
+        override async put(record: PluginRecord): Promise<void> {
+            await super.put(record);
+            if (record.enabled) worker.fail();
+        }
+    }
+    const store = new CrashingStore();
+    const host = createPluginHost({
+        store,
+        policy: { allowUnsigned: true },
+        runtimeFactory: () => worker.runtime,
+    });
+    try {
+        await host.install(artifact);
+        await assertRejects(
+            () => host.enable(artifact.manifest.id),
+            PluginLifecycleError,
+            "stopped while enabling",
+        );
+        assertEquals((await store.get(artifact.manifest.id))?.enabled, false);
+        assertEquals(
+            (await store.get(artifact.manifest.id))?.lastError,
+            "runtime_failed: worker crashed",
+        );
+        assertEquals(worker.listeners.size, 0);
+    } finally {
+        await host.close();
+    }
+});
+
+Deno.test("late failure notifications cannot disable a replacement runtime", async () => {
+    const workers: ReturnType<typeof observableRuntime>[] = [];
+    const host = createPluginHost({
+        policy: { allowUnsigned: true },
+        runtimeFactory: () => {
+            const worker = observableRuntime();
+            workers.push(worker);
+            return worker.runtime;
+        },
+    });
+    try {
+        await host.install(artifact);
+        await host.enable(artifact.manifest.id);
+        const stale = [...workers[0]!.listeners][0]!;
+        await host.disable(artifact.manifest.id);
+        await host.enable(artifact.manifest.id);
+        stale(new Error("old worker crashed"));
+        assertEquals((await host.get(artifact.manifest.id))?.enabled, true);
+        assertEquals(
+            await host.invoke(artifact.manifest.id, { method: "ping" }),
+            "ok",
+        );
+        assertEquals(workers[0]!.listeners.size, 0);
+        assertEquals(workers[1]!.listeners.size, 1);
+    } finally {
+        await host.close();
+    }
+});
+
+Deno.test("shutdown drains admitted startup and rejects new work without losing enable preference", async () => {
+    const store = new InMemoryPluginRecordStore();
+    const starting = deferred();
+    const release = deferred();
+    let stops = 0;
+    const host = createPluginHost({
+        store,
+        policy: { allowUnsigned: true },
+        runtimeFactory: () =>
+            runtime({
+                async start() {
+                    starting.resolve();
+                    await release.promise;
+                },
+                stop() {
+                    stops++;
+                    return Promise.resolve();
+                },
+            }),
+    });
+    await host.install(artifact);
+    const enable = host.enable(artifact.manifest.id);
+    await starting.promise;
+    const close = host.close();
+    try {
+        await assertRejects(
+            () => host.enable(artifact.manifest.id),
+            PluginLifecycleError,
+            "host is closed",
+        );
+        await assertRejects(
+            () => host.install(artifact),
+            PluginLifecycleError,
+            "host is closed",
+        );
+        await assertRejects(
+            () => host.invoke(artifact.manifest.id, { method: "ping" }),
+            PluginLifecycleError,
+            "host is closed",
+        );
+    } finally {
+        release.resolve();
+        await enable;
+        await close;
+    }
+    assertEquals(stops, 1);
+    assertEquals((await store.get(artifact.manifest.id))?.enabled, true);
+    assertEquals((await host.get(artifact.manifest.id))?.enabled, true);
+    await host.close();
+    assertEquals(stops, 1);
+});
+
+Deno.test("shutdown retries partial cleanup without changing durable enable preference", async () => {
+    const store = new FailingStore();
+    const worker = observableRuntime();
+    let stops = 0;
+    worker.runtime.stop = () => {
+        if (++stops === 1) return Promise.reject(new Error("stop failed"));
+        return Promise.resolve();
+    };
+    const host = createPluginHost({
+        store,
+        policy: { allowUnsigned: true },
+        runtimeFactory: () => worker.runtime,
+    });
+    await host.install(artifact);
+    await host.enable(artifact.manifest.id);
+    await assertRejects(() => host.close(), AggregateError, "shutdown failed");
+    await host.close();
+    assertEquals(stops, 2);
+    assertEquals((await store.get(artifact.manifest.id))?.enabled, true);
+});
+
+Deno.test("shutdown reports failed fault persistence and flushes it on retry", async () => {
+    const store = new FailingStore();
+    const stopped = deferred();
+    const worker = observableRuntime({
+        stop() {
+            stopped.resolve();
+            return Promise.resolve();
+        },
+    });
+    const host = createPluginHost({
+        store,
+        policy: { allowUnsigned: true },
+        runtimeFactory: () => worker.runtime,
+    });
+    await host.install(artifact);
+    await host.enable(artifact.manifest.id);
+    store.rejectPut = true;
+    worker.fail();
+    await stopped.promise;
+    await assertRejects(() => host.close(), AggregateError, "shutdown failed");
+    store.rejectPut = false;
+    await host.close();
+    const saved = await store.get(artifact.manifest.id);
+    assertEquals(saved?.enabled, false);
+    assertEquals(saved?.lastError, "runtime_failed: worker crashed");
 });

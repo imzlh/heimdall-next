@@ -2,15 +2,21 @@ import { copyFormJson } from "./form-json.ts";
 import type { UiJsonObject, UiJsonValue } from "./ui.ts";
 import type { SourceProxySelection } from "./proxies.ts";
 import type { SourceDraftProbeResult } from "./source-probe.ts";
+import {
+    parseSourceModelMap,
+    type SourceModelMap,
+} from "./source-model-map.ts";
 
 export type PresetJsonValue = UiJsonValue;
 export type PresetJsonObject = UiJsonObject;
 
 export const PRESET_UI_ACTION_EVENT = "heimdall:preset-action";
 export const PRESET_UI_FEEDBACK_EVENT = "heimdall:preset-feedback";
+export const PRESET_UI_MODEL_MAP_EVENT = "heimdall:preset-model-map";
 export const PRESET_UI_LIMITS = {
-    contextBytes: 4096,
-    actionBytes: 65_536,
+    contextBytes: 524_288,
+    actionBytes: 524_288,
+    configBytes: 65_536,
     feedbackBytes: 16_384,
 } as const;
 
@@ -25,12 +31,16 @@ export interface PresetUiContext {
     readonly presetId: string;
     /** A public host choice, never a proxy endpoint or credentials. */
     readonly proxy?: SourceProxySelection;
+    /** Public routing metadata, independent of the provider configuration. */
+    readonly modelMap?: SourceModelMap;
 }
 
 /** Newly entered configuration travels to the host; the host owns persistence. */
 export interface PresetUiAction {
     readonly kind: "save" | "preview" | "probe";
     readonly config: PresetJsonObject;
+    /** Optional replacement of the host mapping, for model discovery shortcuts. */
+    readonly modelMap?: SourceModelMap;
 }
 
 /** Feedback never echoes submitted configuration or backend response bodies. */
@@ -45,7 +55,13 @@ const pluginId = /^[a-z0-9](?:[a-z0-9._-]{0,126}[a-z0-9])?$/;
 
 export function parsePresetUiContext(value: unknown): PresetUiContext {
     const context = jsonObject(value, PRESET_UI_LIMITS.contextBytes);
-    keys(context, ["draft", "sourcePluginId", "presetId"], ["proxy"]);
+    keys(context, ["draft", "sourcePluginId", "presetId"], [
+        "proxy",
+        "modelMap",
+    ]);
+    const modelMap = context.modelMap === undefined
+        ? undefined
+        : parseSourceModelMap(context.modelMap);
     if (context.proxy !== undefined) {
         const proxy = record(context.proxy);
         if (proxy.mode === "proxy") {
@@ -74,19 +90,36 @@ export function parsePresetUiContext(value: unknown): PresetUiContext {
             "invalid plugin id",
         );
     }
-    return context as unknown as PresetUiContext;
+    return {
+        ...context,
+        ...(modelMap ? { modelMap } : {}),
+    } as unknown as PresetUiContext;
 }
 
 export function parsePresetUiAction(value: unknown): PresetUiAction {
     const action = jsonObject(value, PRESET_UI_LIMITS.actionBytes);
-    keys(action, ["kind", "config"]);
+    keys(action, ["kind", "config"], ["modelMap"]);
+    const modelMap = action.modelMap === undefined
+        ? undefined
+        : parseSourceModelMap(action.modelMap);
     ensure(
         action.kind === "save" || action.kind === "preview" ||
             action.kind === "probe",
         "invalid action",
     );
     record(action.config);
-    return action as unknown as PresetUiAction;
+    copyFormJson(action.config, PRESET_UI_LIMITS.configBytes);
+    return {
+        ...action,
+        ...(modelMap ? { modelMap } : {}),
+    } as unknown as PresetUiAction;
+}
+
+/** A preset can update the in-memory host draft without submitting credentials. */
+export function parsePresetUiModelMap(value: unknown): SourceModelMap {
+    return parseSourceModelMap(
+        jsonObject(value, PRESET_UI_LIMITS.contextBytes),
+    );
 }
 
 export function parsePresetUiFeedback(value: unknown): PresetUiFeedback {

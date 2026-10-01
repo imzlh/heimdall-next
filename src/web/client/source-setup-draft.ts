@@ -1,4 +1,8 @@
 import { randomUuid } from "./random-id.ts";
+import {
+    parseSourceModelMap,
+    type SourceModelMap,
+} from "@heimdall/admin-contracts/source-model-map.ts";
 import type { SourceProxySelection } from "@heimdall/admin-contracts/proxies.ts";
 import { sourceProxySelection } from "../shared/proxy-presentation.ts";
 
@@ -8,6 +12,7 @@ export interface SourceSetupSelection {
     readonly mode: "preset" | "custom";
     readonly presetId?: string;
     readonly proxy?: SourceProxySelection;
+    readonly modelMap?: SourceModelMap;
 }
 
 /** Creation identity and choices live only for the lifetime of the dialog. */
@@ -41,6 +46,7 @@ export function createSourceSetupDraft(
         throw new Error("渠道优先级必须是安全范围内的整数。");
     }
     const mode = ownValue(selection, "mode");
+    const modelMap = parseSourceModelMap(ownValue(selection, "modelMap"));
     if (mode !== "preset" && mode !== "custom") {
         throw new Error("请选择预设或自定义渠道。");
     }
@@ -89,5 +95,6 @@ export function createSourceSetupDraft(
         mode,
         ...(presetId ? { presetId } : {}),
         ...(proxy ? { proxy } : {}),
+        ...(Object.keys(modelMap).length ? { modelMap } : {}),
     };
 }

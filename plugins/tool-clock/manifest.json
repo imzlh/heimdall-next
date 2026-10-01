@@ -7,6 +7,27 @@
     "kind": "tool",
     "trust": "trusted",
     "capabilities": ["current_time"],
+    "ui": [
+        {
+            "pluginId": "heimdall.tool.clock",
+            "id": "conversation",
+            "slot": "chat.sidebar",
+            "title": "当前时间",
+            "schema": {
+                "blocks": [
+                    {
+                        "kind": "text",
+                        "text": "需要当前时间时，助手可调用本机时钟，无需联网。"
+                    },
+                    {
+                        "kind": "badge",
+                        "label": "可用",
+                        "labelFrom": ["tool", "state"]
+                    }
+                ]
+            }
+        }
+    ],
     "permissions": {
         "network": false,
         "filesystem": "none",

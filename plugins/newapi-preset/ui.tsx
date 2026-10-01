@@ -14,11 +14,13 @@ import {
     parsePresetUiFeedback,
     PRESET_UI_ACTION_EVENT,
     PRESET_UI_FEEDBACK_EVENT,
+    PRESET_UI_MODEL_MAP_EVENT,
     type PresetUiAction,
     type PresetUiContext,
     type PresetUiFeedback,
 } from "@heimdall/admin-contracts/preset-ui.ts";
 import { validateNewApiPresetConfig } from "./schema.ts";
+import { parseSourceModelMap } from "@heimdall/admin-contracts/source-model-map.ts";
 
 /** NewAPI renders inside the host dialog and requests actions through JSON events. */
 export function mount(
@@ -53,15 +55,21 @@ function NewApiSetup({ element, context }: {
     const [baseUrl, setBaseUrl] = useState("");
     const [apiKey, setApiKey] = useState("");
     const [modelMap, setModelMap] = useState<Readonly<Record<string, string>>>(
-        {},
+        context.modelMap ?? {},
     );
     const [visible, setVisible] = useState(false);
     const [feedback, setFeedback] = useState<PresetUiFeedback | null>(null);
+    const [probeFeedback, setProbeFeedback] = useState<PresetUiFeedback | null>(
+        null,
+    );
     const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
     const form = useRef<HTMLFormElement | null>(null);
     const pending = useRef(false);
     const busy = feedback?.status === "pending";
     const saved = feedback?.kind === "save" && feedback.status === "success";
+    const probe = probeFeedback?.probe;
+    const probeFailed = probeFeedback?.status === "error" ||
+        probe?.ok === false;
     const prefix = `newapi-${context.draft.id}`;
 
     useLayoutEffect(() => {
@@ -73,6 +81,7 @@ function NewApiSetup({ element, context }: {
                 const next = parsePresetUiFeedback(event.detail);
                 pending.current = next.status === "pending";
                 setFeedback(next);
+                if (next.kind === "probe") setProbeFeedback(next);
                 setErrors(next.errors ?? {});
                 if (next.kind === "save" && next.status === "success") {
                     setApiKey("");
@@ -104,7 +113,6 @@ function NewApiSetup({ element, context }: {
                 id: context.draft.id,
                 baseUrl,
                 ...(apiKey.trim() ? { apiKey } : {}),
-                ...(Object.keys(modelMap).length ? { modelMap } : {}),
             });
         } catch {
             setErrors({
@@ -117,13 +125,11 @@ function NewApiSetup({ element, context }: {
         try {
             action = parsePresetUiAction({
                 kind,
+                modelMap: parseSourceModelMap(modelMap),
                 config: {
                     id: context.draft.id,
                     baseUrl: normalized.baseUrl,
                     ...(normalized.apiKey ? { apiKey: normalized.apiKey } : {}),
-                    ...(normalized.modelMap
-                        ? { modelMap: normalized.modelMap }
-                        : {}),
                 },
             });
         } catch {
@@ -141,7 +147,15 @@ function NewApiSetup({ element, context }: {
         update();
         setErrors({});
         setFeedback(null);
+        setProbeFeedback(null);
     };
+    function selectModels(next: Readonly<Record<string, string>>) {
+        const mapping = parseSourceModelMap(next);
+        setModelMap(mapping);
+        element.dispatchEvent(
+            new CustomEvent(PRESET_UI_MODEL_MAP_EVENT, { detail: mapping }),
+        );
+    }
     return (
         <form
             ref={form}
@@ -249,31 +263,29 @@ function NewApiSetup({ element, context }: {
                                 : "配置校验通过，可以保存渠道。"}
                         </p>
                     )}
-                {feedback?.probe && (
+                {probe && (
                     <div
                         class="source-probe-result"
-                        data-state={feedback.probe.ok ? "success" : "error"}
+                        data-state={probe.ok ? "success" : "error"}
                     >
                         <p
-                            class={feedback.probe.ok
-                                ? "form-success"
-                                : "form-error"}
-                            role={feedback.probe.ok ? "status" : "alert"}
+                            class={probe.ok ? "form-success" : "form-error"}
+                            role={probe.ok ? "status" : "alert"}
                         >
-                            {feedback.probe.message}
+                            {probe.message}
                         </p>
-                        {feedback.probe.ok && feedback.probe.models?.length
+                        {probe.ok && probe.models?.length
                             ? (
                                 <>
                                     <p class="field-help">
-                                        发现 {feedback.probe.models.length}{" "}
+                                        发现 {probe.models.length}{" "}
                                         个模型，点击加入模型映射。
                                     </p>
                                     <div
                                         class="source-model-list"
-                                        aria-label="上游模型"
+                                        aria-label="可用模型"
                                     >
-                                        {feedback.probe.models.map((model) => (
+                                        {probe.models.map((model) => (
                                             <button
                                                 key={model}
                                                 type="button"
@@ -281,15 +293,34 @@ function NewApiSetup({ element, context }: {
                                                 aria-pressed={Object.hasOwn(
                                                         modelMap,
                                                         model,
-                                                    )
+                                                    ) || Object.values(
+                                                        modelMap,
+                                                    ).includes(model)
                                                     ? "true"
                                                     : "false"}
                                                 disabled={busy || saved}
-                                                onClick={() =>
-                                                    setModelMap((current) => ({
-                                                        ...current,
-                                                        [model]: model,
-                                                    }))}
+                                                onClick={() => {
+                                                    if (
+                                                        Object.hasOwn(
+                                                            modelMap,
+                                                            model,
+                                                        ) ||
+                                                        Object.values(modelMap)
+                                                            .includes(model)
+                                                    ) return;
+                                                    try {
+                                                        selectModels({
+                                                            ...modelMap,
+                                                            [model]: model,
+                                                        });
+                                                        setErrors({});
+                                                    } catch {
+                                                        setErrors({
+                                                            _form:
+                                                                "无法添加此模型，请检查名称或减少映射数量。",
+                                                        });
+                                                    }
+                                                }}
                                             >
                                                 {model}
                                             </button>
@@ -297,23 +328,30 @@ function NewApiSetup({ element, context }: {
                                     </div>
                                 </>
                             )
-                            : feedback.probe.ok && (
+                            : probe.ok && (
                                 <p class="field-help">
                                     插件未返回模型列表，仍可保存渠道。
                                 </p>
                             )}
                     </div>
                 )}
+                {!busy && !saved && !probe?.ok && (
+                    <p class="field-help" role="status">
+                        {probeFailed
+                            ? "连接测试未通过，可重试或跳过测试并保存。"
+                            : "尚未测试连接。可先测试，也可直接保存。"}
+                    </p>
+                )}
                 {Object.keys(modelMap).length > 0 && (
                     <p class="field-help">
-                        已选择 {Object.keys(modelMap).length}{" "}
-                        个模型，将随渠道一起保存。<button
+                        已配置 {Object.keys(modelMap).length}{" "}
+                        条模型映射，可返回基础信息调整对外名称。<button
                             type="button"
                             class="text-button"
                             disabled={busy || saved}
-                            onClick={() => setModelMap({})}
+                            onClick={() => selectModels({})}
                         >
-                            清空选择
+                            清空映射
                         </button>
                     </p>
                 )}
@@ -327,7 +365,7 @@ function NewApiSetup({ element, context }: {
                 >
                     {busy && feedback.kind === "probe"
                         ? "测试连接并获取模型…"
-                        : feedback?.probe?.ok === false
+                        : probeFailed
                         ? "重新测试连接"
                         : "测试连接并获取模型"}
                 </button>
@@ -346,7 +384,11 @@ function NewApiSetup({ element, context }: {
                     class="primary-button"
                     disabled={busy || saved}
                 >
-                    {busy && feedback.kind === "save" ? "保存中…" : "保存渠道"}
+                    {busy && feedback.kind === "save"
+                        ? "保存中…"
+                        : probeFailed
+                        ? "跳过测试并保存"
+                        : "保存渠道"}
                 </button>
             </div>
         </form>

@@ -233,6 +233,111 @@ Deno.test("source management saves only dirty fields then closes and restores fo
     }
 });
 
+Deno.test("source management edits, validates and clears model routing metadata independently of provider config", async () => {
+    const test = await setup(undefined, {
+        source: { ...source, modelMap: { fast: "upstream-fast" } },
+    });
+    try {
+        await test.act(() => button(test.dialog, "添加模型映射").click());
+        await test.act(() =>
+            input(find(test.dialog, 'input[name="model-alias-1"]'), " fast ")
+        );
+        await test.act(() =>
+            input(
+                find(test.dialog, 'input[name="model-upstream-1"]'),
+                "upstream-other",
+            )
+        );
+        await test.act(() => button(test.dialog, "保存修改").click());
+        assertEquals(test.requests, []);
+        assert(test.dialog.textContent.includes("重复"));
+        assertEquals(
+            find(test.dialog, 'input[name="model-alias-1"]').getAttribute(
+                "aria-invalid",
+            ),
+            "true",
+        );
+        await test.act(() =>
+            input(find(test.dialog, 'input[name="model-alias-1"]'), "slow")
+        );
+        await test.act(() => button(test.dialog, "保存修改").click());
+        assertEquals(JSON.parse(String(test.requests[0]?.init?.body)), {
+            modelMap: { fast: "upstream-fast", slow: "upstream-other" },
+        });
+        assertEquals(test.changes[0]?.source.modelMap, {
+            fast: "upstream-fast",
+            slow: "upstream-other",
+        });
+    } finally {
+        await test.dispose();
+    }
+    const cleared = await setup(undefined, {
+        source: { ...source, modelMap: { fast: "upstream-fast" } },
+    });
+    try {
+        await cleared.act(() =>
+            find(cleared.dialog, 'button[aria-label="删除第 1 行映射"]').click()
+        );
+        await cleared.act(() => button(cleared.dialog, "保存修改").click());
+        assertEquals(JSON.parse(String(cleared.requests[0]?.init?.body)), {
+            modelMap: {},
+        });
+    } finally {
+        await cleared.dispose();
+    }
+});
+
+Deno.test("source mapping revision conflicts preserve changed aliases and adopt untouched remote mappings", async () => {
+    for (const localChanged of [false, true]) {
+        const original = { ...source, modelMap: { fast: "original-model" } };
+        const latest = {
+            ...original,
+            modelMap: { fast: "remote-model" },
+            priority: 8,
+            versionstamp: '"revision-2"',
+        };
+        const test = await setup(
+            (_request, index) =>
+                index === 0
+                    ? Response.json({
+                        error: { code: "version_conflict", message: "已变更" },
+                    }, { status: 409 })
+                    : index === 1
+                    ? Response.json({ sources: [latest] })
+                    : Response.json({ updated: true }),
+            { source: original },
+        );
+        try {
+            await test.edit("name", "本地渠道");
+            if (localChanged) {
+                await test.act(() =>
+                    input(
+                        find(test.dialog, 'input[name="model-upstream-0"]'),
+                        "local-model",
+                    )
+                );
+            }
+            await test.act(() => button(test.dialog, "保存修改").click());
+            await test.act(() => button(test.dialog, "读取最新信息").click());
+            assertEquals(
+                find(test.dialog, 'input[name="model-upstream-0"]').value,
+                localChanged ? "local-model" : "remote-model",
+            );
+            await test.act(() => button(test.dialog, "保存修改").click());
+            assertEquals(JSON.parse(String(test.requests[2]?.init?.body)), {
+                name: "本地渠道",
+                ...(localChanged ? { modelMap: { fast: "local-model" } } : {}),
+            });
+            assertEquals(
+                new Headers(test.requests[2]?.init?.headers).get("if-match"),
+                latest.versionstamp,
+            );
+        } finally {
+            await test.dispose();
+        }
+    }
+});
+
 Deno.test("source management offers inheritance, direct access and named proxies and saves the chosen mode", async () => {
     const choices: {
         initial: SourceProxySelection;

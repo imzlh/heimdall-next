@@ -96,9 +96,7 @@ export function SystemLogPage(
                                 type="button"
                                 class={`system-log-level-chip${
                                     state.level === value ? " is-active" : ""
-                                }${
-                                    value ? ` system-log-chip-${value}` : ""
-                                }`}
+                                }${value ? ` system-log-chip-${value}` : ""}`}
                                 aria-pressed={state.level === value}
                                 aria-label={label}
                                 title={label}

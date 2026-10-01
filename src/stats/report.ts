@@ -12,9 +12,9 @@ import type { RequestStore, RequestWindowStats } from "@heimdall/storage";
 import {
     civilClock,
     civilDate,
+    dayStart,
     type NaturalDay,
     naturalDay,
-    dayStart,
     recentNaturalDays,
 } from "./calendar.ts";
 
@@ -165,7 +165,9 @@ function recentTrend(reader: StatsReader, clock: StatsClock): StatsTrendDto {
     );
     const start = Math.max(first - RECENT_CONTEXT_MS, end - RECENT_MAX_SPAN_MS);
     const span = end - start;
-    const widened = span < RECENT_MIN_SPAN_MS ? end - RECENT_MIN_SPAN_MS : start;
+    const widened = span < RECENT_MIN_SPAN_MS
+        ? end - RECENT_MIN_SPAN_MS
+        : start;
     const bucketMs = span <= 8 * HOUR_MS
         ? FINE_MS
         : span <= 20 * HOUR_MS
@@ -212,7 +214,9 @@ function bucketSeries(
         points.push({
             from: iso(start),
             day,
-            label: stepMs >= 1440 * MINUTE_MS ? day.slice(5) : civilClock(start, zone),
+            label: stepMs >= 1440 * MINUTE_MS
+                ? day.slice(5)
+                : civilClock(start, zone),
             ...counters(reader.windowStats(iso(start), iso(start + stepMs))),
         });
     }

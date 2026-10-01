@@ -144,6 +144,7 @@ Deno.test("journal download interrupted by retention fails instead of silently o
         request(store, "req-stream");
         frame(store, 0);
         frame(store, 3);
+        store.updateRequest("req-stream", { status: "completed" });
         const response = exportRequestJournal(
             store,
             store.getRequest("req-stream")!,

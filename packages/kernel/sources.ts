@@ -14,6 +14,14 @@ import {
 } from "../hip/mod.ts";
 import { attemptSource, sameSourceRetry } from "./failover.ts";
 import type { SourceRouter } from "./mod.ts";
+import {
+    type SourceCooldown,
+    type SourceCooldownReason,
+    type SourceHealthCheck,
+    SourceHealthOrder,
+    type SourceHealthSnapshot,
+    upstreamCooldownReason,
+} from "./source-health.ts";
 
 /** No configured source can satisfy an operation's advertised traits. */
 export class SourceUnavailableError extends Error {
@@ -81,7 +89,8 @@ export interface SourceRegistryOptions {
 export class SourceRegistry implements SourceRouter {
     #sources = new Map<string, InferenceSource>();
     #cursor = new Map<string, number>();
-    #cooldownUntil = new Map<string, number>();
+    #cooldowns = new Map<string, SourceCooldown>();
+    #healthChecks = new Map<string, SourceHealthOrder>();
     #probes = new Map<string, {
         ok: boolean;
         checkedAt: string;
@@ -122,6 +131,22 @@ export class SourceRegistry implements SourceRouter {
                 "conversationAffinityMs must be a non-negative number",
             );
         }
+        for (
+            const [name, duration] of [["cooldownMs", options.cooldownMs], [
+                "authCooldownMs",
+                options.authCooldownMs,
+            ]] as const
+        ) {
+            if (
+                duration !== undefined &&
+                (!Number.isSafeInteger(duration) || duration < 0 ||
+                    duration > 86_400_000)
+            ) {
+                throw new TypeError(
+                    `${name} must be an integer from 0 to 86400000`,
+                );
+            }
+        }
         this.#now = options.now ?? (() => new Date());
         this.#maxAttempts = options.maxAttempts ?? 3;
         this.#sameSourceAttempts = options.sameSourceAttempts ?? 3;
@@ -136,24 +161,43 @@ export class SourceRegistry implements SourceRouter {
             throw new TypeError(`source already registered: ${source.id}`);
         }
         this.#sources.set(source.id, source);
+        this.#healthChecks.set(source.id, new SourceHealthOrder());
     }
 
     replace(
         source: InferenceSource,
-        options: { readonly preserveDiscovery?: boolean } = {},
+        options: {
+            readonly preserveDiscovery?: boolean;
+            readonly discoveredModels?: readonly string[];
+        } = {},
     ): void {
         validateSource(source);
         if (!this.#sources.has(source.id)) {
             throw new TypeError(`source is not registered: ${source.id}`);
         }
         this.#sources.set(source.id, source);
+        this.#healthChecks.set(source.id, new SourceHealthOrder());
         this.#cursor.clear();
-        if (!options.preserveDiscovery) this.#discovered.delete(source.id);
+        if (!options.preserveDiscovery) {
+            this.#discovered.delete(source.id);
+            this.#probes.delete(source.id);
+            this.#cooldowns.delete(source.id);
+            this.#forgetAffinity(source.id);
+        }
+        if (options.discoveredModels !== undefined) {
+            this.#discovered.set(
+                source.id,
+                sanitizeModelIds(options.discoveredModels),
+            );
+        }
     }
 
     upsert(
         source: InferenceSource,
-        options: { readonly preserveDiscovery?: boolean } = {},
+        options: {
+            readonly preserveDiscovery?: boolean;
+            readonly discoveredModels?: readonly string[];
+        } = {},
     ): void {
         if (this.#sources.has(source.id)) this.replace(source, options);
         else this.register(source);
@@ -162,6 +206,9 @@ export class SourceRegistry implements SourceRouter {
     unregister(id: string): boolean {
         this.#probes.delete(id);
         this.#discovered.delete(id);
+        this.#cooldowns.delete(id);
+        this.#healthChecks.delete(id);
+        this.#forgetAffinity(id);
         return this.#sources.delete(id);
     }
 
@@ -194,24 +241,51 @@ export class SourceRegistry implements SourceRouter {
         return this.#cooled(id) ? "cooldown" : "ready";
     }
 
+    healthSnapshot(id: string): SourceHealthSnapshot {
+        this.#requireKnown(id);
+        return this.#cooled(id)
+            ? { health: "cooldown", cooldown: { ...this.#cooldowns.get(id)! } }
+            : { health: "ready" };
+    }
+
+    /** Only completed newer checks supersede older results; pending traffic does not. */
+    beginHealthCheck(id: string): SourceHealthCheck {
+        this.#requireKnown(id);
+        return this.#healthChecks.get(id)!.begin();
+    }
+
+    /** Re-enter routing without fabricating a successful probe. */
+    clearCooldown(id: string): SourceHealthSnapshot {
+        this.#requireKnown(id);
+        this.#healthChecks.set(id, new SourceHealthOrder());
+        this.#cooldowns.delete(id);
+        return this.healthSnapshot(id);
+    }
+
     /**
      * Record an operator probe for a registered source. Success clears a failover
      * cooldown. Failure applies the same cooldown as an upstream failover.
      * Unknown source ids throw. This does not call the source.
      */
-    recordProbe(id: string, result: SourceProbeResult): void {
-        this.#requireKnown(id);
+    recordProbe(
+        id: string,
+        result: SourceProbeResult,
+        token?: SourceHealthCheck,
+    ): boolean {
+        const check = token ?? this.beginHealthCheck(id);
+        if (!this.#healthChecks.get(id)?.accept(check)) return false;
         this.#probes.set(id, {
             ok: result.ok,
             checkedAt: this.#now().toISOString(),
             message: result.message,
         });
         if (result.ok) {
-            this.#cooldownUntil.delete(id);
+            this.#cooldowns.delete(id);
             if (result.models !== undefined) {
                 this.#discovered.set(id, sanitizeModelIds(result.models));
             }
-        } else this.#cool(id, this.#cooldownMs);
+        } else this.#cool(id, this.#cooldownMs, "probe");
+        return true;
     }
 
     /** Model ids learned from a successful probe. These do not restrict routing. */
@@ -287,7 +361,9 @@ export class SourceRegistry implements SourceRouter {
         request: OperationRequest,
         source: InferenceSource,
     ): void {
-        if (this.#affinityMs === 0) return;
+        if (this.#affinityMs === 0 || this.#sources.get(source.id) !== source) {
+            return;
+        }
         const conversation = conversationIdentity(request);
         if (conversation === undefined) return;
         if (this.#affinity.size >= 4096 && !this.#affinity.has(conversation)) {
@@ -297,6 +373,12 @@ export class SourceRegistry implements SourceRouter {
             sourceId: source.id,
             expiresAt: this.#now().getTime() + this.#affinityMs,
         });
+    }
+
+    #forgetAffinity(id: string): void {
+        for (const [conversation, remembered] of this.#affinity) {
+            if (remembered.sourceId === id) this.#affinity.delete(conversation);
+        }
     }
 
     run(
@@ -322,6 +404,8 @@ export class SourceRegistry implements SourceRouter {
             : { ...context, conversationId: conversation };
         let lastError: CanonicalError | undefined;
         for (const source of attempts) {
+            if (this.#sources.get(source.id) !== source) continue;
+            const healthCheck = this.beginHealthCheck(source.id);
             for (
                 let tryIndex = 0;
                 tryIndex < this.#sameSourceAttempts;
@@ -350,7 +434,10 @@ export class SourceRegistry implements SourceRouter {
                             tryIndex + 1 < this.#sameSourceAttempts &&
                             sameSourceRetry(outcome.error)
                         ) continue;
-                        this.#recordAttemptHealth(source, this.#cooldownMs);
+                        const reason = upstreamCooldownReason(
+                            outcome.error.status,
+                        );
+                        this.#recordAttemptHealth(source, healthCheck, reason);
                         break;
                     }
                     if (outcome.kind === "stop") {
@@ -358,12 +445,13 @@ export class SourceRegistry implements SourceRouter {
                         if (outcome.cooldown === "auth") {
                             this.#recordAttemptHealth(
                                 source,
-                                this.#authCooldownMs,
+                                healthCheck,
+                                "authentication",
                             );
                         }
                         return;
                     }
-                    this.#recordAttemptHealth(source);
+                    this.#recordAttemptHealth(source, healthCheck);
                     if (committed) this.#rememberAffinity(request, source);
                     return;
                 } catch (error) {
@@ -382,7 +470,7 @@ export class SourceRegistry implements SourceRouter {
                         status: 503,
                     };
                     if (tryIndex + 1 < this.#sameSourceAttempts) continue;
-                    this.#recordAttemptHealth(source, this.#cooldownMs);
+                    this.#recordAttemptHealth(source, healthCheck, "transport");
                 }
             }
         }
@@ -419,25 +507,46 @@ export class SourceRegistry implements SourceRouter {
     }
 
     #cooled(id: string): boolean {
-        const until = this.#cooldownUntil.get(id);
-        if (until === undefined) return false;
-        if (until <= this.#now().getTime()) {
-            this.#cooldownUntil.delete(id);
+        const cooldown = this.#cooldowns.get(id);
+        if (cooldown === undefined) return false;
+        if (Date.parse(cooldown.until) <= this.#now().getTime()) {
+            this.#cooldowns.delete(id);
             return false;
         }
         return true;
     }
 
-    #cool(id: string, durationMs: number): void {
-        this.#cooldownUntil.set(id, this.#now().getTime() + durationMs);
+    #cool(id: string, durationMs: number, reason: SourceCooldownReason): void {
+        const now = this.#now();
+        this.#cooldowns.set(id, {
+            reason,
+            startedAt: now.toISOString(),
+            until: new Date(now.getTime() + durationMs).toISOString(),
+        });
     }
 
-    #recordAttemptHealth(source: InferenceSource, cooldownMs?: number): void {
+    #recordAttemptHealth(
+        source: InferenceSource,
+        token: SourceHealthCheck,
+        reason?: SourceCooldownReason,
+    ): void {
         // An in-flight request may finish after its channel was replaced or
         // removed. Its result belongs to that instance, not the reused id.
-        if (this.#sources.get(source.id) !== source) return;
-        if (cooldownMs === undefined) this.#cooldownUntil.delete(source.id);
-        else this.#cool(source.id, cooldownMs);
+        if (
+            this.#sources.get(source.id) !== source ||
+            !this.#healthChecks.get(source.id)?.accept(token)
+        ) return;
+        if (reason === undefined) {
+            this.#cooldowns.delete(source.id);
+            return;
+        }
+        this.#cool(
+            source.id,
+            reason === "authentication"
+                ? this.#authCooldownMs
+                : this.#cooldownMs,
+            reason,
+        );
     }
 
     #requireKnown(id: string): void {

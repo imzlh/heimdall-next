@@ -4,11 +4,15 @@ import {
     assertStringIncludes,
     assertThrows,
 } from "@std/assert";
-import type { DashboardData } from "@heimdall/admin-contracts/console.ts";
+import type {
+    DashboardData,
+    ListedSource,
+} from "@heimdall/admin-contracts/console.ts";
 import {
     isUiJsonObject,
     parseUiContributions,
     resolveUiBlock,
+    UI_LIMITS,
     type UiBlock,
     type UiContext,
     type UiContribution,
@@ -232,4 +236,94 @@ Deno.test("SSR status bindings update with the live catalog and disappear when p
     assertFalse(
         (await html()).includes('data-ui-extension="sample.source:status"'),
     );
+});
+
+Deno.test("source UI context carries only its own detached plugin JSON alongside host status", () => {
+    const ui = { status: { count: 5 }, entries: [true, null, "ready"] };
+    const parent = {
+        ...dashboardUiContext(dashboard),
+        data: { plugin: { otherSource: "private to another source" } },
+    };
+    const context = sourceUiContext(parent, { ...source, ui });
+    assertEquals(context.data.plugin, ui);
+    assertEquals(
+        context.data.source,
+        sourceUiContext(parent, source).data.source,
+    );
+    assertEquals(context.sourceId, source.id);
+    assertEquals(isUiJsonObject(context), true);
+    ui.status.count = 6;
+    assertEquals(context.data.plugin, {
+        status: { count: 5 },
+        entries: [true, null, "ready"],
+    });
+    assertFalse(JSON.stringify(context).includes("otherSource"));
+    assertFalse(Object.hasOwn(sourceUiContext(parent, source).data, "plugin"));
+});
+
+Deno.test("source UI context rejects invalid plugin JSON without losing host status", () => {
+    const parent = dashboardUiContext(dashboard);
+    const cycle: Record<string, unknown> = {};
+    cycle.self = cycle;
+    for (
+        const ui of [
+            null,
+            [],
+            "text",
+            { count: Infinity },
+            { callback: () => undefined },
+            { timestamp: new Date() },
+            { text: "x".repeat(UI_LIMITS.jsonBytes) },
+            JSON.parse('{"__proto__":{"unsafe":true}}'),
+            cycle,
+        ]
+    ) {
+        assertEquals(
+            sourceUiContext(parent, { ...source, ui } as ListedSource),
+            sourceUiContext(parent, source),
+        );
+    }
+    const broken = Object.defineProperty({ ...source }, "ui", {
+        get() {
+            throw new Error("plugin accessor failed");
+        },
+    });
+    assertEquals(
+        sourceUiContext(parent, broken),
+        sourceUiContext(parent, source),
+    );
+});
+
+Deno.test("SSR source slots bind generic plugin state from the live status snapshot", async () => {
+    let count = 12;
+    const pluginContribution: UiContribution = {
+        ...contribution,
+        schema: {
+            blocks: [{
+                kind: "metric",
+                label: "Plugin value",
+                value: "unavailable",
+                valueFrom: ["plugin", "status", "count"],
+            }],
+        },
+    };
+    const app = createServerApp({
+        adminCatalog: {
+            sources: () => [{ ...source, ui: { status: { count } } }],
+            plugins: () => [{
+                id: "sample.source",
+                kind: "source",
+                version: "1",
+                trust: "trusted",
+                name: "Sample",
+                enabled: true,
+            }],
+        },
+        adminUiContributions: [pluginContribution],
+    });
+    const html = async () =>
+        await (await app.request("/admin?view=channels")).text();
+    assertStringIncludes(await html(), "<dd><strong>12</strong></dd>");
+    count = 23;
+    assertStringIncludes(await html(), "<dd><strong>23</strong></dd>");
 });

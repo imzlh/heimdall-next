@@ -5,10 +5,7 @@ import {
     startLogin,
 } from "../chathub-source/mod.ts";
 import manifest from "./manifest.json" with { type: "json" };
-import {
-    SourceProxyError,
-    SourceTransport,
-} from "@heimdall/source-sdk/mod.ts";
+import { SourceProxyError, SourceTransport } from "@heimdall/source-sdk/mod.ts";
 
 /** Mounted only under the host's authenticated management API. */
 export function createChatHubAuthPlugin(

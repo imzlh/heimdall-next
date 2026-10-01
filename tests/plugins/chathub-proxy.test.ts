@@ -136,17 +136,21 @@ function monitorClients() {
 }
 
 Deno.test("ChatHub adopts fresh proxy choices per turn without discarding its warm session", async () => {
+    let now = Date.parse("2026-09-29T10:00:00Z");
+    const liveSnapshots: unknown[] = [];
     let selection: ResolvedSourceProxy = direct;
     let lookups = 0;
     const sockets: ScriptedSocket[] = [];
     const clients: (Deno.HttpClient | undefined)[] = [];
     const urls: URL[] = [];
     const source = createChatHubSource(config, {
+        clock: () => new Date(now),
         getProxy: () => {
             lookups++;
             return selection;
         },
         webSocketFactory(url, client) {
+            liveSnapshots.push(source.uiSnapshot().runtime);
             urls.push(new URL(url));
             clients.push(client);
             const socket = new ScriptedSocket();
@@ -161,11 +165,19 @@ Deno.test("ChatHub adopts fresh proxy choices per turn without discarding its wa
             metadata: { conversationId: "stable-session" },
         },
     };
+    assertEquals(source.uiSnapshot().runtime, {
+        warmContexts: 0,
+        busyContexts: 0,
+    });
     assertEquals(
         (await run(source, undefined, conversation)).at(-1)?.kind,
         "run.completed",
     );
     selection = proxy;
+    assertEquals(source.uiSnapshot().runtime, {
+        warmContexts: 1,
+        busyContexts: 0,
+    });
     const followup: OperationRequest<GenerationRequest> = {
         ...conversation,
         payload: {
@@ -190,6 +202,19 @@ Deno.test("ChatHub adopts fresh proxy choices per turn without discarding its wa
         "run.completed",
     );
     assertEquals(lookups, 2);
+    assertEquals(liveSnapshots, [
+        { warmContexts: 0, busyContexts: 0 },
+        { warmContexts: 0, busyContexts: 1 },
+    ]);
+    assertEquals(source.uiSnapshot().runtime, {
+        warmContexts: 1,
+        busyContexts: 0,
+    });
+    now += 3_600_000;
+    assertEquals(source.uiSnapshot().runtime, {
+        warmContexts: 0,
+        busyContexts: 0,
+    });
     // Custom factories own their networking. HTTP proxy and direct requests
     // use SDK dispatchers, so they have no native Deno client to inherit.
     assertEquals(clients, [undefined, undefined]);

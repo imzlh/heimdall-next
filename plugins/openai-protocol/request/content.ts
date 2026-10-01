@@ -1,4 +1,8 @@
-import { base64ToBytes, type ContentPart, type JsonValue } from "@heimdall/contracts";
+import {
+    base64ToBytes,
+    type ContentPart,
+    type JsonValue,
+} from "@heimdall/contracts";
 import { ProtocolError } from "@heimdall/contracts";
 import {
     asObject,

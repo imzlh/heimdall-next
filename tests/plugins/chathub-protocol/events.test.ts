@@ -70,6 +70,23 @@ Deno.test("inline citation control markers collapse to the renderer's cite form"
     assertEquals(event.text, "秋季档热度较高作品之一。citeturn1search42");
 });
 
+Deno.test("grounded <External> wrappers are unwrapped, keeping the inner text", () => {
+    const event = normalizeFrame(streamItem([
+        {
+            author: "bot",
+            text:
+                "推荐 <External>《无职转生》第三季</External> 与 <External>《药屋少女的呢喃》第三季</External>。",
+            messageType: "",
+        },
+    ]));
+    // The upstream entity-tag carries no data we consume; the titles survive
+    // verbatim while the markup never reaches the answer.
+    assertEquals(
+        event.text,
+        "推荐 《无职转生》第三季 与 《药屋少女的呢喃》第三季。",
+    );
+});
+
 Deno.test("a multi-entry citation run keeps every reference token", () => {
     const event = normalizeFrame(streamItem([
         {
@@ -119,6 +136,25 @@ Deno.test("references come only from reference dictionaries, keyed by id", () =>
     assertEquals(event.references?.length, 1);
     assertEquals(event.references?.[0]?.id, "turn1search1");
     assertEquals(event.references?.[0]?.targetLink, "https://ref.example/1");
+});
+
+Deno.test("the dictionary key overrides a reference's own internal id", () => {
+    const event = normalizeFrame({
+        type: SignalRMessageType.StreamItem,
+        item: {
+            messages: [{ author: "bot", text: "答案。citeturn1search1" }],
+            references: {
+                // The inline marker points at the key `turn1search1`, not at the
+                // reference's internal id; the key must win so the marker resolves.
+                turn1search1: {
+                    id: "cntx_abc123",
+                    targetLink: "https://ref.example/1",
+                    title: "来源一",
+                },
+            },
+        },
+    });
+    assertEquals(event.references?.[0]?.id, "turn1search1");
 });
 
 Deno.test("the stream item exposes the quota table and suggested chat name", () => {

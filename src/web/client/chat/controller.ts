@@ -85,7 +85,6 @@ export function createChatController(
         streamReasoning: "",
         streamActivity: [],
         streamCitations: [],
-        streamQuota: null,
         suggestions: [],
         pendingEffort: "medium",
         error: initial.error ?? "",
@@ -112,7 +111,7 @@ export function createChatController(
     const allowed = () => !disposed && state.available && state.authenticated;
     const idle = () =>
         allowed() && !state.sending && !state.creating && !state.loading &&
-        !state.managing;
+        !state.managing && !state.toolsBusy;
     const draftFor = (id = state.selectedId): Draft => {
         const existing = drafts.get(id);
         if (existing) return existing;
@@ -284,7 +283,6 @@ export function createChatController(
             streamReasoning: "",
             streamActivity: [],
             streamCitations: [],
-            streamQuota: null,
             suggestions: [],
         });
         onSelect?.(conversation.id);
@@ -336,7 +334,6 @@ export function createChatController(
                     streamReasoning: "",
                     streamActivity: [],
                     streamCitations: [],
-                    streamQuota: null,
                 });
             }
         } else errors.push(`消息读取失败：${describe(history.reason)}`);
@@ -361,7 +358,6 @@ export function createChatController(
                 streamReasoning: "",
                 streamActivity: [],
                 streamCitations: [],
-                streamQuota: null,
                 suggestions: [],
                 draft: draft.text,
                 attachments: draft.attachments,
@@ -476,16 +472,48 @@ export function createChatController(
         conversation: ChatConversation,
     ): Promise<ChatConversation> {
         const effort = state.pendingEffort;
-        if (effort === "medium") return conversation;
-        patch({ pendingEffort: "medium" });
+        const disabledTools = state.pendingDisabledTools ?? [];
+        if (effort === "medium" && !disabledTools.length) return conversation;
         try {
-            return await api.updateSettings(
+            const saved = await api.updateSettings(
                 conversation.id,
-                { reasoningEffort: effort },
+                {
+                    reasoningEffort: effort,
+                    ...(disabledTools.length ? { disabledTools } : {}),
+                },
             );
-        } catch {
+            patch({ pendingEffort: "medium", pendingDisabledTools: [] });
+            return saved;
+        } catch (error) {
+            // An explicitly disabled tool must never be exposed after a failed save.
+            if (disabledTools.length) throw error;
             // The send must not fail over a cosmetic setting.
             return conversation;
+        }
+    }
+
+    async function setToolEnabled(
+        id: string,
+        enabled: boolean,
+    ): Promise<boolean> {
+        if (
+            !idle() || state.toolsBusy ||
+            !state.tools.some((tool) => tool.id === id)
+        ) return false;
+        const current = state.conversation?.disabledTools ??
+            state.pendingDisabledTools ?? [];
+        const disabledTools = enabled
+            ? current.filter((value) => value !== id)
+            : [...new Set([...current, id])];
+        if (!state.selectedId) {
+            patch({ pendingDisabledTools: disabledTools });
+            return true;
+        }
+        patch({ toolsBusy: true });
+        try {
+            return await updateSettings(state.selectedId, { disabledTools });
+        } finally {
+            patch({ toolsBusy: false });
         }
     }
 
@@ -547,7 +575,6 @@ export function createChatController(
                     streamReasoning: "",
                     streamActivity: [],
                     streamCitations: [],
-                    streamQuota: null,
                     draft: draft.text,
                     attachments: draft.attachments,
                 });
@@ -627,7 +654,6 @@ export function createChatController(
                 streamReasoning: "",
                 streamActivity: [],
                 streamCitations: [],
-                streamQuota: null,
             });
             return true;
         } catch (error) {
@@ -766,7 +792,6 @@ export function createChatController(
             streamReasoning: "",
             streamActivity: [],
             streamCitations: [],
-            streamQuota: null,
             suggestions: [],
         });
         try {
@@ -812,8 +837,7 @@ export function createChatController(
                         event.message.conversationId === run.id) ||
                     event.type === "delta" || event.type === "tool" ||
                     event.type === "reasoning" || event.type === "activity" ||
-                    event.type === "citations" || event.type === "quota" ||
-                    event.type === "done"
+                    event.type === "citations" || event.type === "done"
                 ) accept();
                 if (
                     event.type === "user" &&
@@ -849,8 +873,6 @@ export function createChatController(
                             ...event.items,
                         ],
                     });
-                } else if (event.type === "quota") {
-                    patch({ streamQuota: event.quota });
                 } else if (event.type === "tool") {
                     const calls = new Map(
                         state.toolCalls.map((call) => [call.callId, call]),
@@ -910,6 +932,10 @@ export function createChatController(
         rename,
         updateSettings,
         chooseEffort,
+        setToolEnabled,
+        replaceTools(tools) {
+            if (!disposed) patch({ tools });
+        },
         remove,
         removeMessage,
         select,

@@ -323,11 +323,58 @@ Deno.test("ChatHub tests its authorized draft and includes selected discovered m
         assertEquals(probes[0]?.accessToken, tokens.accessToken);
         assertEquals(test.saves, []);
         assert(!test.root.textContent.includes("private-access-token"));
+        await test.settle(() => button(test.root, "校验配置").click());
+        assert(test.root.textContent.includes("连接正常"));
         await test.settle(() => button(test.root, "chat-model").click());
         await test.settle(() => button(test.root, "保存渠道").click());
         assertEquals(test.saves[0]?.models, ["chat-model"]);
         assertEquals(test.navigation, []);
         assertEquals(test.storageWrites, []);
+    } finally {
+        await test.close();
+    }
+});
+
+Deno.test("ChatHub keeps failed probe status through validation and allows an explicit skip save", async () => {
+    const test = await fixture({
+        probe: () => Promise.reject(new Error("private-provider-detail")),
+    });
+    try {
+        await test.authorize();
+        await test.settle(() => button(test.root, "测试连接").click());
+        await test.settle(() => button(test.root, "校验配置").click());
+        assert(test.root.textContent.includes("连接测试未通过"));
+        assert(!test.root.textContent.includes("private-provider-detail"));
+        assert(!button(test.root, "重新测试连接").disabled);
+        assertEquals(test.saves, []);
+        await test.settle(() => button(test.root, "跳过测试并保存").click());
+        assertEquals(test.saves.length, 1);
+        assertEquals(test.saves[0]?.accessToken, tokens.accessToken);
+        assertEquals(test.navigation, []);
+        assertEquals(test.storageWrites, []);
+    } finally {
+        await test.close();
+    }
+});
+
+Deno.test("ChatHub clears the previous account probe when reauthorization starts", async () => {
+    const test = await fixture({
+        probe: () =>
+            Promise.resolve({
+                ok: true,
+                message: "连接正常",
+                checkedAt: new Date().toISOString(),
+                models: ["previous-account-model"],
+            }),
+    });
+    try {
+        await test.authorize();
+        await test.settle(() => button(test.root, "测试连接").click());
+        assert(test.root.textContent.includes("previous-account-model"));
+        await test.settle(() => button(test.root, "更换账号").click());
+        assert(!test.root.textContent.includes("previous-account-model"));
+        assert(!test.root.textContent.includes("连接正常"));
+        assert(button(test.root, "保存渠道").disabled);
     } finally {
         await test.close();
     }

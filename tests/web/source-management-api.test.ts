@@ -1,7 +1,9 @@
 import { assertEquals, assertRejects } from "@std/assert";
+import type { UpdateSourceInput } from "@heimdall/admin-contracts";
 import {
     AdminApiError,
     configureAdminTransport,
+    createSource,
     deleteSource,
     probeSourceDraft,
     updateSource,
@@ -11,6 +13,33 @@ interface RecordedRequest {
     input: RequestInfo | URL;
     init?: RequestInit;
 }
+
+Deno.test("creation and probing send model aliases as host metadata without provider configuration fields", async () => {
+    const modelMap = { fast: "provider-fast" };
+    const input = {
+        id: "draft-model-map",
+        name: "模型渠道",
+        priority: 1,
+        sourcePluginId: "heimdall.source.openai-compatible",
+        presetId: "heimdall.preset.newapi",
+        modelMap,
+        proxy: { mode: "direct" as const },
+        config: { baseUrl: "https://provider.example/v1" },
+    };
+    await withTransport(
+        () => Response.json({ probe: { ok: true } }),
+        async (requests) => {
+            await createSource(input);
+            await probeSourceDraft(input);
+            for (const request of requests) {
+                const body = JSON.parse(String(request.init?.body));
+                assertEquals(body.modelMap, modelMap);
+                assertEquals(body.config.modelMap, undefined);
+                assertEquals(body.proxy, { mode: "direct" });
+            }
+        },
+    );
+});
 
 async function withTransport(
     response: () => Response,
@@ -52,12 +81,14 @@ Deno.test("source update encodes its ID and preserves metadata, false and versio
 });
 
 Deno.test("source partial updates send only supplied fields and omit the default versionstamp", async () => {
-    const changes = [
+    const changes: UpdateSourceInput[] = [
         { name: "新名称" },
         { priority: 0 },
         { enabled: false },
         { proxy: { mode: "direct" as const } },
         { proxy: { mode: "proxy" as const, proxyId: "office" } },
+        { modelMap: { fast: "upstream-fast" } },
+        { modelMap: {} },
     ];
     await withTransport(
         () => Response.json({ updated: true }),

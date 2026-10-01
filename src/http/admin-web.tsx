@@ -11,6 +11,10 @@ import { type ConsolePage, ConsolePageView } from "../web/pages/console.tsx";
 import { createWebSession } from "../web/server/session.ts";
 import { createChatWebSession } from "../web/server/chat-session.ts";
 import { loadChatSnapshot } from "../web/server/chat-snapshot.ts";
+import {
+    createChatExtensionLoader,
+    createChatExtensionsRoute,
+} from "../web/server/chat-extensions.ts";
 import { ChatShell } from "../web/components/chat-shell.tsx";
 import { ChatPageView } from "../web/pages/chat.tsx";
 import { serializeBoot } from "../web/server/serialize.ts";
@@ -43,6 +47,14 @@ export function createAdminWebRoutes(options: AdminWebOptions): ServerApp {
     const app = new Hono<ServerEnv>();
     const session = createWebSession(options);
     const catalog = createUiCatalogLoader(options);
+    const chatExtensions = createChatExtensionLoader({
+        ...options,
+        contributions: catalog.contributions,
+    });
+    app.get(
+        "/admin/chat/ui",
+        createChatExtensionsRoute(session, chatExtensions),
+    );
     app.post(
         "/admin/ui/action",
         createUiActions({
@@ -86,6 +98,16 @@ export function createAdminWebRoutes(options: AdminWebOptions): ServerApp {
             conversationId: context.req.query("id"),
             selectedModel: context.req.query("model"),
         });
+        if (initial.authenticated && initial.available) {
+            try {
+                initial.extensions = await chatExtensions(initial.tools ?? []);
+            } catch {
+                initial.error = [
+                    initial.error,
+                    "插件能力暂不可用，可稍后刷新。",
+                ].filter(Boolean).join(" ");
+            }
+        }
         documentHeaders(context);
         return context.html(
             "<!doctype html>" + (<ChatShell
@@ -134,7 +156,13 @@ export function createAdminWebRoutes(options: AdminWebOptions): ServerApp {
                 ...options,
                 authorized,
                 origin: new URL(context.req.url).origin,
-                includeActivity: !["channels", "settings", "plugin", "logs", "requests"].includes(view),
+                includeActivity: ![
+                    "channels",
+                    "settings",
+                    "plugin",
+                    "logs",
+                    "requests",
+                ].includes(view),
             });
             if (view === "logs" || view === "requests") {
                 const url = new URL(context.req.url);
@@ -144,9 +172,15 @@ export function createAdminWebRoutes(options: AdminWebOptions): ServerApp {
                     origin: url.origin,
                 };
                 if (view === "requests") {
-                    snapshot.journal = await loadJournalSnapshot(logOptions, url.searchParams);
+                    snapshot.journal = await loadJournalSnapshot(
+                        logOptions,
+                        url.searchParams,
+                    );
                 } else {
-                    snapshot.systemLog = await loadSystemLogSnapshot(logOptions, url.searchParams);
+                    snapshot.systemLog = await loadSystemLogSnapshot(
+                        logOptions,
+                        url.searchParams,
+                    );
                 }
             }
             const { contributions, schemas, sourcePluginIds, presetPages } =
@@ -206,7 +240,11 @@ export function createAdminWebRoutes(options: AdminWebOptions): ServerApp {
                     (<AdminShell
                         title="Heimdall · 运维控制台"
                         nav={nav}
-                        active={page === "plugin" ? tab ?? "plugin" : page === "requests" ? "overview" : page}
+                        active={page === "plugin"
+                            ? tab ?? "plugin"
+                            : page === "requests"
+                            ? "overview"
+                            : page}
                         scripts={
                             <>
                                 <script

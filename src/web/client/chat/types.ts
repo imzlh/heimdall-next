@@ -8,7 +8,6 @@ import type {
     ChatConversation,
     ChatEvent,
     ChatMessage,
-    ChatQuota,
     ChatStream,
     ChatToolCall,
 } from "../api/chat.ts";
@@ -89,8 +88,6 @@ export interface ChatState {
     readonly streamActivity: readonly ChatActivity[];
     /** Live citations for the in-flight turn; session-only. */
     readonly streamCitations: readonly ChatCitation[];
-    /** Live account quota snapshot for the in-flight turn; session-only. */
-    readonly streamQuota: ChatQuota | null;
     /** Provider-suggested follow-up prompts for the current turn; session-only. */
     readonly suggestions: readonly string[];
     /**
@@ -98,6 +95,8 @@ export interface ChatState {
      * composer falls back to it only while no conversation is selected.
      */
     readonly pendingEffort: "low" | "medium" | "high";
+    readonly pendingDisabledTools?: readonly string[];
+    readonly toolsBusy?: boolean;
     readonly error: string;
     readonly available: boolean;
     readonly authenticated: boolean;
@@ -122,6 +121,8 @@ export interface ChatController {
      * when one is selected, otherwise holds the choice for the next new chat.
      */
     chooseEffort(effort: "low" | "medium" | "high"): void;
+    setToolEnabled(id: string, enabled: boolean): Promise<boolean>;
+    replaceTools(tools: readonly ChatToolInfo[]): void;
     remove(id: string): Promise<boolean>;
     /** Delete a single message from the selected conversation. */
     removeMessage(conversationId: string, messageId: string): Promise<boolean>;

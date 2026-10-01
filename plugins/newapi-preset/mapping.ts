@@ -1,7 +1,6 @@
 import {
     DEFAULT_ENDPOINT,
     DEFAULT_SOURCE_ID,
-    type NewApiPresetConfig,
     type OpenAICompatibleSourceConfig,
     validateNewApiPresetConfig,
 } from "./schema.ts";
@@ -22,9 +21,6 @@ export function toOpenAICompatibleSourceConfig(
         ...(normalized.apiKey === undefined
             ? {}
             : { apiKey: normalized.apiKey }),
-        ...(normalized.modelMap === undefined
-            ? {}
-            : { modelMap: normalized.modelMap }),
         endpoint: normalized.endpoint ?? DEFAULT_ENDPOINT,
         ...(normalized.headers === undefined
             ? {}
@@ -35,18 +31,3 @@ export function toOpenAICompatibleSourceConfig(
 /** Descriptive alias for hosts that treat presets as source factories. */
 export const createOpenAICompatibleSourceConfig =
     toOpenAICompatibleSourceConfig;
-
-/**
- * Resolve a client model through the preset's explicit mapping. An unmapped
- * model passes through unchanged, matching the OpenAI source contract.
- */
-export function mapNewApiModel(
-    config: Pick<NewApiPresetConfig, "modelMap">,
-    clientModel: string | undefined,
-): string {
-    if (clientModel === undefined) return "";
-    return config.modelMap?.[clientModel] ?? clientModel;
-}
-
-/** Compatibility alias used by source-oriented integrations. */
-export const upstreamModel = mapNewApiModel;

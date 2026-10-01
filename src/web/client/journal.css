@@ -1,7 +1,7 @@
 /* Request history keeps the console's restrained cards and pill controls. */
 .journal-page {
     padding: 0;
-    overflow: hidden;
+    overflow: visible;
 }
 .journal-heading {
     padding: 24px 26px 18px;
@@ -14,7 +14,7 @@
     margin-top: 5px;
     font-size: 12px;
 }
-.journal-page button,
+.journal-page button:where(:not(.dropdown-trigger, .dropdown-option, .switch-control)),
 .journal-detail button,
 .journal-detail-footer a {
     display: inline-flex;
@@ -33,7 +33,7 @@
     transition: background var(--motion-fast) ease,
         border-color var(--motion-fast) ease, color var(--motion-fast) ease;
 }
-.journal-page button:hover:not(:disabled),
+.journal-page button:where(:not(.dropdown-trigger, .dropdown-option, .switch-control)):hover:not(:disabled),
 .journal-detail button:hover:not(:disabled),
 .journal-detail-footer a:hover {
     border-color: var(--border-strong);
@@ -103,14 +103,24 @@
     color: var(--subtle);
     font-size: 12px;
 }
-.journal-status-filter select {
-    min-height: 40px;
-    padding: 7px 28px 7px 12px;
+.journal-status-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+}
+.journal-status-pill {
+    padding: 7px 12px;
     border: 1px solid var(--border);
     border-radius: var(--radius-control);
-    color: var(--text);
+    color: var(--muted);
     background: var(--surface);
     font-size: 12px;
+}
+.journal-status-pill:hover,
+.journal-status-pill.is-active {
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-color: var(--accent);
 }
 .journal-list-meta {
     display: flex;
@@ -126,19 +136,6 @@
 .journal-list-meta p {
     min-width: 0;
     overflow-wrap: anywhere;
-}
-.journal-auto-refresh {
-    display: inline-flex;
-    /* The global `label` rule forces column; keep the checkbox inline. */
-    flex-direction: row;
-    align-items: center;
-    gap: 7px;
-    color: var(--muted);
-    cursor: pointer;
-}
-.journal-auto-refresh input {
-    margin: 0;
-    accent-color: var(--accent);
 }
 .journal-table {
     width: 100%;

@@ -6,6 +6,7 @@ const commands = [
     ...(Deno.args.includes("--web-only") ? [] : [[
         "run",
         "--unstable-kv",
+        "--unstable-worker-options",
         "--watch=main.ts,src,packages,plugins",
         "--watch-exclude=public",
         "--allow-net",

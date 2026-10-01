@@ -19,7 +19,14 @@ must never cross this boundary.
   validation, and host policy selection for schema, trusted, or sandbox
   rendering.
 
-Import DTOs with `import type`. Browser code may import the pure runtime helpers
-from `forms.ts` and `ui.ts` explicitly. UI callbacks and DOM mount functions
-live in the web host, never in serialized descriptors. Plugin metadata cannot
-grant itself trusted execution or permission to call host actions.
+Import DTOs with `import type`. Browser code may import constants and pure
+runtime helpers from their contract modules explicitly. The architecture check
+audits every module in this package for browser-safe dependencies and globals.
+UI callbacks and DOM mount functions live in the web host, never in serialized
+descriptors. Plugin metadata cannot grant itself trusted execution or permission
+to call host actions.
+
+Plugin browser entries may consume the public `ui.ts` slot/JSON contract and
+`preset-ui.ts` form bridge. These contracts carry serializable values and pure
+validators only; administrative catalogs and server implementation modules are
+not plugin APIs. Architecture checks retain this explicit boundary.

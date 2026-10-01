@@ -148,6 +148,9 @@ function fakeApi() {
                         patch.reasoningEffort === null
                     ? {}
                     : { reasoningEffort: patch.reasoningEffort }),
+                ...(patch.disabledTools === undefined
+                    ? {}
+                    : { disabledTools: patch.disabledTools }),
             });
         },
         remove() {
@@ -464,6 +467,65 @@ Deno.test("chat effort chosen with a selected conversation persists immediately"
         (state) => state.conversation?.reasoningEffort === "low",
     );
     assertEquals(savedSettings, [["one", "low"]]);
+    controller.dispose();
+});
+
+Deno.test("chat plugin selection before the first message is persisted before tools can run", async () => {
+    const fake = fakeApi();
+    const writes: string[][] = [];
+    const original = fake.api.updateSettings;
+    fake.api.updateSettings = (id, patch, signal) => {
+        writes.push([...(patch.disabledTools ?? [])]);
+        return original(id, patch, signal);
+    };
+    const controller = createChatController({
+        initial: initial({
+            conversation: null,
+            tools: [{ id: "example.tool", name: "能力" }],
+        }),
+        api: fake.api,
+    });
+    assertEquals(await controller.setToolEnabled("example.tool", false), true);
+    assertEquals(writes, []);
+    controller.setDraft("question");
+    const sent = controller.send();
+    await waitForState(controller, (state) => Boolean(state.conversation));
+    assertEquals(writes, [["example.tool"]]);
+    assertEquals(controller.getState().conversation?.disabledTools, [
+        "example.tool",
+    ]);
+    assertEquals(controller.getState().pendingDisabledTools, []);
+    fake.streams[0]!.completion.resolve("done");
+    await sent;
+    controller.dispose();
+});
+
+Deno.test("chat refuses to send if held plugin choices cannot be saved and retains them for retry", async () => {
+    const fake = fakeApi();
+    const original = fake.api.updateSettings;
+    fake.api.updateSettings = () =>
+        Promise.reject(new Error("settings unavailable"));
+    const controller = createChatController({
+        initial: initial({
+            conversation: null,
+            tools: [{ id: "example.tool", name: "能力" }],
+        }),
+        api: fake.api,
+    });
+    await controller.setToolEnabled("example.tool", false);
+    controller.setDraft("question");
+    await controller.send();
+    assertEquals(fake.commands, []);
+    assertEquals(controller.getState().pendingDisabledTools, ["example.tool"]);
+    assertEquals(controller.getState().draft, "question");
+    fake.api.updateSettings = original;
+    const retry = controller.send();
+    await waitForState(controller, (state) => Boolean(state.conversation));
+    assertEquals(controller.getState().conversation?.disabledTools, [
+        "example.tool",
+    ]);
+    fake.streams[0]!.completion.resolve("done");
+    await retry;
     controller.dispose();
 });
 

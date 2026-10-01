@@ -542,6 +542,66 @@ form > .config-actions,
 .settings-form {
     max-width: 760px;
 }
+.retention-settings {
+    min-width: 0;
+    margin: 28px 0 0;
+    padding: 0;
+    border: 0;
+}
+.retention-settings legend {
+    padding: 0;
+    font-size: 15px;
+    font-weight: 600;
+}
+.retention-settings > .field-help,
+.retention-panel > .field-help {
+    margin: 10px 0 16px;
+}
+.retention-settings .field-help {
+    font-weight: 400;
+}
+.retention-settings .field-grid label {
+    align-content: start;
+}
+.maintenance-status {
+    min-width: 0;
+    margin-top: 22px;
+    padding: 18px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-muted);
+}
+.maintenance-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.maintenance-heading h3 {
+    margin: 0;
+    font-size: 13px;
+    font-weight: 600;
+}
+.maintenance-summary {
+    overflow-wrap: anywhere;
+}
+.maintenance-summary dt:last-of-type,
+.maintenance-summary dd:last-of-type {
+    padding-bottom: 0;
+    border-bottom: 0;
+}
+.maintenance-counts {
+    display: flex;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    font-variant-numeric: tabular-nums;
+}
+.maintenance-status > .field-help,
+.maintenance-status > .form-error {
+    margin-bottom: 0;
+}
 .gateway-key-field {
     display: grid;
     gap: 10px;
@@ -1417,6 +1477,85 @@ form > .config-actions,
     overflow: auto;
     overscroll-behavior: contain;
     padding-block: 4px;
+}
+.source-model-map {
+    display: grid;
+    gap: 8px;
+    min-width: 0;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-muted);
+}
+.source-model-map-heading {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+}
+.source-model-map p {
+    margin: 0;
+}
+.source-model-map-rows {
+    display: grid;
+    gap: 12px;
+}
+.source-model-map-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 16px minmax(0, 1fr) 32px;
+    align-items: end;
+    gap: 8px;
+}
+.source-model-map-row label {
+    min-width: 0;
+    margin: 0;
+}
+.source-model-map-row input {
+    width: 100%;
+    min-width: 0;
+    background: var(--surface);
+    border-radius: 10px;
+}
+.source-model-map-arrow {
+    margin-bottom: 12px;
+    width: 16px;
+    height: 16px;
+    color: var(--subtle);
+}
+.source-model-map-row > .icon-button {
+    align-self: end;
+    width: 32px;
+    min-width: 32px;
+    height: 40px;
+}
+.source-model-map-add {
+    display: inline-flex;
+    align-items: center;
+    justify-self: start;
+    gap: 6px;
+}
+.source-model-map-add .icon {
+    width: 15px;
+    height: 15px;
+}
+@media (max-width: 520px) {
+    .source-model-map-row {
+        grid-template-columns: minmax(0, 1fr) 32px;
+        gap: 6px;
+        padding-bottom: 12px;
+        border-bottom: 1px solid var(--border);
+    }
+    .source-model-map-row label {
+        grid-column: 1;
+    }
+    .source-model-map-arrow {
+        display: none;
+    }
+    .source-model-map-row > .icon-button {
+        grid-column: 2;
+        grid-row: 1 / span 2;
+        align-self: center;
+    }
 }
 .source-model-chip {
     max-width: 100%;

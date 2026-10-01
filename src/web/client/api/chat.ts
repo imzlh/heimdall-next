@@ -4,7 +4,6 @@ import type {
     ChatConversation,
     ChatEvent,
     ChatMessage,
-    ChatQuota,
 } from "@heimdall/admin-contracts/chat.ts";
 import { AdminApiError, getAdminToken, request } from "./admin.ts";
 import { payloadRecord } from "./transport.ts";
@@ -19,7 +18,6 @@ export type {
     ChatEvent,
     ChatInitial,
     ChatMessage,
-    ChatQuota,
     ChatToolCall,
 } from "@heimdall/admin-contracts/chat.ts";
 
@@ -177,8 +175,6 @@ function readMessage(value: unknown): ChatMessage {
     if (Array.isArray(body.citations)) {
         message.citations = readCitations(body.citations);
     }
-    const quota = readQuota(body.quota);
-    if (quota) message.quota = quota;
     return message;
 }
 
@@ -202,29 +198,6 @@ function readCitations(
             ...(typeof item.ref === "string" ? { ref: item.ref } : {}),
         }))
         .filter((item) => item.label !== undefined || item.url !== undefined);
-}
-
-/** Per-turn account quota snapshot attached to a stored assistant message. */
-function readQuota(value: unknown): ChatQuota | undefined {
-    if (value === null || typeof value !== "object" || Array.isArray(value)) {
-        return undefined;
-    }
-    const meters = (value as { meters?: unknown }).meters;
-    if (!Array.isArray(meters)) return undefined;
-    const parsed = meters
-        .map((item) => record(item))
-        .filter((item) =>
-            typeof item.name === "string" && (item.name as string).length > 0
-        )
-        .map((item) => ({
-            name: item.name as string,
-            ...(typeof item.remaining === "number"
-                ? { remaining: item.remaining }
-                : {}),
-            ...(item.blocked === true ? { blocked: true } : {}),
-            ...(typeof item.error === "string" ? { error: item.error } : {}),
-        }));
-    return parsed.length > 0 ? { meters: parsed } : undefined;
 }
 
 /** Session chat uses its own route, independent of the management API bridge. */
@@ -546,11 +519,6 @@ function readEvent(value: unknown): ChatEvent {
         case "citations":
             if (!Array.isArray(body.items)) return invalidResponse();
             return { type: "citations", items: readCitations(body.items) };
-        case "quota": {
-            const quota = readQuota(body.quota);
-            if (!quota) return invalidResponse();
-            return { type: "quota", quota };
-        }
         case "tool":
             if (!Array.isArray(body.calls)) return invalidResponse();
             return {

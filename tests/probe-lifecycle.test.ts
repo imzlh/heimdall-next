@@ -10,7 +10,6 @@ import { createRuntimeSettings } from "@heimdall/core/composition/runtime-settin
 import { loadBuiltinComposition } from "@heimdall/core/composition/builtins.ts";
 
 const success = { ok: true, message: "connected", models: ["new-model"] };
-const journal = { pruneOlderThan: () => ({ deleted: 0, done: true }) };
 
 function source(
     id: string,
@@ -154,7 +153,7 @@ Deno.test("background disposal cancels uncooperative probes and removes settings
         limitPerMinute: 0,
         probeIntervalMs: 3600000,
     });
-    const tasks = startBackgroundTasks(registry, settings, journal, 0);
+    const tasks = startBackgroundTasks(registry, settings);
     const signal = await entered.promise;
     await bounded(tasks[Symbol.asyncDispose]());
     assertEquals(signal.aborted, true);
@@ -181,7 +180,7 @@ Deno.test("probe interval updates apply immediately and disabling cancels active
         limitPerMinute: 0,
         probeIntervalMs: 0,
     });
-    await using _tasks = startBackgroundTasks(registry, settings, journal, 0);
+    await using _tasks = startBackgroundTasks(registry, settings);
     assertEquals(calls, 0);
     settings.replace(
         { ...settings.get(), probeIntervalMs: 3600000 },

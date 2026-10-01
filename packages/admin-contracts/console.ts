@@ -4,6 +4,7 @@ import type {
     SourceProxySummary,
 } from "./proxies.ts";
 import type { StatsOverviewDto, StatsSeriesDto } from "./mod.ts";
+import type { UiJsonObject } from "./ui.ts";
 
 /** Serializable console view data shared by SSR and hono/jsx/dom islands. */
 export interface ServiceHealth {
@@ -25,11 +26,14 @@ export interface ListedSource {
     pluginEnabled?: boolean;
     versionstamp?: string;
     health?: string;
+    cooldown?: import("./source-health.ts").SourceCooldownDto;
     models?: unknown[];
     capabilities?: unknown[];
+    ui?: UiJsonObject;
     probe?: { ok?: boolean; message?: string };
     proxy?: SourceProxySelection;
     proxySummary?: SourceProxySummary;
+    modelMap?: import("./source-model-map.ts").SourceModelMap;
 }
 
 export interface ListedPlugin {
@@ -114,11 +118,28 @@ export interface RuntimeSettingsView {
     probeIntervalMs: number;
     /** Cheap model id for chat auto-titling; "" means disabled. */
     titleModel: string;
+    /** Retain completed request records for this many days; 0 keeps them forever. */
+    requestRetentionDays?: number;
+    /** Retain conversations by last activity; 0 keeps them forever. */
+    chatRetentionDays?: number;
+}
+
+export interface MaintenanceStatusView {
+    /** Whether history expiration is enabled; orphan attachment cleanup always runs. */
+    enabled: boolean;
+    running: boolean;
+    lastRunAt: string | null;
+    nextRunAt: string | null;
+    prunedRequests: number;
+    prunedConversations: number;
+    prunedAssets: number;
+    lastError: string | null;
 }
 
 export interface RuntimeSettingsEnvelope {
     settings: RuntimeSettingsView;
     etag: string;
+    maintenance?: MaintenanceStatusView;
 }
 
 export interface ConsoleSnapshot {

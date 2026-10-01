@@ -5,6 +5,8 @@ import { ChatApp } from "./chat-app.tsx";
 import "./style.css";
 import "./chat/messages.css";
 import "./chat/composer.css";
+import "./chat/extensions.css";
+import "./extensions/slots.css";
 import "./chat.css";
 
 const root = document.getElementById("heimdall-chat");

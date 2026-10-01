@@ -337,6 +337,11 @@ Deno.test("UI bridge supports core management operations without authentication 
                 body: {},
             },
             { path: "/api/admin/source-probe", method: "POST", body: {} },
+            {
+                path: "/api/admin/source-health/reset",
+                method: "POST",
+                body: { sourceId: "source.openai" },
+            },
             { path: "/api/admin/preset-preview", method: "POST", body: {} },
             { path: "/api/admin/preset-apply", method: "POST", body: {} },
             { path: "/api/admin/plugin-state", method: "POST", body: {} },
@@ -506,6 +511,99 @@ Deno.test("UI bridge rejects malformed or oversized input before dispatch", asyn
         headers: { "if-match": "unsafe\r\nheader" },
     });
     assertEquals(badHeader.status, 400);
+    assertEquals(dispatched, 0);
+});
+
+Deno.test("plugin package installation crosses the cookie bridge with its own bounded upload limit", async () => {
+    const dispatched: {
+        path: string;
+        method: string;
+        authorization: string | null;
+        body: unknown;
+    }[] = [];
+    const app = createHarness(
+        { adminAuthToken: adminToken },
+        async (request) => {
+            dispatched.push({
+                path: new URL(request.url).pathname,
+                method: request.method,
+                authorization: request.headers.get("authorization"),
+                body: await request.json(),
+            });
+            return Response.json({ plugin: { enabled: false } }, {
+                status: 201,
+            });
+        },
+    );
+    const cookie = await loginCookie(app);
+    // Escaped newlines produce a JSON package above 1 MiB from code below 1 MiB.
+    const body = {
+        format: "heimdall-plugin/v1",
+        entrypoint: "plugin.js",
+        manifest: { id: "example.local", kind: "tool", trust: "isolated" },
+        code: "\n".repeat(600_000),
+        digest: "sha256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+    };
+    const envelope = {
+        path: "/api/admin/plugin-package",
+        method: "POST",
+        body,
+    };
+    assertEquals((await bridgeRequest(app, envelope)).status, 401);
+    assertEquals(
+        (await bridgeRequest(app, envelope, cookie, {
+            origin: "https://attacker.example.test",
+        })).status,
+        403,
+    );
+    assertEquals(dispatched.length, 0);
+    const response = await bridgeRequest(app, envelope, cookie);
+    assertEquals(response.status, 201);
+    assertEquals(await response.json(), { plugin: { enabled: false } });
+    assertEquals(dispatched, [{
+        path: "/api/admin/plugin-package",
+        method: "POST",
+        authorization: `Bearer ${adminToken}`,
+        body,
+    }]);
+    for (const method of ["GET", "DELETE", "PUT"]) {
+        assertEquals(
+            (await bridgeRequest(app, { ...envelope, method }, cookie)).status,
+            403,
+        );
+    }
+    assertEquals(
+        (await bridgeRequest(app, {
+            ...envelope,
+            path: "/api/admin/plugin-package/extra",
+        }, cookie)).status,
+        403,
+    );
+    assertEquals(dispatched.length, 1);
+});
+
+Deno.test("plugin upload limits apply to UTF-8 package bytes without expanding other management limits", async () => {
+    let dispatched = 0;
+    const app = createHarness({}, () => {
+        dispatched++;
+        return Response.json({ plugin: {} });
+    });
+    // The envelope fits its upload allowance, but the package exceeds 2 MiB.
+    const response = await bridgeRequest(app, {
+        path: "/api/admin/plugin-package",
+        method: "POST",
+        body: { code: "界".repeat(699_051) },
+    });
+    assertEquals(response.status, 413);
+    assertStringIncludes((await response.json()).error.message, "2 MiB");
+    assertEquals(
+        (await bridgeRequest(app, {
+            path: "/api/admin/settings",
+            method: "PUT",
+            body: { config: "x".repeat(1_048_576) },
+        })).status,
+        413,
+    );
     assertEquals(dispatched, 0);
 });
 

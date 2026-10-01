@@ -180,7 +180,6 @@ Deno.test("chat message island formats assistant history and stream while whole-
         streamReasoning: "",
         streamActivity: [],
         streamCitations: [],
-        streamQuota: null,
         suggestions: [],
         pendingEffort: "medium",
         error: "",

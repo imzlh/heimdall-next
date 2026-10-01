@@ -114,53 +114,28 @@ Deno.test("ChatResponse ignores private reasoning", () => {
     assertEquals(response.reasoning, "");
 });
 
-Deno.test("ChatResponse captures the account quota off the usage extensions", () => {
+Deno.test("ChatResponse leaves usage extensions outside the chat presentation", () => {
     const response = new ChatResponse();
     response.append({
-        kind: "usage",
+        kind: "part.started",
+        messageId: "m",
+        part: { id: "p", type: "text", text: "Hello" },
+    });
+    const event = {
+        kind: "usage" as const,
         usage: {
             inputTokens: 10,
             outputTokens: 5,
             totalTokens: 15,
             extensions: {
                 estimated: true,
-                quota: {
-                    meters: [
-                        { name: "LLMOnly", remaining: 100 },
-                        {
-                            name: "ImageGeneration",
-                            remaining: 0,
-                            blocked: true,
-                        },
-                        {
-                            name: "ImageGenInsufficientTokensThrottled",
-                            blocked: true,
-                            error: "ImageGenInsufficientTokensThrottled",
-                        },
-                    ],
-                },
+                quota: { meters: [{ name: "sample", remaining: 100 }] },
             },
         },
-    });
-    assertEquals(response.quota, {
-        meters: [
-            { name: "LLMOnly", remaining: 100 },
-            { name: "ImageGeneration", remaining: 0, blocked: true },
-            {
-                name: "ImageGenInsufficientTokensThrottled",
-                blocked: true,
-                error: "ImageGenInsufficientTokensThrottled",
-            },
-        ],
-    });
-});
-
-Deno.test("ChatResponse leaves quota undefined without a usage snapshot", () => {
-    const response = new ChatResponse();
-    response.append({
-        kind: "part.started",
-        messageId: "m",
-        part: { id: "p", type: "text", text: "hi" },
-    });
-    assertEquals(response.quota, undefined);
+    };
+    const original = structuredClone(event);
+    assertEquals(response.append(event), "");
+    assertEquals(response.text, "Hello");
+    assertEquals("quota" in response, false);
+    assertEquals(event, original);
 });

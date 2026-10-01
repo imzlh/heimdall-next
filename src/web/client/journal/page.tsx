@@ -3,19 +3,16 @@ import { useEffect, useRef, useState } from "hono/jsx/dom";
 import type { RequestStatusDto } from "@heimdall/admin-contracts";
 import { Icon } from "../../shared/icons.tsx";
 import { JournalTable } from "../../shared/journal-table.tsx";
-import { requestState } from "../../shared/activity-presentation.ts";
+import {
+    REQUEST_STATUSES,
+    requestState,
+} from "../../shared/activity-presentation.ts";
 import { controlValue } from "../dom.ts";
 import { createJournalController } from "./controller.ts";
 import type { JournalInitial } from "./types.ts";
 import { JournalDetailDrawer } from "./detail.tsx";
-
-const statuses: RequestStatusDto[] = [
-    "pending",
-    "running",
-    "completed",
-    "error",
-    "cancelled",
-];
+import { Dropdown } from "../forms/dropdown.tsx";
+import { Switch } from "../forms/switch.tsx";
 
 export function RequestJournalPage({ revision, initial }: {
     revision: number;
@@ -102,26 +99,26 @@ export function RequestJournalPage({ revision, initial }: {
                     />
                     <button type="submit">搜索</button>
                 </label>
-                <label class="journal-status-filter">
+                <div class="journal-status-filter">
                     <span>状态</span>
-                    <select
-                        name="status"
-                        aria-label="请求状态"
+                    <input type="hidden" name="status" value={state.status} />
+                    <Dropdown
+                        ariaLabel="请求状态"
                         value={state.status}
-                        onInput={(event) =>
+                        options={[
+                            { value: "", label: "全部状态" },
+                            ...REQUEST_STATUSES.map((status) => ({
+                                value: status,
+                                label: requestState(status).label,
+                            })),
+                        ]}
+                        onChange={(value) =>
                             void controller.filter(
                                 search,
-                                controlValue(event) as RequestStatusDto | "",
+                                value as RequestStatusDto | "",
                             )}
-                    >
-                        <option value="">全部状态</option>
-                        {statuses.map((status) => (
-                            <option value={status} key={status}>
-                                {requestState(status).label}
-                            </option>
-                        ))}
-                    </select>
-                </label>
+                    />
+                </div>
                 {(state.q || state.status) && (
                     <button
                         class="journal-clear"
@@ -142,22 +139,17 @@ export function RequestJournalPage({ revision, initial }: {
                         : `${state.requests.length} 条记录`}
                     {state.q && <span>· 搜索“{state.q}”</span>}
                 </p>
-                <label class="journal-auto-refresh">
-                    <input
-                        type="checkbox"
-                        checked={state.autoRefresh}
-                        onInput={(event) =>
-                            controller.setAutoRefresh(
-                                (event.currentTarget as HTMLInputElement)
-                                    .checked,
-                            )}
-                    />
-                    <span>
-                        每 15 秒刷新{state.autoRefresh && state.cursor !== null
+                <Switch
+                    checked={state.autoRefresh}
+                    onToggle={() =>
+                        controller.setAutoRefresh(!state.autoRefresh)}
+                    ariaLabel="自动刷新请求记录"
+                    label={`每 15 秒刷新${
+                        state.autoRefresh && state.cursor !== null
                             ? " · 翻页时暂停"
-                            : ""}
-                    </span>
-                </label>
+                            : ""
+                    }`}
+                />
             </div>
             {state.error && (
                 <div class="journal-error" role="alert">

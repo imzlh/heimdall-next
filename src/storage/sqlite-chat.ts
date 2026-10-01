@@ -15,7 +15,7 @@ CREATE TABLE IF NOT EXISTS conversations (
 CREATE TABLE IF NOT EXISTS messages (
  id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL,
  created_at TEXT NOT NULL, call_id TEXT, tool_name TEXT, status TEXT, error_code TEXT, error_message TEXT,
- parent_id TEXT, selected_child_id TEXT, branch_group_id TEXT, reasoning TEXT, activity TEXT, citations TEXT, quota TEXT,
+ parent_id TEXT, selected_child_id TEXT, branch_group_id TEXT, reasoning TEXT, activity TEXT, citations TEXT,
  FOREIGN KEY (conversation_id) REFERENCES conversations(id)
 );
 CREATE TABLE IF NOT EXISTS message_attachments (
@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS message_attachments (
  asset_id TEXT, PRIMARY KEY (message_id,position), FOREIGN KEY (message_id) REFERENCES messages(id)
 );
 CREATE INDEX IF NOT EXISTS messages_conversation ON messages(conversation_id,created_at,id);
+CREATE INDEX IF NOT EXISTS conversations_activity ON conversations(updated_at,id);
 CREATE TABLE IF NOT EXISTS legacy_attachment_quarantine (
  message_id TEXT NOT NULL, position INTEGER NOT NULL, media_type TEXT NOT NULL,
  data_base64 TEXT NOT NULL, reason TEXT NOT NULL, quarantined_at TEXT NOT NULL,
@@ -57,7 +58,6 @@ interface MessageRow {
     reasoning: string | null;
     activity: string | null;
     citations: string | null;
-    quota: string | null;
 }
 interface AttachmentRow {
     message_id: string;
@@ -102,6 +102,32 @@ export class SqliteChatStore implements ChatStore {
         const row = this.#db.prepare("SELECT * FROM conversations WHERE id=?")
             .get(id) as ConversationRow | undefined;
         return row ? toConversation(row) : null;
+    }
+    /** Bounded, oldest-first keyset scan for host retention, including every branch. */
+    listConversationsOlderThan(
+        before: string,
+        limit: number,
+        after?: { readonly updatedAt: string; readonly id: string },
+    ): readonly ConversationRecord[] {
+        this.#alive();
+        if (!Number.isInteger(limit) || limit < 1 || limit > 500) {
+            throw new TypeError(
+                "retention limit must be an integer from 1 to 500",
+            );
+        }
+        const query = after
+            ? "SELECT * FROM conversations WHERE updated_at < ? AND (updated_at > ? OR (updated_at = ? AND id > ?)) ORDER BY updated_at,id LIMIT ?"
+            : "SELECT * FROM conversations WHERE updated_at < ? ORDER BY updated_at,id LIMIT ?";
+        const rows = after
+            ? this.#db.prepare(query).all(
+                before,
+                after.updatedAt,
+                after.updatedAt,
+                after.id,
+                limit,
+            )
+            : this.#db.prepare(query).all(before, limit);
+        return (rows as unknown as ConversationRow[]).map(toConversation);
     }
     updateConversation(
         id: string,
@@ -189,8 +215,8 @@ export class SqliteChatStore implements ChatStore {
         const branchGroupId = variant?.branch_group_id ?? variant?.id ??
             message.id;
         this.#db.prepare(
-            `INSERT INTO messages(id,conversation_id,role,text,created_at,call_id,tool_name,status,error_code,error_message,parent_id,branch_group_id,reasoning,activity,citations,quota)
-   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+            `INSERT INTO messages(id,conversation_id,role,text,created_at,call_id,tool_name,status,error_code,error_message,parent_id,branch_group_id,reasoning,activity,citations)
+   VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         ).run(
             message.id,
             message.conversationId,
@@ -209,7 +235,6 @@ export class SqliteChatStore implements ChatStore {
             message.citations?.length
                 ? JSON.stringify(message.citations)
                 : null,
-            message.quota?.meters.length ? JSON.stringify(message.quota) : null,
         );
         this.#writeAttachments(message.id, message.attachments ?? []);
         this.#selectLeaf(message.conversationId, message.id);
@@ -627,7 +652,6 @@ export function openSqliteChatStore(path: string): SqliteChatStore {
                 "reasoning",
                 "activity",
                 "citations",
-                "quota",
             ]
         ) ensureColumn(db, "messages", column);
         for (
@@ -761,7 +785,6 @@ function toMessage(
             : "user";
     const activity = parseActivity(row.activity);
     const citations = parseCitations(row.citations);
-    const quota = parseQuota(row.quota);
     return {
         id: row.id,
         conversationId: row.conversation_id,
@@ -782,45 +805,7 @@ function toMessage(
         ...(row.reasoning ? { reasoning: row.reasoning } : {}),
         ...(activity ? { activity } : {}),
         ...(citations ? { citations } : {}),
-        ...(quota ? { quota } : {}),
     };
-}
-
-/** Parse the persisted quota JSON, tolerating legacy nulls and bad rows. */
-function parseQuota(
-    value: string | null,
-): ChatMessageRecord["quota"] | undefined {
-    if (!value) return undefined;
-    try {
-        const parsed = JSON.parse(value);
-        const meters = record(parsed)?.meters;
-        if (!Array.isArray(meters)) return undefined;
-        const items = meters
-            .map((item) => record(item))
-            .filter((item): item is Record<string, unknown> =>
-                item !== undefined && typeof item.name === "string" &&
-                item.name.length > 0
-            )
-            .map((item) => ({
-                name: item.name as string,
-                ...(typeof item.remaining === "number"
-                    ? { remaining: item.remaining }
-                    : {}),
-                ...(item.blocked === true ? { blocked: true } : {}),
-                ...(typeof item.error === "string"
-                    ? { error: item.error }
-                    : {}),
-            }));
-        return items.length > 0 ? { meters: items } : undefined;
-    } catch {
-        return undefined;
-    }
-}
-
-function record(value: unknown): Record<string, unknown> | undefined {
-    return typeof value === "object" && value !== null && !Array.isArray(value)
-        ? value as Record<string, unknown>
-        : undefined;
 }
 
 /** Parse the persisted activity JSON, tolerating legacy nulls and bad rows. */

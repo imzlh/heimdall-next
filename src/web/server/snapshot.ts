@@ -9,12 +9,26 @@ import type {
     UsageResponse,
 } from "@heimdall/admin-contracts/console.ts";
 import { projectListedPlugins } from "@heimdall/admin-contracts/plugin-catalog.ts";
+import { readSourceCooldown } from "@heimdall/admin-contracts/source-health.ts";
 import type { UsageDto } from "@heimdall/admin-contracts";
+import {
+    isUiJsonObject,
+    type UiJsonObject,
+    type UiJsonValue,
+} from "@heimdall/admin-contracts/ui.ts";
 import type {
     SourceProxySelection,
     SourceProxySummary,
 } from "@heimdall/admin-contracts/proxies.ts";
 import { readProxyPoolView } from "../shared/proxy-presentation.ts";
+import {
+    parseSourceModelMap,
+    type SourceModelMap,
+} from "@heimdall/admin-contracts/source-model-map.ts";
+import {
+    readMaintenanceStatus,
+    readRetentionDays,
+} from "../shared/retention-settings.ts";
 import { readStatsOverview, readStatsSeries } from "../shared/stats.ts";
 import type { AdminDispatch } from "./bridge.ts";
 import { readBoundedBody } from "./request.ts";
@@ -39,6 +53,26 @@ interface Resource {
 
 const EMPTY: Resource = { data: {}, etag: "", error: "", unauthorized: false };
 const MAX_SNAPSHOT_BYTES = 4_194_304;
+
+function sourceUiSnapshot(
+    value: unknown,
+    redact: (value: string) => string,
+): UiJsonObject | undefined {
+    if (!isUiJsonObject(value)) return undefined;
+    const project = (entry: UiJsonValue): UiJsonValue => {
+        if (typeof entry === "string") return redact(entry);
+        if (Array.isArray(entry)) return entry.map(project);
+        if (entry === null || typeof entry !== "object") return entry;
+        return Object.fromEntries(
+            Object.entries(entry).map(([key, item]) => [
+                redact(key),
+                project(item),
+            ]),
+        );
+    };
+    const snapshot = project(value);
+    return isUiJsonObject(snapshot) ? snapshot : undefined;
+}
 
 /** Read-only SSR adapter. A failed resource does not erase successful panels. */
 export async function loadConsoleSnapshot(
@@ -98,7 +132,9 @@ export async function loadConsoleSnapshot(
     const protectedRead = (path: string): Promise<Resource> =>
         options.authorized ? read(path) : Promise.resolve(EMPTY);
     const activityRead = (path: string): Promise<Resource> =>
-        options.includeActivity === false ? Promise.resolve(EMPTY) : protectedRead(path);
+        options.includeActivity === false
+            ? Promise.resolve(EMPTY)
+            : protectedRead(path);
     const [
         health,
         models,
@@ -124,7 +160,7 @@ export async function loadConsoleSnapshot(
     const text = (value: unknown): string | undefined =>
         typeof value === "string" ? redact(value) : undefined;
     // Keep the row's token counts through the snapshot so the overview table
-    // shows the same input/output figures the log page does.
+    // shows the same input/output figures the request history does.
     const journalUsage = (value: unknown): UsageDto | undefined => {
         const usage = record(value);
         if (usage === undefined) return undefined;
@@ -154,6 +190,7 @@ export async function loadConsoleSnapshot(
             sources: records(status.data.sources).map(
                 (source): ListedSource => {
                     const probe = record(source.probe);
+                    const ui = sourceUiSnapshot(source.ui, redact);
                     return {
                         id: text(source.id),
                         name: text(source.name),
@@ -167,13 +204,16 @@ export async function loadConsoleSnapshot(
                         pluginEnabled: bool(source.pluginEnabled),
                         versionstamp: text(source.versionstamp),
                         proxy: sourceProxySelection(source.proxy, redact),
+                        modelMap: readModelMap(source.modelMap, redact),
                         proxySummary: sourceProxySummary(
                             source.proxySummary,
                             redact,
                         ),
                         health: text(source.health),
+                        cooldown: readSourceCooldown(source.cooldown),
                         models: strings(source.models, redact),
                         capabilities: strings(source.capabilities, redact),
+                        ...(ui === undefined ? {} : { ui }),
                         ...(probe === undefined ? {} : {
                             probe: {
                                 ok: bool(probe.ok),
@@ -253,6 +293,16 @@ export async function loadConsoleSnapshot(
         }),
     };
     const publicSettings = record(settings.data.settings);
+    const requestRetentionDays = readRetentionDays(
+        publicSettings?.requestRetentionDays,
+    );
+    const chatRetentionDays = readRetentionDays(
+        publicSettings?.chatRetentionDays,
+    );
+    const maintenance = readMaintenanceStatus(
+        settings.data.maintenance,
+        redact,
+    );
     const settingsData: RuntimeSettingsEnvelope | null =
         publicSettings === undefined ? null : {
             settings: {
@@ -265,8 +315,15 @@ export async function loadConsoleSnapshot(
                 titleModel: typeof publicSettings.titleModel === "string"
                     ? publicSettings.titleModel
                     : "",
+                ...(requestRetentionDays === undefined
+                    ? {}
+                    : { requestRetentionDays }),
+                ...(chatRetentionDays === undefined
+                    ? {}
+                    : { chatRetentionDays }),
             },
             etag: settings.etag,
+            ...(maintenance ? { maintenance } : {}),
         };
     let proxiesData: ConsoleSnapshot["proxies"] = null;
     let proxiesError = proxies.error;
@@ -297,7 +354,7 @@ export async function loadConsoleSnapshot(
         series: null,
         errors: { overview: overview.error, series: series.error },
     };
-    if (options.authorized) {
+    if (options.authorized && options.includeActivity !== false) {
         if (!overview.error) {
             try {
                 stats.overview = readStatsOverview(overview.data, redact);
@@ -327,6 +384,23 @@ export async function loadConsoleSnapshot(
             proxies: proxiesError,
         },
     };
+}
+
+function readModelMap(
+    value: unknown,
+    redact: (value: string) => string,
+): SourceModelMap {
+    try {
+        return parseSourceModelMap(
+            Object.fromEntries(
+                Object.entries(parseSourceModelMap(value)).map((
+                    [alias, target],
+                ) => [redact(alias), redact(target)]),
+            ),
+        );
+    } catch {
+        return {};
+    }
 }
 
 function sourceProxySelection(

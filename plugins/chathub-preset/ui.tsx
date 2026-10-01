@@ -68,6 +68,9 @@ function ChatHubSetup({ element, context }: {
     const [models, setModels] = useState("");
     const [errors, setErrors] = useState<Readonly<Record<string, string>>>({});
     const [feedback, setFeedback] = useState<PresetUiFeedback | null>(null);
+    const [probeFeedback, setProbeFeedback] = useState<PresetUiFeedback | null>(
+        null,
+    );
     // Credentials never become DOM attributes or stored drafts.
     const account = useRef<AuthorizedAccount | null>(null);
     const request = useRef<AbortController | null>(null);
@@ -78,6 +81,9 @@ function ChatHubSetup({ element, context }: {
     const busy = phase === "starting" || phase === "exchanging" ||
         feedback?.status === "pending";
     const saved = feedback?.kind === "save" && feedback.status === "success";
+    const probe = probeFeedback?.probe;
+    const probeFailed = probeFeedback?.status === "error" ||
+        probe?.ok === false;
 
     useLayoutEffect(() => {
         mounted.current = true;
@@ -89,6 +95,7 @@ function ChatHubSetup({ element, context }: {
                 const next = parsePresetUiFeedback(event.detail);
                 pending.current = next.status === "pending";
                 setFeedback(next);
+                if (next.kind === "probe") setProbeFeedback(next);
                 setErrors(next.errors ?? {});
                 if (next.kind === "save" && next.status === "success") {
                     completed.current = true;
@@ -121,6 +128,7 @@ function ChatHubSetup({ element, context }: {
         setPhase(nextPhase);
         setErrors({});
         setFeedback(null);
+        setProbeFeedback(null);
         const timeout = setTimeout(() => controller.abort(), 25_000);
         try {
             const result = await operation(controller.signal);
@@ -498,20 +506,18 @@ function ChatHubSetup({ element, context }: {
                                 : "配置校验通过，可以保存渠道。"}
                         </p>
                     )}
-                {feedback?.probe && (
+                {probe && (
                     <div
                         class="source-probe-result"
-                        data-state={feedback.probe.ok ? "success" : "error"}
+                        data-state={probe.ok ? "success" : "error"}
                     >
                         <p
-                            class={feedback.probe.ok
-                                ? "form-success"
-                                : "form-error"}
-                            role={feedback.probe.ok ? "status" : "alert"}
+                            class={probe.ok ? "form-success" : "form-error"}
+                            role={probe.ok ? "status" : "alert"}
                         >
-                            {feedback.probe.message}
+                            {probe.message}
                         </p>
-                        {feedback.probe.ok && feedback.probe.models?.length
+                        {probe.ok && probe.models?.length
                             ? (
                                 <>
                                     <p class="field-help">
@@ -521,7 +527,7 @@ function ChatHubSetup({ element, context }: {
                                         class="source-model-list"
                                         aria-label="上游模型"
                                     >
-                                        {feedback.probe.models.map((model) => (
+                                        {probe.models.map((model) => (
                                             <button
                                                 key={model}
                                                 type="button"
@@ -553,12 +559,19 @@ function ChatHubSetup({ element, context }: {
                                     </div>
                                 </>
                             )
-                            : feedback.probe.ok && (
+                            : probe.ok && (
                                 <p class="field-help">
                                     插件未返回模型列表，可以继续使用默认模型。
                                 </p>
                             )}
                     </div>
+                )}
+                {phase === "authorized" && !busy && !saved && !probe?.ok && (
+                    <p class="field-help" role="status">
+                        {probeFailed
+                            ? "连接测试未通过，可重试或跳过测试并保存。"
+                            : "尚未测试连接。可先测试，也可直接保存。"}
+                    </p>
                 )}
             </div>
             <div class="config-actions source-flow-footer source-preset-actions">
@@ -570,7 +583,7 @@ function ChatHubSetup({ element, context }: {
                 >
                     {busy && feedback?.kind === "probe"
                         ? "测试连接并获取模型…"
-                        : feedback?.probe?.ok === false
+                        : probeFailed
                         ? "重新测试连接"
                         : "测试连接并获取模型"}
                 </button>
@@ -589,7 +602,11 @@ function ChatHubSetup({ element, context }: {
                     class="primary-button"
                     disabled={phase !== "authorized" || busy || saved}
                 >
-                    {busy && feedback?.kind === "save" ? "保存中…" : "保存渠道"}
+                    {busy && feedback?.kind === "save"
+                        ? "保存中…"
+                        : probeFailed
+                        ? "跳过测试并保存"
+                        : "保存渠道"}
                 </button>
             </div>
         </form>

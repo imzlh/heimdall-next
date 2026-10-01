@@ -1,7 +1,4 @@
-import type {
-    StatsSeriesDto,
-    StatsTrendDto,
-} from "@heimdall/admin-contracts";
+import type { StatsSeriesDto, StatsTrendDto } from "@heimdall/admin-contracts";
 
 /**
  * The console's usage trend panel: smooth input/output token lines drawn as

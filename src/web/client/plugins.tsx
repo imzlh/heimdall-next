@@ -4,16 +4,18 @@ import {
     describeError,
     type ListedPlugin,
     setPluginEnabled,
+    uninstallPlugin,
 } from "./api/admin.ts";
+import { installPluginPackage } from "./api/plugin-packages.ts";
+import { PluginCard } from "../shared/plugin-card.tsx";
 import {
     canTogglePlugin,
-    pluginCapabilityLabel,
-    pluginDependencyState,
-    pluginKindLabel,
-    pluginManagementText,
-    pluginState,
-    pluginTrustLabel,
+    canUninstallPlugin,
+    pluginDependents,
 } from "../shared/catalog-presentation.ts";
+import { PluginInstallDialog } from "./plugin-install.tsx";
+import { PluginDialog } from "./plugin-dialog.tsx";
+import type { PluginPackagePreview } from "./plugin-package-file.ts";
 
 interface PluginsProps {
     plugins: ListedPlugin[];
@@ -21,124 +23,12 @@ interface PluginsProps {
     onRefresh: () => Promise<void>;
 }
 
-function PluginCard({ plugin, plugins, pendingId, onToggle }: {
-    plugin: ListedPlugin;
-    plugins: ListedPlugin[];
-    pendingId: string;
-    onToggle: (plugin: ListedPlugin) => Promise<void>;
-}) {
-    const eligible = canTogglePlugin(plugin);
-    const label = plugin.name || plugin.id;
-    const action = plugin.enabled ? "停用" : "启用";
-    const state = pluginState(plugin);
-    return (
-        <article
-            class={`plugin-card${plugin.enabled === false ? " disabled" : ""}`}
-            aria-busy={pendingId === plugin.id ? "true" : "false"}
-        >
-            <header class="plugin-card-head">
-                <div class="plugin-card-title">
-                    <h3 title={label}>{label}</h3>
-                    <code title={plugin.id}>{plugin.id}</code>
-                </div>
-                <span class={`status-chip chip-${state.tone}`}>
-                    {state.label}
-                </span>
-            </header>
-            {plugin.description && (
-                <p class="plugin-card-desc">{plugin.description}</p>
-            )}
-            <div class="plugin-card-badges">
-                {typeof plugin.managed === "boolean" && (
-                    <span class="plugin-chip">
-                        {plugin.managed ? "托管" : "内置"}
-                    </span>
-                )}
-                <span class="plugin-chip accent">
-                    {pluginKindLabel(plugin.kind)}
-                </span>
-                {plugin.version && (
-                    <span class="plugin-chip">v{plugin.version}</span>
-                )}
-            </div>
-            <div class="plugin-card-meta">
-                <div class="plugin-meta-group">
-                    <span class="plugin-meta-label">运行方式</span>
-                    <span>{pluginTrustLabel(plugin.trust)}</span>
-                </div>
-                {Boolean(plugin.capabilities?.length) && (
-                    <details class="plugin-card-details">
-                        <summary>
-                            声明能力{" "}
-                            <span>{plugin.capabilities!.length} 项</span>
-                        </summary>
-                        <div class="plugin-card-badges">
-                            {plugin.capabilities!.map((capability) => (
-                                <span class="plugin-chip" title={capability}>
-                                    {pluginCapabilityLabel(capability)}
-                                </span>
-                            ))}
-                        </div>
-                    </details>
-                )}
-                {Boolean(plugin.dependencies?.length) && (
-                    <details class="plugin-card-details">
-                        <summary>
-                            声明依赖{" "}
-                            <span>{plugin.dependencies!.length} 项</span>
-                        </summary>
-                        <ul class="plugin-dependencies">
-                            {plugin.dependencies!.map((dependency) => {
-                                const state = pluginDependencyState(
-                                    dependency,
-                                    plugins,
-                                );
-                                return (
-                                    <li>
-                                        <code>{dependency}</code>
-                                        <span
-                                            class={`status-chip chip-${state.tone}`}
-                                        >
-                                            {state.label}
-                                        </span>
-                                    </li>
-                                );
-                            })}
-                        </ul>
-                    </details>
-                )}
-            </div>
-            {plugin.lastError && (
-                <p
-                    class="plugin-card-error"
-                    role="alert"
-                    title={plugin.lastError}
-                >
-                    最近错误：{plugin.lastError}
-                </p>
-            )}
-            <footer class="plugin-card-actions">
-                <span>{pluginManagementText(plugin)}</span>
-                {eligible && (
-                    <button
-                        class="secondary-button"
-                        type="button"
-                        disabled={Boolean(pendingId)}
-                        aria-label={`${action} ${label}`}
-                        onClick={() => void onToggle(plugin)}
-                    >
-                        {pendingId === plugin.id ? "处理中…" : action}
-                    </button>
-                )}
-            </footer>
-        </article>
-    );
-}
-
 export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
     const [pendingId, setPendingId] = useState("");
     const [actionError, setActionError] = useState("");
     const [message, setMessage] = useState("");
+    const [dialog, setDialog] = useState<"install" | ListedPlugin | null>(null);
+    const [refreshFailed, setRefreshFailed] = useState(false);
     const busy = useRef(false);
     const mounted = useRef(true);
     useEffect(() => {
@@ -147,35 +37,103 @@ export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
             mounted.current = false;
         };
     }, []);
+    const deleting = dialog && dialog !== "install" ? dialog : null;
+    const dependents = deleting ? pluginDependents(deleting, plugins) : [];
 
-    async function togglePlugin(plugin: ListedPlugin) {
-        if (busy.current || !canTogglePlugin(plugin)) return;
+    function dismiss() {
+        if (!busy.current) {
+            setDialog(null);
+            setActionError("");
+        }
+    }
+
+    async function refresh(completed: string) {
+        try {
+            await onRefresh();
+            if (mounted.current) setRefreshFailed(false);
+        } catch (error) {
+            if (mounted.current) {
+                setRefreshFailed(true);
+                setActionError(
+                    `${completed}，列表刷新失败：${describeError(error)}`,
+                );
+            }
+        }
+    }
+
+    async function change(kind: "toggle" | "remove", plugin: ListedPlugin) {
+        if (busy.current) return;
+        if (kind === "toggle" && !canTogglePlugin(plugin)) return;
+        if (
+            kind === "remove" &&
+            (!canUninstallPlugin(plugin) ||
+                pluginDependents(plugin, plugins).length)
+        ) return;
         busy.current = true;
         setPendingId(plugin.id);
         setActionError("");
         setMessage("");
         try {
-            await setPluginEnabled(plugin.id, !plugin.enabled);
-            if (mounted.current) {
-                setMessage(
-                    `已${plugin.enabled ? "停用" : "启用"} ${
-                        plugin.name || plugin.id
-                    }。`,
-                );
-            }
-            try {
-                await onRefresh();
-            } catch (error) {
-                if (mounted.current) {
-                    setActionError(
-                        `插件状态已更新，列表刷新失败：${describeError(error)}`,
-                    );
-                }
-            }
+            if (kind === "toggle") {
+                await setPluginEnabled(plugin.id, !plugin.enabled);
+            } else await uninstallPlugin(plugin.id);
+            if (!mounted.current) return;
+            const action = kind === "remove"
+                ? "卸载"
+                : plugin.enabled
+                ? "停用"
+                : "启用";
+            setMessage(`已${action} ${plugin.name || plugin.id}。`);
+            if (kind === "remove") setDialog(null);
+            await refresh(kind === "remove" ? "插件已卸载" : "插件状态已更新");
         } catch (error) {
             if (mounted.current) {
-                setActionError(`更新插件状态失败：${describeError(error)}`);
+                setActionError(
+                    `${kind === "remove" ? "卸载插件" : "更新插件状态"}失败：${
+                        describeError(error)
+                    }`,
+                );
+                // A lifecycle failure may have persisted lastError or stopped a worker.
+                // Refresh the actual host state while retaining the operation failure.
+                try {
+                    await onRefresh();
+                } catch { /* Original operation error remains actionable. */ }
             }
+        } finally {
+            busy.current = false;
+            if (mounted.current) setPendingId("");
+        }
+    }
+
+    async function install(preview: PluginPackagePreview) {
+        if (busy.current) return;
+        busy.current = true;
+        setPendingId("@install");
+        setActionError("");
+        setMessage("");
+        try {
+            await installPluginPackage(preview.input);
+            if (!mounted.current) return;
+            setDialog(null);
+            setMessage(
+                `已安装 ${
+                    preview.plugin.name || preview.plugin.id
+                }，可在插件卡片中启用。`,
+            );
+            await refresh("插件已安装");
+        } finally {
+            busy.current = false;
+            if (mounted.current) setPendingId("");
+        }
+    }
+
+    async function retryRefresh() {
+        if (busy.current) return;
+        busy.current = true;
+        setPendingId("@refresh");
+        setActionError("");
+        try {
+            await refresh("操作已完成");
         } finally {
             busy.current = false;
             if (mounted.current) setPendingId("");
@@ -191,15 +149,41 @@ export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
         >
             <div class="panel-heading">
                 <div>
-                    <h2 id="plugins-title">插件能力</h2>
+                    <h2 id="plugins-title" tabIndex={-1}>插件能力</h2>
                     <p>已注册插件的运行状态与可用操作</p>
                 </div>
-                <span class="panel-count">{plugins.length} 个插件</span>
+                <div class="plugin-heading-actions">
+                    <span class="panel-count">{plugins.length} 个插件</span>
+                    <button
+                        type="button"
+                        class="secondary-button"
+                        disabled={Boolean(pendingId)}
+                        onClick={() => {
+                            if (!busy.current) {
+                                setActionError("");
+                                setDialog("install");
+                            }
+                        }}
+                    >
+                        安装插件
+                    </button>
+                </div>
             </div>
             {loadError && <p class="form-error" role="alert">{loadError}</p>}
-            {actionError && <p class="form-error" role="alert">{actionError}
-            </p>}
+            {actionError && !deleting && (
+                <p class="form-error" role="alert">{actionError}</p>
+            )}
             {message && <p class="form-success" role="status">{message}</p>}
+            {(refreshFailed || loadError) && (
+                <button
+                    class="text-button"
+                    type="button"
+                    disabled={Boolean(pendingId)}
+                    onClick={() => void retryRefresh()}
+                >
+                    重新读取插件列表
+                </button>
+            )}
             {plugins.length
                 ? (
                     <div class="plugin-cards">
@@ -208,8 +192,16 @@ export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
                                 key={plugin.id}
                                 plugin={plugin}
                                 plugins={plugins}
-                                pendingId={pendingId}
-                                onToggle={togglePlugin}
+                                busy={Boolean(pendingId)}
+                                pending={pendingId === plugin.id}
+                                onToggle={(plugin) =>
+                                    void change("toggle", plugin)}
+                                onUninstall={(plugin) => {
+                                    if (!busy.current) {
+                                        setActionError("");
+                                        setDialog(plugin);
+                                    }
+                                }}
                             />
                         ))}
                     </div>
@@ -220,6 +212,64 @@ export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
                         <p>已加载的上游源、协议和预设会在这里显示。</p>
                     </div>
                 )}
+            {dialog === "install" && (
+                <PluginInstallDialog
+                    plugins={plugins}
+                    busy={Boolean(pendingId)}
+                    onInstall={install}
+                    onClose={dismiss}
+                />
+            )}
+            {deleting && (
+                <PluginDialog
+                    title="卸载插件"
+                    busy={Boolean(pendingId)}
+                    onClose={dismiss}
+                >
+                    <p class="plugin-remove-description">
+                        卸载“{deleting.name ||
+                            deleting.id}”将移除插件包和安装记录。
+                        {deleting.enabled ? "运行中的插件会先停用。" : ""}
+                        之后可以重新安装。
+                    </p>
+                    <code>{deleting.id}</code>
+                    {dependents.length > 0 && (
+                        <div class="plugin-remove-blocked" role="alert">
+                            <p>以下插件仍依赖它，请先处理这些依赖：</p>
+                            <ul>
+                                {dependents.map((plugin) => (
+                                    <li key={plugin.id}>
+                                        {plugin.name || plugin.id}{" "}
+                                        <code>{plugin.id}</code>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                    {actionError && (
+                        <p class="form-error" role="alert">{actionError}</p>
+                    )}
+                    <footer class="plugin-dialog-actions">
+                        <button
+                            type="button"
+                            class="text-button"
+                            disabled={Boolean(pendingId)}
+                            onClick={dismiss}
+                        >
+                            取消
+                        </button>
+                        <button
+                            type="button"
+                            class="primary-button plugin-confirm-remove"
+                            disabled={Boolean(pendingId) ||
+                                dependents.length > 0}
+                            onClick={() => void change("remove", deleting)}
+                        >
+                            {pendingId ? "正在卸载…" : "确认卸载"}
+                        </button>
+                    </footer>
+                </PluginDialog>
+            )}
         </section>
     );
 }

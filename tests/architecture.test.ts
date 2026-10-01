@@ -301,7 +301,7 @@ Deno.test("architecture: browser and shared UI modules cannot depend on server r
         const directory of [clientRoot, sharedRoot, "packages/admin-contracts"]
     ) {
         for (const { file, source, imports } of await sourcesUnder(directory)) {
-            for (const { specifier, resolved, typeOnly } of imports) {
+            for (const { specifier, resolved } of imports) {
                 const isClient = isUnder(file, clientRoot);
                 const allowed = (isClient && isUnder(resolved, clientRoot)) ||
                     isUnder(resolved, sharedRoot) ||
@@ -312,14 +312,9 @@ Deno.test("architecture: browser and shared UI modules cannot depend on server r
                     (file === `${sharedRoot}/icons.tsx` &&
                         resolved === "npm:lucide@1.47.0/dist/esm/lucide.mjs") ||
                     (isClient && isHonoJsx(resolved)) ||
-                    resolved === "packages/admin-contracts/forms.ts" ||
-                    resolved === "packages/admin-contracts/plugin-catalog.ts" ||
-                    resolved === "packages/admin-contracts/ui.ts" ||
-                    resolved === "packages/admin-contracts/ui-catalog.ts" ||
-                    resolved === "packages/admin-contracts/preset-ui.ts" ||
-                    (isUnder(file, "packages/admin-contracts") &&
-                        isUnder(resolved, "packages/admin-contracts")) ||
-                    (typeOnly && isUnder(resolved, "packages/admin-contracts"));
+                    // This loop audits every contract module too: constants and
+                    // pure validators are safe without a per-file allowlist.
+                    isUnder(resolved, "packages/admin-contracts");
                 if (!allowed) violations.push(`${file} -> ${specifier}`);
             }
             if (
@@ -371,7 +366,11 @@ Deno.test("architecture: plugins cannot import host implementation details", asy
         for (const { specifier, resolved } of imports) {
             if (
                 isPluginUiEntry(file) &&
-                resolved === "packages/admin-contracts/preset-ui.ts"
+                [
+                    "packages/admin-contracts/preset-ui.ts",
+                    "packages/admin-contracts/source-model-map.ts",
+                    "packages/admin-contracts/ui.ts",
+                ].includes(resolved)
             ) continue;
             // Preset browser entries share decorative icons through the public
             // UI alias; host state, transport, and other UI internals stay private.

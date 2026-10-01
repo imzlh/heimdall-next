@@ -130,6 +130,70 @@ Third-party packages use an isolated broker with explicit RPC capabilities.
 Enable/disable state is persisted independently of package bytes, so a failed
 runtime cannot silently become active.
 
+### Offline managed tool packages
+
+The management page can install `heimdall-plugin/v1` JSON packages. The current
+runtime supports `kind: "tool"`, `trust: "isolated"` packages with one bundled
+ESM entrypoint. Source, preset, protocol, API and UI plugins continue to use the
+reviewed server composition; uploading one of these kinds is rejected.
+
+An isolated entrypoint exports `invoke(method, payload, context)`:
+
+```js
+export function invoke(method, payload) {
+    if (method === "tools.list") {
+        return [{
+            name: "text_length",
+            description: "返回文本字符数",
+            inputSchema: {
+                type: "object",
+                properties: { text: { type: "string" } },
+                required: ["text"],
+            },
+        }];
+    }
+    if (method === "tools.execute") {
+        const args = JSON.parse(payload.argumentsText);
+        return { text: String([...String(args.text)].length), isError: false };
+    }
+    throw new Error("Unknown method");
+}
+```
+
+Use a manifest such as:
+
+```json
+{
+    "id": "example.text-length",
+    "name": "文本长度",
+    "version": "1.0.0",
+    "apiVersion": "1",
+    "kind": "tool",
+    "trust": "isolated"
+}
+```
+
+Bundle TypeScript and dependencies before packaging, then produce the JSON
+artifact with the existing verifier and SHA-256 implementation:
+
+```sh
+deno bundle --node-modules-dir=none --platform browser --minify --output plugin.js plugin.ts
+deno task plugin:package manifest.json plugin.js text-length.heimdall.json
+```
+
+For a self-contained JavaScript module, only the second command is needed.
+Packaging reads files without evaluating the entrypoint, checks the manifest and
+permission policy, and refuses to overwrite an existing output. The code limit
+is 1 MiB and the complete JSON file limit is 2 MiB. Upload the resulting file
+through **总览 → 插件能力 → 安装插件**, review its metadata, then enable its
+card. Installation verifies the digest on the server and persists the package in
+KV; it does not grant execution until enabled. Enabled packages are reverified
+and restored when the server restarts.
+
+The worker receives JSON values and an abort signal. Network, filesystem,
+environment and subprocess access are denied; no runtime package downloads are
+performed. A checksum verifies artifact integrity, not publisher identity.
+
 ## UI plugins
 
 Operator UI extensions default to host-rendered schemas. Reviewed modules may

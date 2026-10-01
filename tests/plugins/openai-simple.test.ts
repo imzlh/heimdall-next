@@ -174,7 +174,6 @@ Deno.test("OpenAI source posts embeddings and image edits to fixed paths", async
     const source = createOpenAICompatibleSource({
         baseUrl: "https://upstream.example/v1",
         apiKey: "sk-test",
-        modelMap: { "fixture-model": "mapped-model" },
     }, {
         fetch: (url, init) => {
             calls.push({ url: String(url), init: init ?? {} });
@@ -206,7 +205,7 @@ Deno.test("OpenAI source posts embeddings and image edits to fixed paths", async
                 vocabulary: "openai.embedding",
                 value: { model: "fixture-model", input: "hi" },
             },
-            traits: { model: "fixture-model", streaming: false },
+            traits: { model: "mapped-model", streaming: false },
         }, {
             requestId: "embed-1",
             signal: new AbortController().signal,
@@ -243,7 +242,7 @@ Deno.test("OpenAI source posts embeddings and image edits to fixed paths", async
                     }],
                 },
             },
-            traits: { model: "fixture-model", streaming: false },
+            traits: { model: "mapped-model", streaming: false },
         }, {
             requestId: "edit-1",
             signal: new AbortController().signal,

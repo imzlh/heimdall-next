@@ -2,6 +2,14 @@ import type { ChatStore } from "@heimdall/storage";
 
 const activeRuns = new WeakMap<ChatStore, Set<string>>();
 
+/** Synchronous retention work must not delete a conversation owned by a command. */
+export function isConversationRunning(
+    store: ChatStore,
+    conversationId: string,
+): boolean {
+    return activeRuns.get(store)?.has(conversationId) === true;
+}
+
 class ChatRunConflictError extends Error {
     override readonly name = "ChatRunConflictError";
     readonly status = 409;

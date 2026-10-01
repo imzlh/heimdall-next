@@ -7,6 +7,7 @@ export type {
     ListedPlugin,
     ListedPreset,
     ListedSource,
+    MaintenanceStatusView,
     RuntimeSettingsEnvelope,
     RuntimeSettingsView,
     ServiceHealth,

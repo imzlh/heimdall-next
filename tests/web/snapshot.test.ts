@@ -1,4 +1,5 @@
 import { assert, assertEquals, assertFalse } from "@std/assert";
+import { UI_LIMITS } from "@heimdall/admin-contracts/ui.ts";
 import { loadConsoleSnapshot } from "@heimdall/core/web/server/snapshot.ts";
 
 Deno.test("unauthenticated SSR only reads public health and supplies a tokenless empty dashboard", async () => {
@@ -261,4 +262,58 @@ Deno.test("SSR marks expired authorization while keeping the public health visib
     assertEquals(snapshot.dashboard.authRequired, true);
     assert(snapshot.dashboard.errors.models.includes("401"));
     assert(snapshot.errors.settings.includes("401"));
+});
+
+Deno.test("SSR transports generic plugin JSON, redacts admin secrets recursively and isolates invalid source UI", async () => {
+    const ui = {
+        status: { count: 17, text: "prefix ADMIN-SECRET suffix" },
+        "ADMIN-SECRET-field": [null, true, { note: "ADMIN-SECRET" }],
+        source: { state: "plugin-owned nested value" },
+    };
+    const invalid = [
+        null,
+        [],
+        "text",
+        42,
+        JSON.parse('{"constructor":{"unsafe":true}}'),
+        { text: "x".repeat(UI_LIMITS.jsonBytes) },
+        { entries: Array(129).fill(0) },
+    ];
+    const snapshot = await loadConsoleSnapshot({
+        authorized: true,
+        adminAuthToken: "ADMIN-SECRET",
+        dispatch(request) {
+            return Response.json(
+                new URL(request.url).pathname === "/api/admin/status"
+                    ? {
+                        sources: [
+                            { id: "current", enabled: true, ui },
+                            { id: "empty", ui: {} },
+                            ...invalid.map((value, index) => ({
+                                id: `invalid-${index}`,
+                                enabled: true,
+                                models: ["model-a"],
+                                ui: value,
+                            })),
+                        ],
+                    }
+                    : {},
+            );
+        },
+    });
+    const sources = snapshot.dashboard.status.sources;
+    assertEquals(sources[0]?.ui, {
+        status: { count: 17, text: "prefix [已隐藏] suffix" },
+        "[已隐藏]-field": [null, true, { note: "[已隐藏]" }],
+        source: { state: "plugin-owned nested value" },
+    });
+    assertEquals(sources[1]?.ui, {});
+    assertFalse(JSON.stringify(snapshot).includes("ADMIN-SECRET"));
+    assertEquals(ui.status.text, "prefix ADMIN-SECRET suffix");
+    assertEquals(sources.length, invalid.length + 2);
+    for (const source of sources.slice(2)) {
+        assertEquals(source.enabled, true);
+        assertEquals(source.models, ["model-a"]);
+        assertFalse(Object.hasOwn(source, "ui"));
+    }
 });

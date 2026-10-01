@@ -420,11 +420,22 @@ export class ChatHubClient {
                 finishReject(eventError(event, "ChatHub WebSocket error"));
             };
 
-            const onClose = (): void => {
+            const onClose = (event: Event): void => {
                 if (!settled) {
+                    const close = event as CloseEvent;
+                    const detail = [
+                        typeof close.code === "number" && close.code
+                            ? `code ${close.code}`
+                            : "",
+                        typeof close.reason === "string" && close.reason
+                            ? close.reason
+                            : "",
+                    ].filter(Boolean).join(": ");
                     finishReject(
                         new ChatHubTransportError(
-                            "ChatHub WebSocket closed before completion",
+                            detail
+                                ? `ChatHub WebSocket closed before completion (${detail})`
+                                : "ChatHub WebSocket closed before completion",
                         ),
                     );
                 }

@@ -213,7 +213,11 @@ Deno.test("plugin toggle calls the real management API once and refreshes status
             find(dom.root, 'button[aria-label="启用 测试工具"]').disabled,
         );
         assertEquals(dom.navigation, []);
-        assertEquals(dom.storageWrites, []);
+        assertEquals(dom.storageWrites.length, 1);
+        assertStringIncludes(
+            dom.storageWrites[0]!,
+            "heimdall.plugins.revision=",
+        );
     } finally {
         await dom.act(() => render(null, dom.root as unknown as HTMLElement));
         configureAdminTransport();
@@ -248,9 +252,11 @@ Deno.test("plugin toggle distinguishes API failure from refresh failure and perm
                     dom.root as unknown as HTMLElement,
                 )
             );
-            await dom.act(() => find(dom.root, "button").click());
+            await dom.act(() =>
+                find(dom.root, 'button[aria-label="停用 测试工具"]').click()
+            );
             for (let pass = 0; pass < 3; pass++) await dom.act();
-            assertEquals(refreshes, apiFailure ? 0 : 1);
+            assertEquals(refreshes, 1);
             assertStringIncludes(
                 find(dom.root, '[role="alert"]').textContent,
                 apiFailure
@@ -261,7 +267,9 @@ Deno.test("plugin toggle distinguishes API failure from refresh failure and perm
                 dom.root.querySelector('[role="status"]') !== null,
                 !apiFailure,
             );
-            assertFalse(find(dom.root, "button").disabled);
+            assertFalse(
+                find(dom.root, 'button[aria-label="停用 测试工具"]').disabled,
+            );
         } finally {
             await dom.act(() =>
                 render(null, dom.root as unknown as HTMLElement)

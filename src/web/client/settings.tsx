@@ -4,6 +4,12 @@ import { controlValue } from "./dom.ts";
 import { GatewayKeyField } from "./gateway-key.tsx";
 import { gatewayKeyPatch } from "./gateway-key-draft.ts";
 import { Icon } from "../shared/icons.tsx";
+import { MaintenanceStatus } from "../shared/maintenance-status.tsx";
+import {
+    ASSET_RETENTION_NOTE,
+    readRetentionDays,
+    RETENTION_MAX_DAYS,
+} from "../shared/retention-settings.ts";
 import {
     AdminApiError,
     describeError,
@@ -34,17 +40,32 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
     const [titleModel, setTitleModel] = useState(
         initial ? initial.settings.titleModel : "",
     );
+    const [requestRetention, setRequestRetention] = useState(
+        String(initial?.settings.requestRetentionDays ?? 0),
+    );
+    const [chatRetention, setChatRetention] = useState(
+        String(initial?.settings.chatRetentionDays ?? 0),
+    );
+    const [maintenance, setMaintenance] = useState(initial?.maintenance);
     const [proxyKey, setProxyKey] = useState("");
     const [clearProxyKey, setClearProxyKey] = useState(false);
     const [keyConfigured, setKeyConfigured] = useState(
         initial?.settings.proxyKeyConfigured ?? false,
     );
-    const [baseline, setBaseline] = useState({ limit, interval, titleModel });
+    const [baseline, setBaseline] = useState({
+        limit,
+        interval,
+        titleModel,
+        requestRetention,
+        chatRetention,
+    });
     const pending = useRef(false);
     const mounted = useRef(true);
     const busy = loading || saving;
     const dirty = limit !== baseline.limit || interval !== baseline.interval ||
         titleModel !== baseline.titleModel || proxyKey.trim().length > 0 ||
+        requestRetention !== baseline.requestRetention ||
+        chatRetention !== baseline.chatRetention ||
         clearProxyKey;
 
     useEffect(() => {
@@ -59,11 +80,16 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
             limit: String(result.settings.limitPerMinute),
             interval: String(result.settings.probeIntervalMs),
             titleModel: result.settings.titleModel,
+            requestRetention: String(result.settings.requestRetentionDays ?? 0),
+            chatRetention: String(result.settings.chatRetentionDays ?? 0),
         };
         setEtag(result.etag);
         setLimit(next.limit);
         setInterval(next.interval);
         setTitleModel(next.titleModel);
+        setRequestRetention(next.requestRetention);
+        setChatRetention(next.chatRetention);
+        setMaintenance(result.maintenance);
         setBaseline(next);
         setProxyKey("");
         setClearProxyKey(false);
@@ -99,6 +125,10 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
         setMessage("");
         const limitPerMinute = Number(limit);
         const probeIntervalMs = Number(interval);
+        const requestRetentionDays = readRetentionDays(
+            Number(requestRetention),
+        );
+        const chatRetentionDays = readRetentionDays(Number(chatRetention));
         if (
             !limit.trim() || !Number.isSafeInteger(limitPerMinute) ||
             limitPerMinute < 0 || limitPerMinute > 100_000
@@ -113,6 +143,14 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
             setError("探测间隔必须是 0 到 86400000 的整数");
             return;
         }
+        if (!requestRetention.trim() || requestRetentionDays === undefined) {
+            setError("请求记录保留天数必须是 0 到 3650 的整数，0 表示永久保留");
+            return;
+        }
+        if (!chatRetention.trim() || chatRetentionDays === undefined) {
+            setError("对话保留天数必须是 0 到 3650 的整数，0 表示永久保留");
+            return;
+        }
         pending.current = true;
         setSaving(true);
         try {
@@ -121,6 +159,8 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
                 probeIntervalMs: number;
                 proxyKey?: string;
                 titleModel?: string;
+                requestRetentionDays?: number;
+                chatRetentionDays?: number;
             } = {
                 limitPerMinute,
                 probeIntervalMs,
@@ -128,6 +168,12 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
             };
             if (titleModel.trim() !== baseline.titleModel) {
                 patch.titleModel = titleModel.trim();
+            }
+            if (requestRetention !== baseline.requestRetention) {
+                patch.requestRetentionDays = requestRetentionDays;
+            }
+            if (chatRetention !== baseline.chatRetention) {
+                patch.chatRetentionDays = chatRetentionDays;
             }
             const result = await saveRuntimeSettings(patch, etag);
             if (!mounted.current) return;
@@ -239,6 +285,61 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
                         />
                     </label>
                 </div>
+                <fieldset
+                    class="retention-settings"
+                    disabled={busy || !loaded || conflict}
+                >
+                    <legend>数据保留</legend>
+                    <p class="field-help" id="retention-policy-help">
+                        按天保留历史，0
+                        表示永久保留。缩短天数后，过期数据将在下次自动清理时删除。
+                    </p>
+                    <div class="field-grid">
+                        <label>
+                            请求记录保留（天）
+                            <input
+                                name="requestRetentionDays"
+                                type="number"
+                                min="0"
+                                max={RETENTION_MAX_DAYS}
+                                step="1"
+                                inputMode="numeric"
+                                required
+                                value={requestRetention}
+                                aria-describedby="retention-policy-help request-retention-help"
+                                onInput={(event) =>
+                                    setRequestRetention(controlValue(event))}
+                            />
+                            <small
+                                id="request-retention-help"
+                                class="field-help"
+                            >
+                                清理过期请求记录；正在处理的请求会保留。
+                            </small>
+                        </label>
+                        <label>
+                            对话保留（天）
+                            <input
+                                name="chatRetentionDays"
+                                type="number"
+                                min="0"
+                                max={RETENTION_MAX_DAYS}
+                                step="1"
+                                inputMode="numeric"
+                                required
+                                value={chatRetention}
+                                aria-describedby="retention-policy-help chat-retention-help"
+                                onInput={(event) =>
+                                    setChatRetention(controlValue(event))}
+                            />
+                            <small id="chat-retention-help" class="field-help">
+                                按最后活动时间计算；正在生成的对话会保留。
+                            </small>
+                        </label>
+                    </div>
+                    <p class="field-help">{ASSET_RETENTION_NOTE}</p>
+                </fieldset>
+                <MaintenanceStatus status={maintenance} />
                 <div class="config-actions">
                     <button
                         class="primary-button"

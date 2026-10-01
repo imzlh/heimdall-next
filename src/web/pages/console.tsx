@@ -17,6 +17,11 @@ import {
     requestState,
 } from "../shared/activity-presentation.ts";
 import { DurationSummary, TokenSummary } from "../shared/request-cells.tsx";
+import { MaintenanceStatus } from "../shared/maintenance-status.tsx";
+import {
+    ASSET_RETENTION_NOTE,
+    retentionDaysLabel,
+} from "../shared/retention-settings.ts";
 
 export type { ConsolePage } from "../shared/page-info.ts";
 export interface ConsolePageProps {
@@ -142,6 +147,48 @@ export function ConsolePageView(props: ConsolePageProps) {
                                         </p>
                                     )}
                             </section>
+                            {snapshot.settings && (
+                                <section
+                                    class="panel retention-panel"
+                                    aria-labelledby="retention-title"
+                                >
+                                    <div class="panel-heading">
+                                        <div>
+                                            <h2 id="retention-title">
+                                                数据保留
+                                            </h2>
+                                            <p>
+                                                按天保留历史，0 表示永久保留。
+                                            </p>
+                                        </div>
+                                    </div>
+                                    <dl class="settings-summary">
+                                        <dt>请求记录保留</dt>
+                                        <dd>
+                                            {retentionDaysLabel(
+                                                snapshot.settings.settings
+                                                    .requestRetentionDays,
+                                            )}
+                                        </dd>
+                                        <dt>对话保留</dt>
+                                        <dd>
+                                            {retentionDaysLabel(
+                                                snapshot.settings.settings
+                                                    .chatRetentionDays,
+                                            )}
+                                        </dd>
+                                    </dl>
+                                    <p class="field-help">
+                                        对话按最后活动时间计算，正在生成的对话会保留。
+                                    </p>
+                                    <p class="field-help">
+                                        {ASSET_RETENTION_NOTE}
+                                    </p>
+                                    <MaintenanceStatus
+                                        status={snapshot.settings.maintenance}
+                                    />
+                                </section>
+                            )}
                             <ProxyPoolSnapshot snapshot={snapshot} />
                             <PluginSlots
                                 slot="settings.section"
@@ -279,7 +326,10 @@ function RequestTable({ snapshot }: { snapshot: ConsoleSnapshot }) {
             <div class="panel-heading">
                 <div>
                     <h2 id="activity-title">用量与最近请求</h2>
-                    <p>最近 20 条请求 · <a href="/admin?view=requests">查看全部</a></p>
+                    <p>
+                        最近 20 条请求 ·{" "}
+                        <a href="/admin?view=requests">查看全部</a>
+                    </p>
                 </div>
                 <span class="status-chip chip-muted">
                     {snapshot.usage.usage
@@ -354,7 +404,12 @@ function RequestTable({ snapshot }: { snapshot: ConsoleSnapshot }) {
                                                 <a
                                                     class="request-id-inline"
                                                     title={request.requestId}
-                                                    href={`/admin?view=requests&id=${encodeURIComponent(request.requestId ?? "")}`}
+                                                    href={`/admin?view=requests&id=${
+                                                        encodeURIComponent(
+                                                            request.requestId ??
+                                                                "",
+                                                        )
+                                                    }`}
                                                 >
                                                     {request.requestId}
                                                 </a>

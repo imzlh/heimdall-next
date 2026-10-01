@@ -1,6 +1,7 @@
 import {
     isUiAction,
     isUiJsonObject,
+    resolveUiBlock,
     resolveUiRender,
     UI_LIMITS,
     uiActionAllowed,
@@ -151,10 +152,12 @@ export function enhancePluginSlot(
     ) {
         button.disabled = true;
         button.removeAttribute("aria-busy");
-        const block =
+        const declared =
             contribution.schema.blocks[Number(button.dataset.uiActionIndex)];
+        const block = declared && resolveUiBlock(declared, context);
         if (
-            block?.kind !== "action" || !options.onAction ||
+            (block?.kind !== "action" && block?.kind !== "toggle") ||
+            (block.kind === "toggle" && block.disabled) || !options.onAction ||
             !uiActionAllowed(contribution, block.action, policy)
         ) continue;
         button.disabled = false;
@@ -166,7 +169,17 @@ export function enhancePluginSlot(
             button.disabled = true;
             button.setAttribute("aria-busy", "true");
             try {
-                await dispatch(block.action);
+                await dispatch(
+                    block.kind === "toggle"
+                        ? {
+                            ...block.action,
+                            payload: {
+                                ...block.action.payload,
+                                checked: !block.checked,
+                            },
+                        }
+                        : block.action,
+                );
             } catch {
                 report();
             } finally {

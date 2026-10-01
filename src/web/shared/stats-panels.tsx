@@ -1,10 +1,10 @@
 import type {
+    ModelUsageDto,
     StatsOverviewDto,
     StatsSeriesDto,
     StatsTrendDto,
     StatsTrendMode,
     StatsTrendPointDto,
-    ModelUsageDto,
 } from "@heimdall/admin-contracts";
 import {
     dayTrendPoints,
@@ -194,9 +194,8 @@ export function StatsPanels({ stats, loading = false }: {
                                         class={`trend-mode${
                                             item === mode ? " is-active" : ""
                                         }`}
-                                        disabled={
-                                            !stats?.onModeChange || loading
-                                        }
+                                        disabled={!stats?.onModeChange ||
+                                            loading}
                                         onClick={() =>
                                             stats?.onModeChange?.(item)}
                                     >
@@ -225,8 +224,9 @@ export function StatsPanels({ stats, loading = false }: {
                                             ariaLabel={`用量趋势折线图，按 ${series.timeZone} 自然日统计 ${dayFirst.date} 至 ${dayLast.date} 的输入与输出 Token。`}
                                         />
                                         <p class="ranking-note">
-                                            {dayFirst.date} 至 {dayLast.date}{" "}
-                                            · {series.timeZone}
+                                            {dayFirst.date} 至 {dayLast.date} ·
+                                            {" "}
+                                            {series.timeZone}
                                         </p>
                                         <details class="usage-history">
                                             <summary>
@@ -310,7 +310,23 @@ export function StatsPanels({ stats, loading = false }: {
                                     <>
                                         <TrendChart
                                             points={intervalTrendPoints(trend)}
-                                            ariaLabel={`用量趋势折线图，${bucketWord(trend.bucketMinutes)}统计 ${stamp(trend.series[0]!, trend.mode)} 至 ${stamp(trend.series[trend.series.length - 1]!, trend.mode)} 的输入与输出 Token。`}
+                                            ariaLabel={`用量趋势折线图，${
+                                                bucketWord(trend.bucketMinutes)
+                                            }统计 ${
+                                                stamp(
+                                                    trend.series[0]!,
+                                                    trend.mode,
+                                                )
+                                            } 至 ${
+                                                stamp(
+                                                    trend
+                                                        .series[
+                                                            trend.series
+                                                                .length - 1
+                                                        ]!,
+                                                    trend.mode,
+                                                )
+                                            } 的输入与输出 Token。`}
                                         />
                                         <p class="ranking-note">
                                             {trendNote(trend)}

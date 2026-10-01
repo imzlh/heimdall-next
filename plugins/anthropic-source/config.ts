@@ -13,8 +13,6 @@ export interface AnthropicSourceConfig {
     /** Origin or path prefix; defaults to `https://api.anthropic.com`. */
     readonly baseUrl?: string;
     readonly apiKey?: string;
-    /** Client model name -> upstream model name. */
-    readonly modelMap?: Readonly<Record<string, string>>;
     /** Defaults to `/v1/messages`; must be an absolute path. */
     readonly endpoint?: string;
     /** Additional non-secret headers sent to the upstream. */
@@ -86,20 +84,8 @@ export function validateAnthropicSourceConfig(
         ? DEFAULT_ANTHROPIC_VERSION
         : normalizeVersion(value.anthropicVersion);
 
-    const modelMap: Record<string, string> = {};
-    if (value.modelMap !== undefined) {
-        if (!isPlainRecord(value.modelMap)) {
-            throw new TypeError("modelMap must be an object");
-        }
-        for (
-            const [clientModel, upstreamModel] of Object.entries(value.modelMap)
-        ) {
-            rejectReservedKey(clientModel, "modelMap key");
-            modelMap[nonEmpty(clientModel, "modelMap key")] = nonEmpty(
-                upstreamModel,
-                `modelMap.${clientModel}`,
-            );
-        }
+    if (Object.hasOwn(value, "modelMap")) {
+        throw new TypeError("modelMap belongs to host source settings");
     }
 
     const headers: Record<string, string> = {};
@@ -134,7 +120,6 @@ export function validateAnthropicSourceConfig(
         id,
         baseUrl,
         ...(apiKey === undefined ? {} : { apiKey }),
-        ...(Object.keys(modelMap).length === 0 ? {} : { modelMap }),
         endpoint,
         ...(Object.keys(headers).length === 0 ? {} : { headers }),
         anthropicVersion,
@@ -142,25 +127,15 @@ export function validateAnthropicSourceConfig(
 }
 
 export function advertisedCapabilities(
-    config: AnthropicSourceConfig,
+    _config: AnthropicSourceConfig,
 ): readonly SourceCapability[] {
-    const models = Object.keys(config.modelMap ?? {}).sort();
-    const shared = models.length === 0 ? {} : { models };
     return [
         {
             operation: "generation.create",
-            ...shared,
             streaming: true,
             features: ["tools", "structured_output", "image.input"],
         },
     ];
-}
-
-export function upstreamModel(
-    config: AnthropicSourceConfig,
-    clientModel: string | undefined,
-): string {
-    return config.modelMap?.[clientModel ?? ""] ?? clientModel ?? "";
 }
 
 export function upstreamUrl(config: AnthropicSourceConfig): string {

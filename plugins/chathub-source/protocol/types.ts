@@ -140,7 +140,7 @@ export interface SuggestedResponse extends ChatMessage {
 export interface ChatHubRequest {
     text: string;
     invocationId?: string;
-    /** Upstream engine selector (e.g. Claude_Sonnet_Reasoning); "Magic" when unset. */
+    /** Upstream engine selector (e.g. Gpt_5_6_Reasoning); "Magic" when unset. */
     tone?: string;
     locale?: string;
     timezone?: string;

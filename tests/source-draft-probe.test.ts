@@ -118,7 +118,7 @@ Deno.test("draft probes preserve saved configuration, deliver selected proxy and
             };
         });
     });
-    await using resources = test.resources;
+    await using _resources = test.resources;
     const configStore = test.store.namespace("heimdall", "source-config");
     await configStore.set(["saved-source"], {
         sourcePluginId: pluginId,
@@ -159,7 +159,7 @@ Deno.test("draft probes time out and propagate cancellation even when the plugin
             return new Promise(() => {});
         })
     );
-    await using resources = test.resources;
+    await using _resources = test.resources;
     const result = await probeSourceDraft(input, new AbortController().signal, {
         ...test.dependencies,
         timeoutMs: 5,
@@ -180,7 +180,7 @@ Deno.test("draft probes time out and propagate cancellation even when the plugin
 
 Deno.test("draft probes reject unavailable plugins, invalid presets and unsupported discovery without exposing errors", async () => {
     const test = await fixture((config) => source(config, undefined));
-    await using resources = test.resources;
+    await using _resources = test.resources;
     await assertRejects(
         () =>
             probeSourceDraft(input, new AbortController().signal, {
@@ -278,4 +278,49 @@ Deno.test("draft probe endpoint is authenticated on both prefixes and never crea
         assertEquals(result.probe.ok, true);
         assertEquals(composition.sources.list().length, 0);
     }
+});
+
+Deno.test("draft probes isolate source initialization failures without exposing credentials", async () => {
+    const test = await fixture(() => {
+        throw new TypeError("cannot initialize with private-api-key");
+    });
+    await using _resources = test.resources;
+    const failure = await assertRejects(
+        () =>
+            probeSourceDraft(
+                input,
+                new AbortController().signal,
+                test.dependencies,
+            ),
+        Error,
+        "无法初始化源插件",
+    );
+    assert(!failure.message.includes("private-api-key"));
+    assertEquals((failure as Error & { status: number }).status, 400);
+    assertEquals(
+        (await Array.fromAsync(
+            test.store.namespace("heimdall", "source-config").list(),
+        )).length,
+        0,
+    );
+});
+
+Deno.test("draft probes accept successful connectivity with malformed optional discovery data", async () => {
+    const test = await fixture((config) =>
+        source(config, () =>
+            Promise.resolve({
+                ok: true,
+                message: "connected",
+                // JavaScript plugins can return data which violates their declared type.
+                models: "unexpected text" as unknown as string[],
+            }))
+    );
+    await using _resources = test.resources;
+    const result = await probeSourceDraft(
+        input,
+        new AbortController().signal,
+        test.dependencies,
+    );
+    assertEquals(result.ok, true);
+    assertEquals(result.models, undefined);
 });

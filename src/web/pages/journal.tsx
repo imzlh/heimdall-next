@@ -2,6 +2,10 @@ import type { JournalSnapshot } from "@heimdall/admin-contracts/console.ts";
 import { JournalTable } from "../shared/journal-table.tsx";
 import { journalHref as href } from "../shared/journal-links.ts";
 import { Icon } from "../shared/icons.tsx";
+import {
+    REQUEST_STATUSES,
+    requestState,
+} from "../shared/activity-presentation.ts";
 
 function JsonSection(
     { title, value, open = false }: {
@@ -57,30 +61,32 @@ export function JournalSnapshotView(
                         />
                         <button type="submit">搜索</button>
                     </label>
-                    <label class="journal-status-filter" for="journal-status">
-                        状态
-                        <select
-                            id="journal-status"
-                            name="status"
-                            aria-label="请求状态"
-                        >
-                            {[
-                                ["", "全部状态"],
-                                ["pending", "等待中"],
-                                ["running", "处理中"],
-                                ["completed", "已完成"],
-                                ["error", "失败"],
-                                ["cancelled", "已取消"],
-                            ].map(([value, label]) => (
-                                <option
-                                    value={value}
-                                    selected={value === (snapshot.status ?? "")}
-                                >
-                                    {label}
-                                </option>
-                            ))}
-                        </select>
-                    </label>
+                    <input
+                        type="hidden"
+                        name="status"
+                        value={snapshot.status ?? ""}
+                    />
+                    <nav class="journal-status-pills" aria-label="请求状态">
+                        {["", ...REQUEST_STATUSES].map((value) => (
+                            <a
+                                class={`journal-status-pill${
+                                    value === (snapshot.status ?? "")
+                                        ? " is-active"
+                                        : ""
+                                }`}
+                                aria-current={value === (snapshot.status ?? "")
+                                    ? "true"
+                                    : undefined}
+                                href={href(snapshot, {
+                                    status: value || null,
+                                    cursor: null,
+                                    id: null,
+                                })}
+                            >
+                                {value ? requestState(value).label : "全部状态"}
+                            </a>
+                        ))}
+                    </nav>
                     {(snapshot.q || snapshot.status) && (
                         <a class="secondary-button" href={href({})}>清除筛选</a>
                     )}

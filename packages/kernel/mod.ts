@@ -96,6 +96,12 @@ export type {
     FrameValidationOptions,
     SourceRegistryOptions,
 } from "./sources.ts";
+export type {
+    SourceCooldown,
+    SourceCooldownReason,
+    SourceHealthCheck,
+    SourceHealthSnapshot,
+} from "./source-health.ts";
 export {
     FrameValidationError,
     SourceRegistry,

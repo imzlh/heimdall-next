@@ -86,7 +86,7 @@ async function setup(
     };
 }
 
-Deno.test("journal page begins with SSR data, exposes native filters and preserves pagination controls", async () => {
+Deno.test("journal page begins with SSR data, exposes filters and preserves pagination controls", async () => {
     const test = await setup((url) =>
         Response.json({
             requests: [{
@@ -228,17 +228,23 @@ Deno.test("journal list error retains SSR records and offers retry, status filte
         await test.act(() => button(test.root, "重试").click());
         await test.act();
         assertStringIncludes(test.root.textContent, "暂无请求记录");
-        await test.act(() => {
-            const select = find(test.root, 'select[aria-label="请求状态"]');
-            select.value = "error";
-            select.dispatchEvent(new Event("input"));
-        });
+        await test.act(() =>
+            find(test.root, 'button[aria-label="请求状态"]').click()
+        );
+        await test.act(() =>
+            find(test.root, 'button[data-value="error"]').click()
+        );
         await test.act();
         assertEquals(
             test.requests.at(-1)!.url.searchParams.get("status"),
             "error",
         );
         assertStringIncludes(test.root.textContent, "没有匹配的请求");
+        assertEquals(find(test.root, 'input[name="status"]').value, "error");
+        const toggle = find(test.root, 'button[role="switch"]');
+        assertEquals(toggle.getAttribute("aria-checked"), "true");
+        await test.act(() => toggle.click());
+        assertEquals(toggle.getAttribute("aria-checked"), "false");
     } finally {
         await test.cleanup();
     }

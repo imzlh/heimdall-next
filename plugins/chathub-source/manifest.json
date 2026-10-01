@@ -15,6 +15,37 @@
     "ui": [
         {
             "pluginId": "heimdall.source.chathub",
+            "id": "account-information",
+            "slot": "source.status",
+            "sourcePluginId": "heimdall.source.chathub",
+            "title": "ChatHub 账号信息",
+            "order": -10,
+            "schema": {
+                "blocks": [
+                    {
+                        "kind": "text",
+                        "text": "Microsoft 账号",
+                        "textFrom": ["plugin", "account", "label"]
+                    },
+                    {
+                        "kind": "text",
+                        "text": "尚无额度快照，完成一次对话后更新。",
+                        "textFrom": ["plugin", "account", "summary"]
+                    },
+                    {
+                        "kind": "text",
+                        "text": "尚未获取账号额度",
+                        "textFrom": ["plugin", "account", "updatedSummary"]
+                    }
+                ]
+            },
+            "render": {
+                "kind": "trusted",
+                "modulePath": "/admin/assets/plugins/chathub-account.js"
+            }
+        },
+        {
+            "pluginId": "heimdall.source.chathub",
             "id": "connection-status",
             "slot": "source.status",
             "sourcePluginId": "heimdall.source.chathub",
@@ -29,9 +60,16 @@
                     },
                     {
                         "kind": "metric",
-                        "label": "已发布模型",
+                        "label": "可复用上下文",
                         "value": "—",
-                        "valueFrom": ["source", "modelCount"],
+                        "valueFrom": ["plugin", "runtime", "warmContexts"],
+                        "unit": "个"
+                    },
+                    {
+                        "kind": "metric",
+                        "label": "复用中",
+                        "value": "—",
+                        "valueFrom": ["plugin", "runtime", "busyContexts"],
                         "unit": "个"
                     },
                     {
@@ -85,7 +123,7 @@
                 "type": "string",
                 "name": "models",
                 "label": "模型",
-                "default": "claude-sonnet-reasoning,gpt-5.6-reasoning,gpt-5.5-reasoning",
+                "default": "gpt-5.6-sol,auto",
                 "help": "多个模型用逗号分隔。"
             },
             {

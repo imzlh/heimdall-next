@@ -17,6 +17,7 @@ import {
 import { downloadConversation } from "./chat/export.ts";
 import { MessageEditor } from "./chat/message-editor.tsx";
 import { ConversationBranches } from "./chat/conversation-branches.tsx";
+import { useChatExtensions } from "./chat/extensions.tsx";
 
 function savedTheme(): "light" | "dark" {
     try {
@@ -106,12 +107,7 @@ function ConversationSettings(
         scheduleSettingsSave({ systemPrompt: next });
     }
     function toggleTool(id: string, enable: boolean) {
-        const current = state.conversation?.disabledTools ?? [];
-        const next = enable
-            ? current.filter((item) => item !== id)
-            : [...new Set([...current, id])];
-        if (next.length === current.length) return;
-        void controller.updateSettings(conversationId, { disabledTools: next });
+        void controller.setToolEnabled(id, enable);
     }
     if (!open) return null;
     return (
@@ -220,11 +216,12 @@ function ConversationSettings(
 
 function busy(state: ChatState): boolean {
     return state.loading || state.creating || state.sending ||
-        state.attachmentsBusy || state.managing;
+        state.attachmentsBusy || state.managing || Boolean(state.toolsBusy);
 }
 
 export function ChatApp({ initial }: { initial: ChatInitial }) {
     const { state, controller } = useChat(initial, updateLocation);
+    const plugins = useChatExtensions(initial, controller);
     const [theme, setTheme] = useState(savedTheme);
     const [historyOpen, setHistoryOpen] = useState(false);
     const [collapsed, setCollapsed] = useState(savedCollapsed);
@@ -280,7 +277,29 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
         if (element && followEnd.current) {
             element.scrollTop = element.scrollHeight;
         }
-    }, [state.messages, state.streamText, state.toolCalls]);
+    }, [
+        state.messages,
+        state.streamText,
+        state.streamReasoning,
+        state.streamActivity,
+        state.streamCitations,
+        state.toolCalls,
+    ]);
+    // Blocks that grow taller after the first paint — streaming code blocks,
+    // images finishing load — must keep the newest line in view too. A resize
+    // observer on the thread follows that growth while the user stays pinned to
+    // the bottom, which per-delta state effects alone miss.
+    useEffect(() => {
+        const element = viewport.current;
+        if (!element || typeof ResizeObserver === "undefined") return;
+        const content = element.firstElementChild;
+        if (!content) return;
+        const observer = new ResizeObserver(() => {
+            if (followEnd.current) element.scrollTop = element.scrollHeight;
+        });
+        observer.observe(content);
+        return () => observer.disconnect();
+    }, [state.selectedId]);
     // Ctrl+N opens a new conversation, matching the original chat.
     useEffect(() => {
         const onKey = (event: KeyboardEvent) => {
@@ -548,6 +567,11 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                         </li>
                     )}
                 </ul>
+                {plugins.error && (
+                    <p class="chat-plugin-notice" role="status">
+                        {plugins.error}
+                    </p>
+                )}
                 <div class="chat-sidebar-footer">
                     <button
                         type="button"
@@ -721,7 +745,10 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                             type="button"
                             class="chat-icon-button"
                             disabled={busyState}
-                            onClick={() => void controller.refresh()}
+                            onClick={() => {
+                                void controller.refresh();
+                                void plugins.refresh();
+                            }}
                             aria-label="刷新会话"
                             title="刷新会话"
                         >
@@ -808,9 +835,9 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                         class="chat-jump-latest"
                         onClick={stickToBottom}
                         aria-label="回到最新消息"
+                        title="回到最新"
                     >
-                        <Icon name="arrow-down" size={14} />
-                        回到最新
+                        <Icon name="arrow-down" size={18} />
                     </button>
                 )}
                 <p class="sr-only" role="status" aria-live="polite">
@@ -822,31 +849,10 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                         ? "正在创建会话"
                         : "已就绪"}
                 </p>
-                {state.suggestions.length > 0 && !state.sending && (
-                    <div class="chat-suggestions" aria-label="推荐问题">
-                        {state.suggestions.map((text) => (
-                            <button
-                                key={text}
-                                type="button"
-                                class="chat-suggestion"
-                                title={text}
-                                onClick={() => {
-                                    controller.setDraft(text);
-                                    document.getElementById("chat-draft")
-                                        ?.focus();
-                                }}
-                            >
-                                <Icon
-                                    name="chat"
-                                    size={14}
-                                    class="chat-suggestion-icon"
-                                />
-                                <span>{text}</span>
-                            </button>
-                        ))}
-                    </div>
-                )}
-                <ChatComposer state={state} controller={controller} />
+                <ChatComposer
+                    state={state}
+                    controller={controller}
+                />
             </section>
             {management && (
                 <ConversationDialog

@@ -16,6 +16,9 @@ export interface UiBridgeOptions {
 }
 
 const MAX_REQUEST_BYTES = 1_048_576;
+// Installation carries up to 2 MiB of package JSON plus the bridge envelope.
+const MAX_PACKAGE_BYTES = 2 * 1024 * 1024;
+const MAX_PACKAGE_ENVELOPE_BYTES = MAX_PACKAGE_BYTES + 16_384;
 const MAX_RESPONSE_BYTES = 4_194_304;
 const ROUTES: Readonly<Record<string, readonly string[]>> = {
     "/api/admin/plugins/chathub/auth": ["POST"],
@@ -30,8 +33,10 @@ const ROUTES: Readonly<Record<string, readonly string[]>> = {
     "/api/admin/preset-preview": ["POST"],
     "/api/admin/preset-apply": ["POST"],
     "/api/admin/plugin-state": ["POST"],
+    "/api/admin/plugin-package": ["POST"],
     "/api/admin/plugin": ["DELETE"],
     "/api/admin/source-probe": ["POST"],
+    "/api/admin/source-health/reset": ["POST"],
     "/api/admin/source-draft-probe": ["POST"],
     "/api/admin/settings": ["GET", "PUT"],
     "/api/admin/proxies": ["GET", "PUT"],
@@ -72,7 +77,7 @@ export function createUiBridge(options: UiBridgeOptions) {
             }
             const text = await readBoundedBody(
                 context.req.raw.body,
-                MAX_REQUEST_BYTES,
+                MAX_PACKAGE_ENVELOPE_BYTES,
                 context.req.header("content-length"),
             );
             let input: unknown;
@@ -116,6 +121,17 @@ export function createUiBridge(options: UiBridgeOptions) {
                     "后台不能执行此管理请求。",
                 );
             }
+            const packageInstall = url.pathname === "/api/admin/plugin-package";
+            if (
+                !packageInstall &&
+                new TextEncoder().encode(text).length > MAX_REQUEST_BYTES
+            ) {
+                throw new WebRequestError(
+                    413,
+                    "payload_too_large",
+                    "管理请求不能超过 1 MiB。",
+                );
+            }
             // Surface the resolved target in the access log; the bridge path
             // itself (`POST /admin/ui/request`) says nothing about the op.
             context.set("accessLogTarget", `${method} ${url.pathname}`);
@@ -137,6 +153,16 @@ export function createUiBridge(options: UiBridgeOptions) {
             let body: string | undefined;
             if (input.body !== undefined) {
                 body = JSON.stringify(input.body);
+                if (
+                    packageInstall &&
+                    new TextEncoder().encode(body).length > MAX_PACKAGE_BYTES
+                ) {
+                    throw new WebRequestError(
+                        413,
+                        "payload_too_large",
+                        "插件包不能超过 2 MiB。",
+                    );
+                }
                 headers.set("content-type", "application/json");
             }
             headers.set("accept", "application/json");

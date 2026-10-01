@@ -4,7 +4,9 @@
  */
 
 import type { SourceProxySelection, SourceProxySummary } from "./proxies.ts";
+import type { UiJsonObject } from "./ui.ts";
 export type * from "./journal.ts";
+export type { SourceModelMap } from "./source-model-map.ts";
 
 export type {
     ProxyEntryView,
@@ -97,6 +99,7 @@ export interface CreateSourceInput {
     readonly name: string;
     readonly priority: number;
     readonly proxy?: SourceProxySelection;
+    readonly modelMap?: import("./source-model-map.ts").SourceModelMap;
     readonly sourcePluginId: string;
     readonly presetId?: string;
     readonly config: unknown;
@@ -108,6 +111,7 @@ export interface UpdateSourceInput {
     readonly priority?: number;
     readonly enabled?: boolean;
     readonly proxy?: SourceProxySelection;
+    readonly modelMap?: import("./source-model-map.ts").SourceModelMap;
 }
 
 export interface SourceDto {
@@ -115,6 +119,7 @@ export interface SourceDto {
     readonly name?: string;
     readonly priority?: number;
     readonly proxy?: SourceProxySelection;
+    readonly modelMap?: import("./source-model-map.ts").SourceModelMap;
     readonly proxySummary?: SourceProxySummary;
     readonly sourcePluginId?: string;
     readonly enabled: boolean;
@@ -125,8 +130,11 @@ export interface SourceDto {
     readonly versionstamp?: string;
     readonly models?: readonly string[];
     readonly capabilities?: readonly string[];
-    /** Present only while the source is cooling down after an upstream failure. */
+    /** Routing eligibility; ready does not assert a successful upstream probe. */
     readonly health?: "ready" | "cooldown";
+    readonly cooldown?: import("./source-health.ts").SourceCooldownDto;
+    /** Validated, redacted UI state supplied by this source's plugin. */
+    readonly ui?: UiJsonObject;
     /** Present after an operator probe has been recorded for this source. */
     readonly probe?: {
         readonly ok: boolean;

@@ -62,6 +62,21 @@ function SchemaBlock({ block, index }: { block: UiBlock; index: number }) {
                     {block.label}
                 </button>
             );
+        case "toggle":
+            return (
+                <button
+                    type="button"
+                    class="slot-toggle"
+                    role="switch"
+                    aria-checked={block.checked ? "true" : "false"}
+                    data-ui-action-index={index}
+                    disabled
+                    title="交互加载后可用"
+                >
+                    <span>{block.label}</span>
+                    <span class="slot-toggle-track" aria-hidden="true" />
+                </button>
+            );
     }
 }
 
@@ -108,7 +123,7 @@ export function PluginSlot({ contribution, context, policy }: PluginSlotProps) {
             <div class="slot-mount" data-ui-mount="" hidden />
             <p class="slot-notice" data-ui-notice="" role="status" hidden />
             {contribution.schema.blocks.some((block) =>
-                block.kind === "action"
+                block.kind === "action" || block.kind === "toggle"
             ) && (
                 <noscript>
                     <p class="slot-notice">

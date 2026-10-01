@@ -21,26 +21,12 @@ export interface ChatResponseCitation {
     readonly ref?: string;
 }
 
-/** One capability's remaining allowance, shown in the account quota card. */
-export interface ChatResponseQuotaMeter {
-    readonly name: string;
-    readonly remaining?: number;
-    readonly blocked?: boolean;
-    readonly error?: string;
-}
-
-/** Per-turn account quota snapshot carried on the usage event's extensions. */
-export interface ChatResponseQuota {
-    readonly meters: readonly ChatResponseQuotaMeter[];
-}
-
 /** Keep provider reasoning and tool arguments out of the visible chat reply. */
 export class ChatResponse {
     text = "";
     #title = "";
     #suggestions: string[] = [];
     #reasoning = "";
-    #quota: ChatResponseQuota | undefined;
     readonly #images: ChatResponseImage[] = [];
     readonly #activity: ChatResponseActivity[] = [];
     readonly #citations: ChatResponseCitation[] = [];
@@ -69,11 +55,6 @@ export class ChatResponse {
     /** Sources the reply cited, empty when none were streamed. */
     get citations(): readonly ChatResponseCitation[] {
         return this.#citations;
-    }
-
-    /** Per-turn account quota snapshot, or undefined when none was reported. */
-    get quota(): ChatResponseQuota | undefined {
-        return this.#quota;
     }
 
     /** Provider-suggested conversation title, or "" when none was streamed. */
@@ -172,12 +153,6 @@ export class ChatResponse {
                         ? previous?.argumentsText ?? ""
                         : JSON.stringify(event.arguments)),
             });
-        } else if (event.kind === "usage") {
-            // The account quota snapshot rides on the usage event's extensions
-            // (a HIP-native channel, not a chat-only bypass); surface it so the
-            // reply can show the remaining message/image allowance.
-            const quota = readQuota(event.usage.extensions?.quota);
-            if (quota) this.#quota = quota;
         }
         this.text += delta;
         return delta;
@@ -195,26 +170,4 @@ function statusSummary(value: unknown): string | undefined {
     return typeof summary === "string" && summary.trim().length > 0
         ? summary.trim()
         : undefined;
-}
-
-/** Validate the quota object carried on `usage.extensions.quota`. */
-function readQuota(value: unknown): ChatResponseQuota | undefined {
-    if (typeof value !== "object" || value === null) return undefined;
-    const meters = (value as { meters?: unknown }).meters;
-    if (!Array.isArray(meters)) return undefined;
-    const parsed: ChatResponseQuotaMeter[] = [];
-    for (const entry of meters) {
-        if (typeof entry !== "object" || entry === null) continue;
-        const meter = entry as Record<string, unknown>;
-        if (typeof meter.name !== "string" || meter.name.length === 0) continue;
-        parsed.push({
-            name: meter.name,
-            ...(typeof meter.remaining === "number"
-                ? { remaining: meter.remaining }
-                : {}),
-            ...(meter.blocked === true ? { blocked: true } : {}),
-            ...(typeof meter.error === "string" ? { error: meter.error } : {}),
-        });
-    }
-    return parsed.length > 0 ? { meters: parsed } : undefined;
 }

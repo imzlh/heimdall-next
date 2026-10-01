@@ -58,6 +58,8 @@ Deno.test("runtime settings persist without returning the proxy key", async () =
             limitPerMinute: 15,
             probeIntervalMs: 300_000,
             titleModel: "",
+            requestRetentionDays: 0,
+            chatRetentionDays: 0,
         });
         assertEquals(JSON.stringify(saved).includes("stored-key"), false);
         assertEquals(settings.get().proxyKey, "stored-key");

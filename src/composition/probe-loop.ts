@@ -1,8 +1,6 @@
 import type { SourceRegistry } from "@heimdall/kernel";
 import type { SourceProbeResult } from "@heimdall/contracts";
 
-const latestProbes = new WeakMap<SourceRegistry, Map<string, symbol>>();
-
 /** Run the same bounded probe for periodic checks and operator-triggered checks. */
 export async function probeSource(
     sources: SourceRegistry,
@@ -22,10 +20,7 @@ export async function probeSource(
     options.signal?.throwIfAborted();
     const source = sources.get(sourceId);
     if (!source?.probe) return;
-    let probes = latestProbes.get(sources);
-    if (!probes) latestProbes.set(sources, probes = new Map());
-    const token = Symbol();
-    probes.set(sourceId, token);
+    const healthCheck = sources.beginHealthCheck(sourceId);
     const controller = new AbortController();
     const signal = options.signal
         ? AbortSignal.any([options.signal, controller.signal])
@@ -62,16 +57,13 @@ export async function probeSource(
             };
         }
         options.signal?.throwIfAborted();
-        // A removed/reconfigured channel or a newer probe owns its current status.
-        if (
-            sources.get(sourceId) !== source || probes.get(sourceId) !== token
-        ) return;
-        sources.recordProbe(sourceId, result);
+        // Removed/reconfigured sources and newer completed checks invalidate this result.
+        if (sources.get(sourceId) !== source) return;
+        if (!sources.recordProbe(sourceId, result, healthCheck)) return;
         return result;
     } finally {
         clearTimeout(timer);
         if (aborted) signal.removeEventListener("abort", aborted);
-        if (probes.get(sourceId) === token) probes.delete(sourceId);
     }
 }
 

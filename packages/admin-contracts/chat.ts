@@ -1,4 +1,5 @@
 /** JSON-only chat presentation and transport records, shared by SSR and islands. */
+import type { ChatExtensions } from "./chat-ui.ts";
 export interface ChatConversation {
     id: string;
     title: string;
@@ -66,8 +67,6 @@ export interface ChatMessage {
     activity?: ChatActivity[];
     /** Sources the answer cited. */
     citations?: ChatCitation[];
-    /** Per-turn account quota snapshot shown as an info card with the reply. */
-    quota?: ChatQuota;
 }
 
 /** A one-line cloud-activity status (search, tool, etc.) shown with a reply. */
@@ -84,19 +83,6 @@ export interface ChatCitation {
      * letting the answer link each badge to the source it cites.
      */
     ref?: string;
-}
-
-/** One capability's remaining allowance, shown in the account quota card. */
-export interface ChatQuotaMeter {
-    name: string;
-    remaining?: number;
-    blocked?: boolean;
-    error?: string;
-}
-
-/** Per-turn account quota snapshot (message/image allowances) with the reply. */
-export interface ChatQuota {
-    meters: ChatQuotaMeter[];
 }
 
 export interface ChatToolCall {
@@ -139,7 +125,6 @@ export type ChatEvent =
     | { type: "reasoning"; text: string }
     | { type: "activity"; items: ChatActivity[] }
     | { type: "citations"; items: ChatCitation[] }
-    | { type: "quota"; quota: ChatQuota }
     | { type: "tool"; calls: ChatToolCall[] }
     | { type: "suggestions"; items: string[] }
     | { type: "done"; conversation?: ChatConversation }
@@ -154,6 +139,8 @@ export interface ChatInitial {
     selectedModel?: string;
     /** Tool plugins the settings popover can toggle for this conversation. */
     tools?: readonly ChatToolInfo[];
+    /** Host-selected Chat slots; execution still requires the host UI policy. */
+    extensions?: ChatExtensions;
     error?: string;
     authenticated: boolean;
     available: boolean;

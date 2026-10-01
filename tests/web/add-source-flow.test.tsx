@@ -84,15 +84,23 @@ function PluginFixture({ draft, controls, lifecycle, onProbe }: {
                 },
                 presetId: draft.presetId!,
                 sourcePluginId,
+                ...(draft.modelMap ? { modelMap: draft.modelMap } : {}),
             },
             () => Promise.resolve({ mount }),
             {
                 onSubmit: controls.onSave,
+                onModelMapChange: controls.onModelMapChange,
                 onPreview: () => Promise.resolve(),
                 ...(onProbe
                     ? {
-                        onProbe: (config, signal) =>
-                            onProbe({ draft, sourcePluginId, config }, signal),
+                        onProbe: (config, signal, modelMap) =>
+                            onProbe({
+                                draft: modelMap === undefined
+                                    ? draft
+                                    : { ...draft, modelMap },
+                                sourcePluginId,
+                                config,
+                            }, signal),
                     }
                     : {}),
             },
@@ -230,6 +238,52 @@ Deno.test("source creation keeps one dialog while switching preset JSX and custo
         assertEquals(test.storageWrites, []);
     } finally {
         await test.dispose();
+    }
+});
+
+Deno.test("basic model mappings validate before advancing and survive preset and custom navigation", async () => {
+    for (const choice of ["自定义配置", "NewAPI"]) {
+        const test = await setup();
+        try {
+            await test.act(() => button(test.dialog, "添加模型映射").click());
+            await test.details();
+            assert(test.dialog.textContent.includes("请填写每行"));
+            const alias = find(test.dialog, 'input[name="model-alias-0"]');
+            assertEquals(alias.getAttribute("aria-invalid"), "true");
+            await test.act(() => input(alias, " fast "));
+            await test.act(() =>
+                input(
+                    find(test.dialog, 'input[name="model-upstream-0"]'),
+                    " provider-fast ",
+                )
+            );
+            await test.act(() => button(test.dialog, "下一步").click());
+            await test.act(() => button(test.dialog, choice).click());
+            await test.act(() => button(test.dialog, "上一步").click());
+            await test.act(() => button(test.dialog, "上一步").click());
+            assertEquals(
+                find(test.dialog, 'input[name="model-alias-0"]').value,
+                " fast ",
+            );
+            await test.act(() => button(test.dialog, "下一步").click());
+            await test.act(() => button(test.dialog, choice).click());
+            await test.act(() =>
+                input(
+                    find(test.dialog, 'input[name="baseUrl"]'),
+                    "https://provider.example/v1",
+                )
+            );
+            await test.act(() => button(test.dialog, "保存渠道").click());
+            assertEquals(test.saved[0]?.draft.modelMap, {
+                fast: "provider-fast",
+            });
+            assertEquals(test.saved[0]?.draft.priority, 17);
+            assertEquals(test.saved[0]?.config.modelMap, undefined);
+            assertEquals(test.navigation, []);
+            assertEquals(test.dialog.showModalCalls, 1);
+        } finally {
+            await test.dispose();
+        }
     }
 });
 
@@ -550,12 +604,13 @@ Deno.test("custom draft tests current input, retries in place and saves selected
             "true",
         );
         assertEquals(
-            JSON.parse(find(test.dialog, 'textarea[name="modelMap"]').value),
-            { "model-a": "model-a" },
+            test.dialog.querySelector('textarea[name="modelMap"]'),
+            null,
         );
         assertStrictEquals(find(test.root, "dialog"), test.dialog);
         await test.act(() => button(test.dialog, "保存渠道").click());
-        assertEquals(test.saved[0]?.config.modelMap, { "model-a": "model-a" });
+        assertEquals(test.saved[0]?.draft.modelMap, { "model-a": "model-a" });
+        assertEquals(test.saved[0]?.config.modelMap, undefined);
         assertEquals(test.navigation, []);
         assertEquals(test.storageWrites, []);
     } finally {
@@ -656,14 +711,211 @@ Deno.test("NewAPI preset JSX tests and selects models through host JSON actions 
             button(test.dialog, "preset-model").getAttribute("aria-pressed"),
             "true",
         );
+        await test.act(() => button(test.dialog, "校验配置").click());
+        assert(test.dialog.textContent.includes("连接正常"));
+        assertEquals(
+            button(test.dialog, "preset-model").getAttribute("aria-pressed"),
+            "true",
+        );
         assertStrictEquals(find(test.root, "dialog"), test.dialog);
         await test.act(() => button(test.dialog, "保存渠道").click());
-        assertEquals(test.saved[0]?.config.modelMap, {
+        assertEquals(test.saved[0]?.draft.modelMap, {
             "preset-model": "preset-model",
         });
+        assertEquals(test.saved[0]?.config.modelMap, undefined);
         assertEquals(test.closes, 1);
         assertEquals(test.navigation, []);
         assertEquals(test.storageWrites, []);
+    } finally {
+        await test.dispose();
+    }
+});
+
+Deno.test("preset model discovery immediately updates basic mapping rows without remounting or persisting credentials", async () => {
+    const test = await setup({
+        onProbe: () =>
+            Promise.resolve({
+                ok: true,
+                message: "连接正常",
+                checkedAt: new Date().toISOString(),
+                models: ["preset-model"],
+            }),
+    });
+    try {
+        await test.details();
+        await test.act(() => button(test.dialog, "NewAPI").click());
+        await test.act(() =>
+            input(
+                find(test.dialog, 'input[name="baseUrl"]'),
+                "https://preset.example/v1",
+            )
+        );
+        await test.act(() =>
+            input(find(test.dialog, 'input[name="apiKey"]'), "memory-only-key")
+        );
+        await test.act(() => button(test.dialog, "测试连接").click());
+        await test.act(() => button(test.dialog, "preset-model").click());
+        assertEquals(test.lifecycle.mounts, 1);
+        assertEquals(
+            find(test.dialog, 'input[name="apiKey"]').value,
+            "memory-only-key",
+        );
+        await test.act(() => button(test.dialog, "上一步").click());
+        await test.act(() => button(test.dialog, "上一步").click());
+        assertEquals(
+            find(test.dialog, 'input[name="model-alias-0"]').value,
+            "preset-model",
+        );
+        await test.act(() =>
+            input(find(test.dialog, 'input[name="model-alias-0"]'), "fast")
+        );
+        await test.act(() => button(test.dialog, "下一步").click());
+        await test.act(() => button(test.dialog, "NewAPI").click());
+        assertEquals(find(test.dialog, 'input[name="apiKey"]').value, "");
+        await test.act(() =>
+            input(
+                find(test.dialog, 'input[name="baseUrl"]'),
+                "https://preset.example/v1",
+            )
+        );
+        await test.act(() => button(test.dialog, "保存渠道").click());
+        assertEquals(test.saved[0]?.draft.modelMap, { fast: "preset-model" });
+        assertEquals(test.saved[0]?.config.modelMap, undefined);
+        assertEquals(test.storageWrites, []);
+    } finally {
+        await test.dispose();
+    }
+});
+
+Deno.test("failed draft probes require an explicit skip save and keep configuration inside the dialog", async () => {
+    for (const mode of ["自定义配置", "NewAPI"]) {
+        for (const rejected of [false, true]) {
+            const test = await setup({
+                onProbe: () =>
+                    rejected
+                        ? Promise.reject(new Error("服务暂时不可用"))
+                        : Promise.resolve({
+                            ok: false,
+                            message: "连接失败，请检查地址",
+                            checkedAt: new Date().toISOString(),
+                        }),
+            });
+            try {
+                await test.details();
+                await test.act(() => button(test.dialog, mode).click());
+                await test.act(() =>
+                    input(
+                        find(test.dialog, 'input[name="baseUrl"]'),
+                        "https://provider.example/v1",
+                    )
+                );
+                await test.act(() =>
+                    input(
+                        find(test.dialog, 'input[name="apiKey"]'),
+                        "draft-secret",
+                    )
+                );
+                await test.act(() => button(test.dialog, "测试连接").click());
+                if (mode === "NewAPI") {
+                    await test.act(() =>
+                        button(test.dialog, "校验配置").click()
+                    );
+                }
+                assert(test.dialog.textContent.includes("连接测试未通过"));
+                assert(!button(test.dialog, "重新测试连接").disabled);
+                assertEquals(test.saved, []);
+                assertStrictEquals(find(test.root, "dialog"), test.dialog);
+                await test.act(() =>
+                    button(test.dialog, "跳过测试并保存").click()
+                );
+                assertEquals(test.saved.length, 1);
+                assertEquals(test.saved[0]?.config.apiKey, "draft-secret");
+                assertEquals(
+                    test.saved[0]?.config.baseUrl,
+                    "https://provider.example/v1",
+                );
+                assertEquals(test.closes, 1);
+                assertEquals(test.navigation, []);
+                assertEquals(test.storageWrites, []);
+            } finally {
+                await test.dispose();
+            }
+        }
+    }
+});
+
+Deno.test("a same-tick save cannot race a draft probe before the disabled state renders", async () => {
+    let resolve!: (
+        value: { ok: boolean; message: string; checkedAt: string },
+    ) => void;
+    const test = await setup({
+        onProbe: () => new Promise((done) => resolve = done),
+    });
+    try {
+        await test.details();
+        await test.act(() => button(test.dialog, "自定义配置").click());
+        await test.act(() =>
+            input(
+                find(test.dialog, 'input[name="baseUrl"]'),
+                "https://provider.example/v1",
+            )
+        );
+        await test.act(() => {
+            button(test.dialog, "测试连接").click();
+            button(test.dialog, "保存渠道").click();
+        });
+        assertEquals(test.saved, []);
+        assert(button(test.dialog, "保存渠道").disabled);
+        resolve({
+            ok: true,
+            message: "连接正常",
+            checkedAt: new Date().toISOString(),
+        });
+        await test.act();
+        await test.act(() => button(test.dialog, "保存渠道").click());
+        assertEquals(test.saved.length, 1);
+    } finally {
+        resolve?.({
+            ok: false,
+            message: "结束测试",
+            checkedAt: new Date().toISOString(),
+        });
+        await test.dispose();
+    }
+});
+
+Deno.test("preset connection results survive save errors and are cleared when credentials change", async () => {
+    const test = await setup({
+        onProbe: () =>
+            Promise.resolve({
+                ok: true,
+                message: "连接正常",
+                checkedAt: new Date().toISOString(),
+                models: ["discovered-model"],
+            }),
+        onSave: () => Promise.reject(new Error("save failed")),
+    });
+    try {
+        await test.details();
+        await test.act(() => button(test.dialog, "NewAPI").click());
+        await test.act(() =>
+            input(
+                find(test.dialog, 'input[name="baseUrl"]'),
+                "https://provider.example/v1",
+            )
+        );
+        await test.act(() => button(test.dialog, "测试连接").click());
+        await test.act(() => button(test.dialog, "保存渠道").click());
+        assert(test.dialog.textContent.includes("保存失败"));
+        assert(test.dialog.textContent.includes("连接正常"));
+        assert(!button(test.dialog, "discovered-model").disabled);
+        await test.act(() =>
+            input(find(test.dialog, 'input[name="apiKey"]'), "new-secret")
+        );
+        assert(!test.dialog.textContent.includes("连接正常"));
+        assert(!test.dialog.textContent.includes("discovered-model"));
+        assert(test.dialog.textContent.includes("尚未测试连接"));
+        assertEquals(test.closes, 0);
     } finally {
         await test.dispose();
     }

@@ -5,11 +5,7 @@ import type {
     OperationRequest,
 } from "@heimdall/contracts";
 import { bytesToBase64 } from "@heimdall/contracts";
-import {
-    type AnthropicSourceConfig,
-    SAFE_FORWARD_FIELDS,
-    upstreamModel,
-} from "./config.ts";
+import { type AnthropicSourceConfig, SAFE_FORWARD_FIELDS } from "./config.ts";
 import { AnthropicUpstreamError } from "./errors.ts";
 import { isRecord, type WireObject } from "./types.ts";
 
@@ -35,16 +31,21 @@ export function generationPayload(input: OperationRequest): GenerateRequest {
             status: 500,
         });
     }
-    return payload as unknown as GenerateRequest;
+    return {
+        ...payload,
+        ...(input.traits.model === undefined
+            ? {}
+            : { model: input.traits.model }),
+    } as unknown as GenerateRequest;
 }
 
 /** Convert the canonical generation request to Anthropic Messages JSON. */
 export function toWireRequest(
     request: GenerateRequest,
-    config: AnthropicSourceConfig,
+    _config: AnthropicSourceConfig,
 ): WireObject {
     const body: WireObject = {
-        model: upstreamModel(config, request.model),
+        model: request.model ?? "",
         messages: toWireMessages(request.messages),
         max_tokens: maxTokens(request),
         stream: request.stream === true,

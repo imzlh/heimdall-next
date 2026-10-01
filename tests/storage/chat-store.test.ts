@@ -94,12 +94,6 @@ Deno.test("assistant reasoning, activity and citations persist across reopen", a
             reasoning: "先想想再查证。",
             activity: [{ summary: "🔍 搜索：北京 天气" }],
             citations: [{ label: "天气来源", url: "https://ref.example/a" }],
-            quota: {
-                meters: [
-                    { name: "LLMOnly", remaining: 100 },
-                    { name: "ImageGeneration", remaining: 0, blocked: true },
-                ],
-            },
         };
         store.addMessage(reply);
         store.close();
@@ -113,12 +107,58 @@ Deno.test("assistant reasoning, activity and citations persist across reopen", a
             label: "天气来源",
             url: "https://ref.example/a",
         }]);
-        assertEquals(stored?.quota, {
-            meters: [
-                { name: "LLMOnly", remaining: 100 },
-                { name: "ImageGeneration", remaining: 0, blocked: true },
-            ],
-        });
+    } finally {
+        store.close();
+        await Deno.remove(directory, { recursive: true });
+    }
+});
+
+Deno.test("chat history ignores an existing provider quota column and writes new replies", async () => {
+    const directory = await Deno.makeTempDir({
+        prefix: "heimdall-chat-legacy-meta-",
+    });
+    const path = `${directory}/chat.sqlite`;
+    let store = openSqliteChatStore(path);
+    try {
+        const time = "2026-09-29T00:00:00.000Z";
+        const conversation = store.createConversation("Legacy metadata", time);
+        const reply: ChatMessageRecord = {
+            id: "legacy-reply",
+            conversationId: conversation.id,
+            role: "assistant",
+            text: "A readable reply",
+            createdAt: time,
+        };
+        store.addMessage(reply);
+        store.close();
+        const database = new DatabaseSync(path);
+        try {
+            const columns = database.prepare("PRAGMA table_info(messages)")
+                .all().map((column) => column.name);
+            assertEquals(columns.includes("quota"), false);
+            database.exec("ALTER TABLE messages ADD COLUMN quota TEXT");
+            database.prepare("UPDATE messages SET quota=? WHERE id=?").run(
+                JSON.stringify({ meters: [{ name: "sample", remaining: 50 }] }),
+                reply.id,
+            );
+        } finally {
+            database.close();
+        }
+        store = openSqliteChatStore(path);
+        assertEquals(store.listMessages(conversation.id), [{
+            ...reply,
+            parentId: null,
+        }]);
+        const next: ChatMessageRecord = {
+            ...reply,
+            id: "new-reply",
+            text: "A new reply",
+        };
+        store.addMessage(next);
+        assertEquals(store.listMessages(conversation.id), [
+            { ...reply, parentId: null },
+            { ...next, parentId: reply.id },
+        ]);
     } finally {
         store.close();
         await Deno.remove(directory, { recursive: true });

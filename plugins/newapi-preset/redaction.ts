@@ -21,7 +21,6 @@ export function redactNewApiSourceConfig(
         id: value.id,
         baseUrl: value.baseUrl,
         endpoint: value.endpoint,
-        ...(value.modelMap === undefined ? {} : { modelMap: value.modelMap }),
         ...(Object.keys(safeHeaders).length === 0
             ? {}
             : { headers: safeHeaders }),
@@ -43,9 +42,6 @@ export function redactNewApiPresetApplication(
         baseUrl: stringValue(config.baseUrl, ""),
         endpoint: stringValue(config.endpoint, "/chat/completions"),
         ...(typeof config.apiKey === "string" ? { apiKey: config.apiKey } : {}),
-        ...(isRecord(config.modelMap)
-            ? { modelMap: stringRecord(config.modelMap) }
-            : {}),
         ...(isRecord(config.headers)
             ? { headers: stringRecord(config.headers) }
             : {}),

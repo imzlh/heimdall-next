@@ -3,8 +3,8 @@ import type {
     ChatConversation,
     ChatInitial,
     ChatMessage,
-    ChatToolInfo,
 } from "@heimdall/admin-contracts/chat.ts";
+import { projectChatTools } from "@heimdall/admin-contracts/chat-ui.ts";
 import type { AdminDispatch } from "./bridge.ts";
 import { readBoundedBody } from "./request.ts";
 import { chatAttachmentUrl } from "../shared/chat-view.ts";
@@ -179,41 +179,6 @@ export async function loadChatSnapshot(
                 }
             }
         }
-        const quota = ((): {
-            meters: {
-                name: string;
-                remaining?: number;
-                blocked?: boolean;
-                error?: string;
-            }[];
-        } | undefined => {
-            const q = record(input.quota);
-            if (!q || !Array.isArray(q.meters)) return undefined;
-            const meters: {
-                name: string;
-                remaining?: number;
-                blocked?: boolean;
-                error?: string;
-            }[] = [];
-            for (const value of q.meters.slice(0, 12)) {
-                const item = record(value);
-                if (!item || typeof item.name !== "string" || !item.name) {
-                    continue;
-                }
-                meters.push({
-                    name: string(item.name, 120),
-                    ...(typeof item.remaining === "number" &&
-                            Number.isFinite(item.remaining)
-                        ? { remaining: item.remaining }
-                        : {}),
-                    ...(item.blocked === true ? { blocked: true } : {}),
-                    ...(typeof item.error === "string" && item.error
-                        ? { error: string(item.error, 200) }
-                        : {}),
-                });
-            }
-            return meters.length ? { meters } : undefined;
-        })();
         const branch = record(input.branch);
         const branchIds = Array.isArray(branch?.messageIds) &&
                 branch.messageIds.length <= 10_000 &&
@@ -275,7 +240,6 @@ export async function loadChatSnapshot(
                 : {}),
             ...(activity.length ? { activity } : {}),
             ...(citations.length ? { citations } : {}),
-            ...(quota ? { quota } : {}),
         };
     };
     const read = async (
@@ -355,21 +319,13 @@ export async function loadChatSnapshot(
         ? plugins.plugins
         : [];
     if (pluginDtos.length) {
-        initial.tools = pluginDtos.slice(0, 32).map((value) => {
-            const dto = record(value);
-            if (!dto || dto.kind !== "tool" || dto.enabled !== true) return;
-            const id = string(dto.id, 128);
-            if (!id) return;
-            const tool: ChatToolInfo = {
-                id,
-                name: string(dto.name, 128) || id,
-                ...(typeof dto.description === "string" &&
-                        dto.description.length > 0
-                    ? { description: string(dto.description, 512) }
-                    : {}),
-            };
-            return tool;
-        }).filter((value): value is ChatToolInfo => value !== undefined);
+        initial.tools = projectChatTools(pluginDtos).map((tool) => ({
+            id: string(tool.id, 80),
+            name: string(tool.name, 128),
+            ...(tool.description
+                ? { description: string(tool.description, 512) }
+                : {}),
+        }));
     }
     initial.selectedModel =
         options.selectedModel && initial.models.includes(options.selectedModel)

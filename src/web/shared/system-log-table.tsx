@@ -64,7 +64,9 @@ export function SystemLogLedger(
                         </div>
                         <span
                             class="system-log-scope"
-                            title={count > 1 ? `连续 ${count} 条相同事件` : undefined}
+                            title={count > 1
+                                ? `连续 ${count} 条相同事件`
+                                : undefined}
                         >
                             {head.scope}
                             {count > 1 && (

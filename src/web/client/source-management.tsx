@@ -7,6 +7,14 @@ import type {
 } from "@heimdall/admin-contracts/proxies.ts";
 import { sourceProxyValue } from "../shared/proxy-presentation.ts";
 import { SourceProxySelect } from "./source-proxy-select.tsx";
+import type { SourceModelMap } from "@heimdall/admin-contracts/source-model-map.ts";
+import {
+    readSourceModelMapRows,
+    sameSourceModelMap,
+    SourceModelMapEditor,
+    type SourceModelMapRow,
+    sourceModelMapRows,
+} from "./forms/source-model-map.tsx";
 import {
     AdminApiError,
     deleteSource,
@@ -55,13 +63,18 @@ export function SourceManagementDialog(
     const [proxy, setProxy] = useState<SourceProxySelection>(
         source.proxy ?? { mode: "inherit" },
     );
+    const [modelRows, setModelRows] = useState<readonly SourceModelMapRow[]>(
+        sourceModelMapRows(source.modelMap),
+    );
     const [view, setView] = useState<"edit" | "delete">("edit");
     const [action, setAction] = useState<"save" | "delete" | "reload" | "">("");
     const [closing, setClosing] = useState(false);
     const [error, setError] = useState("");
     const [conflict, setConflict] = useState(false);
     const [notice, setNotice] = useState("");
-    const [errorField, setErrorField] = useState<"name" | "priority" | "">("");
+    const [errorField, setErrorField] = useState<
+        "name" | "priority" | "modelMap" | ""
+    >("");
     const busy = Boolean(action) || closing;
 
     useEffect(() => {
@@ -140,6 +153,7 @@ export function SourceManagementDialog(
             name?: string;
             priority?: number;
             proxy?: SourceProxySelection;
+            modelMap?: SourceModelMap;
         } = {};
         if (kind === "save") {
             if (!name.trim() || name.trim().length > 120) {
@@ -162,6 +176,16 @@ export function SourceManagementDialog(
             }
             if (sourceProxyValue(proxy) !== sourceProxyValue(baseline.proxy)) {
                 changes.proxy = proxy;
+            }
+            try {
+                const modelMap = readSourceModelMapRows(modelRows);
+                if (!sameSourceModelMap(modelMap, baseline.modelMap)) {
+                    changes.modelMap = modelMap;
+                }
+            } catch (cause) {
+                setError(describeError(cause));
+                setErrorField("modelMap");
+                return;
             }
             if (!Object.keys(changes).length) {
                 close();
@@ -187,6 +211,18 @@ export function SourceManagementDialog(
                     sourceProxyValue(proxy) === sourceProxyValue(baseline.proxy)
                 ) {
                     setProxy(latest.proxy ?? { mode: "inherit" });
+                }
+                try {
+                    if (
+                        sameSourceModelMap(
+                            readSourceModelMapRows(modelRows),
+                            baseline.modelMap,
+                        )
+                    ) {
+                        setModelRows(sourceModelMapRows(latest.modelMap));
+                    }
+                } catch {
+                    /* Preserve incomplete operator edits while reloading the revision. */
                 }
                 setBaseline(latest);
                 setConflict(false);
@@ -314,6 +350,19 @@ export function SourceManagementDialog(
                             pool={proxyPool}
                             disabled={busy || conflict}
                             onChange={setProxy}
+                        />
+                        <SourceModelMapEditor
+                            rows={modelRows}
+                            idPrefix="source-management-model-map"
+                            disabled={busy || conflict}
+                            invalid={errorField === "modelMap"}
+                            onChange={(rows) => {
+                                setModelRows(rows);
+                                if (errorField === "modelMap") {
+                                    setErrorField("");
+                                    setError("");
+                                }
+                            }}
                         />
                         {renderFeedback()}
                         <div class="config-actions source-management-actions">

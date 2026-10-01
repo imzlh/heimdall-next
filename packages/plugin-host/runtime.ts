@@ -72,11 +72,36 @@ export class InMemoryPluginRecordStore implements PluginRecordStore {
     }
 
     put(record: PluginRecord): Promise<void> {
-        this.#records.set(record.manifest.id, cloneRecord(record));
+        const previous = this.#records.get(record.manifest.id);
+        if (previous?.revision !== record.revision) {
+            return Promise.reject(
+                lifecycleError(
+                    "revision_conflict",
+                    record.manifest.id,
+                    "record changed before lifecycle update",
+                ),
+            );
+        }
+        this.#records.set(
+            record.manifest.id,
+            cloneRecord({ ...record, revision: crypto.randomUUID() }),
+        );
         return Promise.resolve();
     }
 
-    delete(id: string): Promise<void> {
+    delete(id: string, expectedRevision?: string): Promise<void> {
+        if (
+            expectedRevision !== undefined &&
+            this.#records.get(id)?.revision !== expectedRevision
+        ) {
+            return Promise.reject(
+                lifecycleError(
+                    "revision_conflict",
+                    id,
+                    "record changed before uninstall",
+                ),
+            );
+        }
         this.#records.delete(id);
         return Promise.resolve();
     }
@@ -109,7 +134,14 @@ function trustedIds(options: PluginHostOptions): Set<string> {
 
 interface RuntimeState {
     readonly runtime: PluginRuntime;
+    readonly dependencies: readonly string[];
     active: boolean;
+    unsubscribe?: () => void;
+}
+
+interface RuntimeFailure {
+    readonly state: RuntimeState;
+    readonly error: Error;
 }
 
 function withAbort<T>(result: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -139,10 +171,14 @@ export class InMemoryPluginHost implements PluginHost {
     readonly #runtimeFactory;
     readonly #now;
     readonly #requireRuntimeOnEnable;
+    readonly #externalDependencies;
     readonly #artifacts = new Map<string, PluginArtifact>();
     readonly #runtimes = new Map<string, RuntimeState>();
+    readonly #failures = new Map<string, RuntimeFailure>();
     readonly #operations = new Map<string, Promise<void>>();
+    #admissions: Promise<void> = Promise.resolve();
     readonly #invocations = new Map<string, Set<AbortController>>();
+    #closed = false;
 
     constructor(options: PluginHostOptions = {}) {
         this.#policy = options.policy ?? {};
@@ -152,17 +188,19 @@ export class InMemoryPluginHost implements PluginHost {
         this.#runtimeFactory = options.runtimeFactory;
         this.#now = options.now ?? (() => new Date().toISOString());
         this.#requireRuntimeOnEnable = options.requireRuntimeOnEnable ?? false;
+        this.#externalDependencies = options.externalDependencies ?? (() => []);
     }
 
     async install(artifact: PluginArtifact): Promise<PluginRecord> {
+        this.#assertOpen();
         // Snapshot before yielding: verification and activation must use the
         // same bytes even when a caller later reuses its input buffers.
         // Normalize first: structuredClone would otherwise execute accessors
         // that the manifest validator deliberately rejects without reading.
         const manifest = validatePluginManifest(artifact.manifest);
         const snapshot = cloneArtifact({ ...artifact, manifest });
-        return await this.#serialize(
-            snapshot.manifest.id,
+        return await this.#serializeMany(
+            [snapshot.manifest.id, ...(snapshot.manifest.dependencies ?? [])],
             () => this.#install(snapshot),
         );
     }
@@ -212,17 +250,25 @@ export class InMemoryPluginHost implements PluginHost {
         if (this.#store.install === undefined) {
             await this.#store.put(record);
         } else {
-            await this.#store.install(record, cloneArtifact({ ...artifact, manifest }));
+            await this.#store.install(
+                record,
+                cloneArtifact({ ...artifact, manifest }),
+            );
         }
         this.#artifacts.set(
             manifest.id,
-            cloneArtifact({ ...artifact, manifest }),
+            cloneArtifact({
+                ...artifact,
+                manifest,
+                digest: verification.digest,
+            }),
         );
-        return cloneRecord(record);
+        return cloneRecord((await this.#store.get(manifest.id)) ?? record);
     }
 
-    enable(id: string): Promise<PluginRecord> {
-        return this.#serialize(id, () => this.#enable(id));
+    async enable(id: string): Promise<PluginRecord> {
+        this.#assertOpen();
+        return await this.#withDependencies(id, () => this.#enable(id));
     }
 
     async #enable(id: string, restored?: PluginRecord): Promise<PluginRecord> {
@@ -238,24 +284,25 @@ export class InMemoryPluginHost implements PluginHost {
             }
         }
         const state = this.#runtimes.get(id);
-        if (state !== undefined && !state.active) {
+        if (state !== undefined && !this.#runtimeActive(id)) {
             // A failed stop does not prove that resources were released. Retry
             // cleanup before allowing a second instance of the same plugin.
             await this.#stopRuntime(id);
         }
         if (record.enabled) return cloneRecord(record);
-        if (
-            this.#runtimeFactory === undefined &&
-            (this.#requireRuntimeOnEnable || record.isolated)
-        ) {
-            throw lifecycleError(
-                "runtime_required",
-                id,
-                "has no runtime factory",
-            );
-        }
         let runtime: PluginRuntime | undefined;
         try {
+            await this.#requireDependencies(record);
+            if (
+                this.#runtimeFactory === undefined &&
+                (this.#requireRuntimeOnEnable || record.isolated)
+            ) {
+                throw lifecycleError(
+                    "runtime_required",
+                    id,
+                    "has no runtime factory",
+                );
+            }
             if (this.#runtimeFactory !== undefined) {
                 const artifact = await this.#loadArtifact(record);
                 if (artifact === undefined) {
@@ -266,8 +313,21 @@ export class InMemoryPluginHost implements PluginHost {
                     );
                 }
                 runtime = await this.#runtimeFactory(cloneArtifact(artifact));
-                this.#runtimes.set(id, { runtime, active: false });
+                const starting: RuntimeState = {
+                    runtime,
+                    dependencies: record.manifest.dependencies ?? [],
+                    active: false,
+                };
+                this.#runtimes.set(id, starting);
+                starting.unsubscribe = runtime.onFailure?.((error) => {
+                    this.#runtimeFailed(id, starting, error);
+                });
                 await runtime.start(cloneArtifact(artifact));
+                const failure = this.#failures.get(id);
+                if (failure !== undefined) throw failure.error;
+                if (runtime.isActive?.() === false) {
+                    throw new Error("plugin runtime stopped during startup");
+                }
             }
         } catch (error) {
             if (runtime !== undefined) {
@@ -287,11 +347,15 @@ export class InMemoryPluginHost implements PluginHost {
                         ? error.message
                         : String(error),
                 });
+                this.#failures.delete(id);
             } catch (persistenceError) {
                 cause = new AggregateError(
                     [error, persistenceError],
                     "runtime startup and failure persistence both failed",
                 );
+            }
+            if (cause === error && error instanceof PluginLifecycleError) {
+                throw error;
             }
             throw new PluginLifecycleError(
                 "runtime_failed",
@@ -305,8 +369,10 @@ export class InMemoryPluginHost implements PluginHost {
             updatedAt: this.#now(),
             ...(record.lastError === undefined ? {} : { lastError: undefined }),
         });
+        let saved: PluginRecord;
         try {
             await this.#store.put(enabled);
+            saved = (await this.#store.get(id)) ?? enabled;
         } catch (error) {
             if (runtime !== undefined) {
                 try {
@@ -321,13 +387,25 @@ export class InMemoryPluginHost implements PluginHost {
                 { cause: error },
             );
         }
+        if (this.#failures.has(id) || runtime?.isActive?.() === false) {
+            await this.#reconcile(saved);
+            throw lifecycleError(
+                "runtime_failed",
+                id,
+                "stopped while enabling",
+            );
+        }
         const enabledRuntime = this.#runtimes.get(id);
         if (enabledRuntime !== undefined) enabledRuntime.active = true;
-        return cloneRecord(enabled);
+        return cloneRecord(saved);
     }
 
-    disable(id: string): Promise<PluginRecord> {
-        return this.#serialize(id, () => this.#disable(id));
+    async disable(id: string): Promise<PluginRecord> {
+        this.#assertOpen();
+        return await this.#serialize(id, async () => {
+            await this.#requireNoDependents(id, true);
+            return await this.#disable(id);
+        });
     }
 
     async #disable(id: string): Promise<PluginRecord> {
@@ -344,13 +422,14 @@ export class InMemoryPluginHost implements PluginHost {
         });
         // Do not tear down a healthy runtime if durable disable was rejected.
         await this.#store.put(disabled);
+        const saved = (await this.#store.get(id)) ?? disabled;
         this.#abortInvocations(id);
         try {
             await this.#stopRuntime(id);
         } catch (error) {
             try {
                 await this.#store.put({
-                    ...disabled,
+                    ...saved,
                     lastError: error instanceof Error
                         ? error.message
                         : String(error),
@@ -369,19 +448,22 @@ export class InMemoryPluginHost implements PluginHost {
             }
             throw error;
         }
-        return cloneRecord(disabled);
+        return cloneRecord(saved);
     }
 
-    uninstall(id: string): Promise<boolean> {
-        return this.#serialize(id, () => this.#uninstall(id));
+    async uninstall(id: string): Promise<boolean> {
+        this.#assertOpen();
+        return await this.#serialize(id, () => this.#uninstall(id));
     }
 
     async #uninstall(id: string): Promise<boolean> {
         const record = await this.#store.get(id);
         if (record === undefined) return false;
-        await this.#disable(id);
-        await this.#store.delete(id);
+        await this.#requireNoDependents(id, false);
+        const disabled = await this.#disable(id);
+        await this.#store.delete(id, disabled.revision);
         this.#artifacts.delete(id);
+        this.#failures.delete(id);
         return true;
     }
 
@@ -400,49 +482,140 @@ export class InMemoryPluginHost implements PluginHost {
         );
     }
 
-    async #loadArtifact(record: PluginRecord): Promise<PluginArtifact | undefined> {
+    async #loadArtifact(
+        record: PluginRecord,
+    ): Promise<PluginArtifact | undefined> {
         const cached = this.#artifacts.get(record.manifest.id);
-        if (cached !== undefined) return cached;
+        if (
+            cached !== undefined && cached.digest === record.digest &&
+            JSON.stringify(cached.manifest) === JSON.stringify(record.manifest)
+        ) return cached;
         const artifact = await this.#store.readArtifact?.(record.manifest.id);
         if (artifact === undefined) return undefined;
         const verification = await this.#verifier.verify(artifact);
-        const manifest = verification.manifest ?? validatePluginManifest(artifact.manifest);
+        const manifest = verification.manifest ??
+            validatePluginManifest(artifact.manifest);
         if (
             verification.status === "rejected" ||
             verification.digest !== record.digest ||
             verification.signerKeyId !== record.signerKeyId ||
-            JSON.stringify(manifest) !== JSON.stringify(validatePluginManifest(record.manifest))
+            JSON.stringify(manifest) !==
+                JSON.stringify(validatePluginManifest(record.manifest))
         ) {
-            throw new PluginVerificationError("verification_rejected", "persisted plugin package failed verification");
+            throw new PluginVerificationError(
+                "verification_rejected",
+                "persisted plugin package failed verification",
+            );
         }
-        const snapshot = cloneArtifact({ ...artifact, manifest });
+        const snapshot = cloneArtifact({
+            ...artifact,
+            manifest,
+            digest: verification.digest,
+        });
         this.#artifacts.set(record.manifest.id, snapshot);
         return snapshot;
     }
 
     async restore(): Promise<readonly PluginRecord[]> {
+        this.#assertOpen();
         const records = await this.#store.list();
-        await Promise.all(records.map((saved) => this.#serialize(saved.manifest.id, async () => {
-            const record = await this.#store.get(saved.manifest.id);
-            if (record === undefined || !record.enabled || this.#runtimes.get(record.manifest.id)?.active) return;
-            try {
-                await this.#enable(record.manifest.id, { ...record, enabled: false });
-            } catch (error) {
-                // One broken package must not prevent unrelated plugins from restoring.
-                await this.#store.put({ ...record, enabled: false, updatedAt: this.#now(), lastError: error instanceof Error ? error.message : String(error) });
+        const enabled = new Map(
+            records.filter((record) => record.enabled).map((
+                record,
+            ) => [record.manifest.id, record]),
+        );
+        const visited = new Set<string>();
+        const visit = async (
+            id: string,
+            ancestors = new Set<string>(),
+        ): Promise<void> => {
+            if (visited.has(id)) return;
+            const saved = enabled.get(id);
+            if (saved === undefined) return;
+            if (ancestors.has(id)) {
+                throw lifecycleError(
+                    "dependency_unavailable",
+                    id,
+                    "has a dependency cycle",
+                );
             }
-        })));
+            const next = new Set([...ancestors, id]);
+            let dependencyError: unknown;
+            try {
+                for (const dependency of saved.manifest.dependencies ?? []) {
+                    await visit(dependency, next);
+                }
+            } catch (error) {
+                dependencyError = error;
+            }
+            visited.add(id);
+            await this.#withDependencies(id, async () => {
+                const record = await this.#store.get(id);
+                if (
+                    record === undefined || !record.enabled ||
+                    this.#runtimeActive(id)
+                ) return;
+                try {
+                    if (dependencyError !== undefined) throw dependencyError;
+                    await this.#enable(id, { ...record, enabled: false });
+                } catch (error) {
+                    // Re-read because startup may already have persisted its own failure.
+                    const latest = await this.#store.get(id);
+                    if (latest !== undefined) {
+                        await this.#store.put({
+                            ...latest,
+                            enabled: false,
+                            updatedAt: this.#now(),
+                            lastError: latest.lastError ??
+                                (error instanceof Error
+                                    ? error.message
+                                    : String(error)),
+                        });
+                    }
+                }
+            });
+        };
+        // Restore prerequisites first; a failed branch does not stop other plugins.
+        const failures: unknown[] = [];
+        for (const id of enabled.keys()) {
+            try {
+                await visit(id);
+            } catch (error) {
+                failures.push(error);
+            }
+        }
+        if (failures.length) {
+            throw new AggregateError(
+                failures,
+                "plugin restore state could not be persisted",
+            );
+        }
         return await this.list();
     }
 
     async close(): Promise<void> {
-        const ids = new Set([...this.#operations.keys(), ...this.#runtimes.keys()]);
-        const results = await Promise.allSettled([...ids].map((id) => this.#serialize(id, async () => {
-            this.#abortInvocations(id);
-            await this.#stopRuntime(id);
-        })));
-        const failures = results.filter((result) => result.status === "rejected").map((result) => result.reason);
-        if (failures.length) throw new AggregateError(failures, "plugin shutdown failed");
+        this.#closed = true;
+        await this.#admissions;
+        const ids = new Set([
+            ...this.#operations.keys(),
+            ...this.#runtimes.keys(),
+            ...this.#failures.keys(),
+        ]);
+        const results = await Promise.allSettled(
+            [...ids].map((id) =>
+                this.#serialize(id, async () => {
+                    if (this.#failures.has(id)) await this.#read(id);
+                    this.#abortInvocations(id);
+                    await this.#stopRuntime(id);
+                })
+            ),
+        );
+        const failures = results.filter((result) =>
+            result.status === "rejected"
+        ).map((result) => result.reason);
+        if (failures.length) {
+            throw new AggregateError(failures, "plugin shutdown failed");
+        }
     }
 
     /** Invoke an active runtime without exposing runtime instances to callers. */
@@ -450,6 +623,7 @@ export class InMemoryPluginHost implements PluginHost {
         id: string,
         invocation: PluginInvocation,
     ): Promise<Awaited<ReturnType<PluginRuntime["invoke"]>>> {
+        this.#assertOpen();
         invocation.signal?.throwIfAborted();
         // Serialize admission, not execution. A disable can always cancel an
         // in-flight invocation, including a runtime that ignores its signal.
@@ -517,10 +691,42 @@ export class InMemoryPluginHost implements PluginHost {
         }
     }
 
+    #runtimeFailed(id: string, state: RuntimeState, error: Error): void {
+        if (
+            this.#runtimes.get(id) !== state ||
+            this.#failures.get(id)?.state === state
+        ) return;
+        state.active = false;
+        const failure = { state, error };
+        this.#failures.set(id, failure);
+        this.#abortInvocations(id);
+        this.#serialize(id, async () => {
+            if (this.#failures.get(id) === failure) await this.#read(id);
+        }).catch(() => {
+            // Keep the failure until durable reconciliation succeeds.
+            // Subsequent reads retry and can never report it healthy.
+        });
+        // A dependent can no longer execute under the contract it was enabled
+        // with. Quarantine that branch; unrelated runtimes remain available.
+        for (const [dependent, candidate] of this.#runtimes) {
+            if (candidate.dependencies.includes(id)) {
+                this.#runtimeFailed(
+                    dependent,
+                    candidate,
+                    new Error(
+                        `dependency_unavailable: plugin ${id} runtime failed`,
+                    ),
+                );
+            }
+        }
+    }
+
     async #stopRuntime(id: string): Promise<void> {
         const state = this.#runtimes.get(id);
         if (state === undefined) return;
         state.active = false;
+        state.unsubscribe?.();
+        state.unsubscribe = undefined;
         try {
             await state.runtime.stop();
         } catch (error) {
@@ -535,17 +741,120 @@ export class InMemoryPluginHost implements PluginHost {
     }
 
     #serialize<T>(id: string, operation: () => Promise<T>): Promise<T> {
-        const previous = this.#operations.get(id) ?? Promise.resolve();
+        return this.#serializeMany([id], operation);
+    }
+
+    #serializeMany<T>(
+        ids: readonly string[],
+        operation: () => Promise<T>,
+    ): Promise<T> {
+        return this.#schedule(() => Promise.resolve(ids), operation);
+    }
+
+    #schedule<T>(
+        ids: () => Promise<readonly string[]>,
+        operation: () => Promise<T>,
+    ): Promise<T> {
+        // Preserve call order while resolving lock keys, without waiting for runtime startup.
+        const admission = this.#admissions.then(async () => ({
+            result: this.#enqueue(await ids(), operation),
+        }));
+        this.#admissions = admission.then(() => {}, () => {});
+        return admission.then(({ result }) => result);
+    }
+
+    #enqueue<T>(
+        ids: readonly string[],
+        operation: () => Promise<T>,
+    ): Promise<T> {
+        const keys = [...new Set(ids)];
+        const previous = Promise.all(
+            keys.map((id) => this.#operations.get(id)),
+        );
         const result = previous.then(operation);
+        result.catch(() => {});
         // A rejected operation must not poison later enable/disable attempts.
         const settled = result.then(() => {}, () => {});
-        this.#operations.set(id, settled);
+        for (const id of keys) this.#operations.set(id, settled);
         settled.then(() => {
-            if (this.#operations.get(id) === settled) {
-                this.#operations.delete(id);
+            for (const id of keys) {
+                if (this.#operations.get(id) === settled) {
+                    this.#operations.delete(id);
+                }
             }
         });
         return result;
+    }
+
+    async #withDependencies<T>(
+        id: string,
+        operation: () => Promise<T>,
+    ): Promise<T> {
+        let dependencies: readonly string[] = [];
+        const result = await this.#schedule(async () => {
+            dependencies = (await this.#store.get(id))?.manifest.dependencies ??
+                [];
+            return [id, ...dependencies];
+        }, async () => {
+            const current = await this.#store.get(id);
+            if (
+                (current?.manifest.dependencies ?? []).some((dependency) =>
+                    !dependencies.includes(dependency)
+                )
+            ) {
+                return { retry: true as const };
+            }
+            return { retry: false as const, value: await operation() };
+        });
+        return result.retry
+            ? this.#withDependencies(id, operation)
+            : result.value;
+    }
+
+    async #requireDependencies(record: PluginRecord): Promise<void> {
+        const external = new Map(
+            this.#externalDependencies().map((
+                item,
+            ) => [item.manifest.id, item]),
+        );
+        for (const id of record.manifest.dependencies ?? []) {
+            const installed = await this.#store.get(id);
+            const dependency = installed ?? external.get(id);
+            const runtimeMissing = installed !== undefined &&
+                (installed.isolated || this.#requireRuntimeOnEnable ||
+                    this.#runtimeFactory !== undefined) &&
+                !this.#runtimeActive(id);
+            if (!dependency?.enabled || runtimeMissing) {
+                throw lifecycleError(
+                    "dependency_unavailable",
+                    record.manifest.id,
+                    `requires enabled dependency ${id}`,
+                );
+            }
+        }
+    }
+
+    async #requireNoDependents(
+        id: string,
+        onlyEnabled: boolean,
+    ): Promise<void> {
+        const records = [
+            ...await this.#store.list(),
+            ...this.#externalDependencies(),
+        ];
+        const dependents = records.filter((record) =>
+            (!onlyEnabled || record.enabled) &&
+            record.manifest.dependencies?.includes(id)
+        );
+        if (dependents.length) {
+            throw lifecycleError(
+                "dependency_in_use",
+                id,
+                `is required by ${
+                    dependents.map((record) => record.manifest.id).join(", ")
+                }`,
+            );
+        }
     }
 
     async #require(id: string): Promise<PluginRecord> {
@@ -558,25 +867,52 @@ export class InMemoryPluginHost implements PluginHost {
 
     async #read(id: string): Promise<PluginRecord | undefined> {
         const record = await this.#store.get(id);
+        // Shutdown intentionally preserves the next process's enable preference.
+        if (this.#closed && !this.#failures.has(id)) return record;
         return record === undefined ? undefined : await this.#reconcile(record);
     }
 
     async #reconcile(record: PluginRecord): Promise<PluginRecord> {
+        const id = record.manifest.id;
+        const failure = this.#failures.get(id);
         const requiresRuntime = record.isolated ||
             this.#requireRuntimeOnEnable ||
             this.#runtimeFactory !== undefined;
         if (
-            !record.enabled || !requiresRuntime ||
-            this.#runtimes.get(record.manifest.id)?.active
+            failure === undefined && (!record.enabled || !requiresRuntime ||
+                this.#runtimeActive(id))
         ) return record;
         const stale: PluginRecord = Object.freeze({
             ...record,
             enabled: false,
             updatedAt: this.#now(),
-            lastError: "runtime_required: plugin runtime is not active",
+            lastError: failure === undefined
+                ? "runtime_required: plugin runtime is not active"
+                : `runtime_failed: ${failure.error.message}`,
         });
-        await this.#store.put(stale);
-        return stale;
+        this.#abortInvocations(id);
+        // Failed storage must not keep a dead worker's registrations or resources.
+        try {
+            await this.#store.put(stale);
+        } finally {
+            await this.#stopRuntime(id);
+        }
+        if (this.#failures.get(id) === failure) this.#failures.delete(id);
+        return (await this.#store.get(id)) ?? stale;
+    }
+
+    #runtimeActive(id: string): boolean {
+        const state = this.#runtimes.get(id);
+        return state?.active === true && state.runtime.isActive?.() !== false;
+    }
+
+    #assertOpen(): void {
+        if (this.#closed) {
+            throw new PluginLifecycleError(
+                "policy_denied",
+                "plugin host is closed",
+            );
+        }
     }
 }
 
