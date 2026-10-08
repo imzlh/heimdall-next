@@ -55,6 +55,11 @@ export interface ManagedPlugins {
     readonly host: PluginHost;
     readonly tools: () => readonly ToolPlugin[];
     install(input: unknown): Promise<PluginRecord>;
+    upgrade(
+        id: string,
+        input: unknown,
+        expectedRevision: string,
+    ): Promise<PluginRecord>;
 }
 
 /** Adapter registers generic tool capabilities; tool business logic stays in its worker. */
@@ -72,6 +77,8 @@ export function createManagedPlugins(
         })),
 ): ManagedPlugins {
     const active = new Map<string, ToolPlugin>();
+    const pending = new Map<string, ToolPlugin>();
+    const reservedNames = new Map<string, ReadonlySet<string>>();
     const host = createPluginHost({
         store: new ConfigPluginRecordStore(store),
         policy: { allowUnsigned: true, maxBytes: 1024 * 1024 },
@@ -83,17 +90,43 @@ export function createManagedPlugins(
                 artifact.manifest.kind !== "tool" || reservedIds().includes(id)
             ) throw new TypeError("插件类型不支持或 ID 与内置插件冲突");
             const runtime = new IsolatedPluginRuntime();
+            let staged: ToolPlugin | undefined;
+            const withdraw = () => {
+                if (active.get(id) === staged) active.delete(id);
+                if (pending.get(id) === staged) pending.delete(id);
+            };
             // Revoke advertisements in the same event turn as a worker failure,
             // before the host's serialized persistence work gets its next turn.
-            runtime.onFailure(() => active.delete(id));
+            runtime.onFailure(withdraw);
             return {
                 isActive: () => runtime.isActive(),
                 onFailure: (listener) => runtime.onFailure(listener),
+                reserveCapabilities() {
+                    const names = new Set(
+                        staged?.tools.map((tool) => tool.definition.name),
+                    );
+                    reservedNames.set(id, names);
+                    return () => {
+                        if (reservedNames.get(id) === names) {
+                            reservedNames.delete(id);
+                        }
+                    };
+                },
                 async start(input) {
                     await runtime.start(input);
                     const definitions = parseToolDefinitions(
                         await runtime.invoke({ method: "tools.list" }),
                     );
+                    for (const [owner, names] of reservedNames) {
+                        if (
+                            owner !== id &&
+                            definitions.some((definition) =>
+                                names.has(definition.name)
+                            )
+                        ) {
+                            throw new TypeError("工具名称与正在替换的插件冲突");
+                        }
+                    }
                     const plugin: ToolPlugin = {
                         manifest: input.manifest,
                         tools: definitions.map((definition) => ({
@@ -135,13 +168,23 @@ export function createManagedPlugins(
                         ...[...active.values()].filter((entry) =>
                             entry.manifest.id !== id
                         ),
+                        ...[...pending.values()].filter((entry) =>
+                            entry.manifest.id !== id
+                        ),
                         plugin,
                     ]);
-                    active.set(id, plugin);
+                    staged = plugin;
+                    pending.set(id, plugin);
+                },
+                activate() {
+                    if (staged) {
+                        pending.delete(id);
+                        active.set(id, staged);
+                    }
                 },
                 invoke: (invocation) => runtime.invoke(invocation),
                 async stop() {
-                    active.delete(id);
+                    withdraw();
                     await runtime.stop();
                 },
             };
@@ -156,6 +199,13 @@ export function createManagedPlugins(
                 throw new TypeError("插件 ID 与内置插件冲突");
             }
             return await host.install(artifact);
+        },
+        async upgrade(id, input, expectedRevision) {
+            const artifact = parseManagedPluginPackage(input);
+            if (reservedIds().includes(id)) {
+                throw new TypeError("插件 ID 与内置插件冲突");
+            }
+            return await host.upgrade(id, artifact, expectedRevision);
         },
     };
 }

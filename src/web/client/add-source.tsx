@@ -9,6 +9,13 @@ import type {
 import { controlValue } from "./dom.ts";
 import { Icon } from "../shared/icons.tsx";
 import { SourceProxySelect } from "./source-proxy-select.tsx";
+import { SourceMiddlewareSelect } from "./source-middleware-select.tsx";
+import {
+    readSourceHealthPolicyDraft,
+    sourceHealthPolicyDraft,
+    SourceHealthPolicyEditor,
+} from "./source-health-policy.tsx";
+import type { ListedPlugin } from "@heimdall/admin-contracts/console.ts";
 import {
     parseSourceModelMap,
     type SourceModelMap,
@@ -50,6 +57,7 @@ export interface AddSourceFlowProps {
     readonly initialDraft?: SourceSetupDraft;
     readonly initialStep?: AddSourceStep;
     readonly proxyPool?: ProxyPoolView | null;
+    readonly plugins?: readonly ListedPlugin[];
     readonly onClose: () => void;
     readonly onSave: (input: SourceSetupSaveInput) => Promise<void>;
     readonly onProbe?: SourceSetupProbe;
@@ -69,6 +77,7 @@ export function AddSourceFlow(
         initialDraft,
         initialStep = "details",
         proxyPool,
+        plugins,
         onClose,
         onSave,
         onProbe,
@@ -102,6 +111,12 @@ export function AddSourceFlow(
     const [proxy, setProxy] = useState<SourceProxySelection>(
         initialDraft?.proxy ?? { mode: "inherit" },
     );
+    const [middleware, setMiddleware] = useState<readonly string[] | null>(
+        initialDraft?.middleware ?? null,
+    );
+    const [healthDraft, setHealthDraft] = useState(() =>
+        sourceHealthPolicyDraft(initialDraft?.healthPolicy)
+    );
     const [modelRows, setModelRows] = useState<readonly SourceModelMapRow[]>(
         sourceModelMapRows(initialDraft?.modelMap),
     );
@@ -111,7 +126,7 @@ export function AddSourceFlow(
     );
     const [error, setError] = useState("");
     const [errorField, setErrorField] = useState<
-        "name" | "priority" | "modelMap" | null
+        "name" | "priority" | "modelMap" | "healthPolicy" | null
     >(
         null,
     );
@@ -195,7 +210,9 @@ export function AddSourceFlow(
         setStep(to);
     }
 
-    function clearError(field: "name" | "priority" | "modelMap") {
+    function clearError(
+        field: "name" | "priority" | "modelMap" | "healthPolicy",
+    ) {
         if (errorField !== field) return;
         setError("");
         setErrorField(null);
@@ -214,6 +231,13 @@ export function AddSourceFlow(
             setError("优先级必须是安全范围内的整数。");
             setErrorField("priority");
             priorityInput.current?.focus();
+            return;
+        }
+        try {
+            readSourceHealthPolicyDraft(healthDraft);
+        } catch (cause) {
+            setError(describeError(cause));
+            setErrorField("healthPolicy");
             return;
         }
         try {
@@ -247,6 +271,11 @@ export function AddSourceFlow(
                 name,
                 priority: Number(priority),
                 proxy,
+                ...(middleware !== null ? { middleware } : {}),
+                ...(healthDraft.mode === "custom" ||
+                        initialDraft?.healthPolicy !== undefined
+                    ? { healthPolicy: readSourceHealthPolicyDraft(healthDraft) }
+                    : {}),
                 modelMap: readSourceModelMapRows(modelRows),
                 mode: presetId ? "preset" : "custom",
                 ...(presetId ? { presetId } : {}),
@@ -414,6 +443,21 @@ export function AddSourceFlow(
                             onChange={(rows) => {
                                 setModelRows(rows);
                                 clearError("modelMap");
+                            }}
+                        />
+                        <SourceMiddlewareSelect
+                            value={middleware}
+                            plugins={plugins}
+                            disabled={busy}
+                            onChange={setMiddleware}
+                        />
+                        <SourceHealthPolicyEditor
+                            value={healthDraft}
+                            disabled={busy}
+                            invalid={errorField === "healthPolicy"}
+                            onChange={(value) => {
+                                setHealthDraft(value);
+                                clearError("healthPolicy");
                             }}
                         />
                         {error && (

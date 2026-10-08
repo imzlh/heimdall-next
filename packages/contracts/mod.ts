@@ -4,3 +4,4 @@ export * from "./plugin.ts";
 export * from "./tools.ts";
 export * from "./storage.ts";
 export * from "./proxy.ts";
+export * from "./source-health.ts";

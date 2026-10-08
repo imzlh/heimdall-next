@@ -14,6 +14,7 @@ import {
     type ListedSource,
 } from "@heimdall/core/web/client/api/admin.ts";
 import { SourceManagementDialog } from "@heimdall/core/web/client/source-management.tsx";
+import type { ListedPlugin } from "@heimdall/admin-contracts/console.ts";
 import { installTestDom, type TestElement } from "./helpers/jsx-dom.ts";
 
 const source: ListedSource = {
@@ -79,7 +80,11 @@ async function setup(
         request: RecordedRequest,
         index: number,
     ) => Response | Promise<Response> = () => Response.json({ updated: true }),
-    options: { source?: ListedSource; proxyPool?: ProxyPoolView | null } = {},
+    options: {
+        source?: ListedSource;
+        proxyPool?: ProxyPoolView | null;
+        plugins?: readonly ListedPlugin[];
+    } = {},
 ) {
     const dom = installTestDom();
     Object.defineProperties(dom.document, {
@@ -110,6 +115,7 @@ async function setup(
                     <SourceManagementDialog
                         source={options.source ?? source}
                         proxyPool={options.proxyPool}
+                        plugins={options.plugins}
                         onChanged={(kind, source) => {
                             changes.push({ kind, source });
                             lifecycle.push(kind);
@@ -189,6 +195,617 @@ async function setup(
         },
     };
 }
+
+async function healthMode(
+    test: Awaited<ReturnType<typeof setup>>,
+    mode: string,
+) {
+    await test.act(() =>
+        find(test.dialog, 'button[data-dropdown="source-health-mode"]').click()
+    );
+    await test.act(() =>
+        find(test.dialog, `button[role="option"][data-value="${mode}"]`).click()
+    );
+}
+
+Deno.test("source health policy converts seconds to milliseconds and blocks malformed edits", async () => {
+    const test = await setup(undefined, {
+        source: {
+            ...source,
+            effectiveHealthPolicy: { cooldownMs: 1234, authCooldownMs: 56000 },
+        },
+    });
+    try {
+        assert(test.dialog.textContent.includes("1.234 秒"));
+        assert(test.dialog.textContent.includes("56 秒"));
+        assert(test.dialog.textContent.includes("当前倒计时会保留"));
+        await healthMode(test, "custom");
+        await test.act(() =>
+            input(
+                find(test.dialog, 'input[name="source-health-cooldown"]'),
+                "86400.001",
+            )
+        );
+        await test.act(() => button(test.dialog, "保存修改").click());
+        assertEquals(test.requests.length, 0);
+        assert(test.dialog.textContent.includes("0 至 86400 秒"));
+        assertEquals(
+            find(test.dialog, 'input[name="source-health-cooldown"]')
+                .getAttribute("aria-invalid"),
+            "true",
+        );
+        await test.act(() =>
+            input(
+                find(test.dialog, 'input[name="source-health-cooldown"]'),
+                "1.001",
+            )
+        );
+        await test.act(() =>
+            input(
+                find(test.dialog, 'input[name="source-health-auth-cooldown"]'),
+                "0",
+            )
+        );
+        await test.act(() => button(test.dialog, "保存修改").click());
+        assertEquals(JSON.parse(String(test.requests[0]?.init?.body)), {
+            healthPolicy: { cooldownMs: 1001, authCooldownMs: 0 },
+        });
+        assertEquals(
+            new Headers(test.requests[0]?.init?.headers).get("if-match"),
+            source.versionstamp,
+        );
+        assertEquals(test.closes, 1);
+    } finally {
+        await test.dispose();
+    }
+});
+
+Deno.test("source health policy inheritance explicitly clears a saved override", async () => {
+    const test = await setup(undefined, {
+        source: { ...source, healthPolicy: { cooldownMs: 2000 } },
+    });
+    try {
+        await healthMode(test, "inherit");
+        assertEquals(
+            test.dialog.querySelector('input[name="source-health-cooldown"]'),
+            null,
+        );
+        await test.act(() => button(test.dialog, "保存修改").click());
+        assertEquals(JSON.parse(String(test.requests[0]?.init?.body)), {
+            healthPolicy: null,
+        });
+    } finally {
+        await test.dispose();
+    }
+});
+
+Deno.test("source health policy conflict reload preserves local edits and refreshes untouched policy", async () => {
+    for (const edited of [false, true]) {
+        const baseline = { ...source, healthPolicy: { cooldownMs: 2000 } };
+        const latest = {
+            ...baseline,
+            healthPolicy: { cooldownMs: 8000, authCooldownMs: 9000 },
+            versionstamp: '"health-revision-2"',
+        };
+        const test = await setup(
+            (_request, index) =>
+                index === 0
+                    ? Response.json({ error: { message: "冲突" } }, {
+                        status: 409,
+                    })
+                    : index === 1
+                    ? Response.json({ sources: [latest] })
+                    : Response.json({ updated: true }),
+            { source: baseline },
+        );
+        try {
+            await test.edit("name", "本地名称");
+            if (edited) {
+                await test.act(() =>
+                    input(
+                        find(
+                            test.dialog,
+                            'input[name="source-health-cooldown"]',
+                        ),
+                        "3.001",
+                    )
+                );
+            }
+            await test.act(() => button(test.dialog, "保存修改").click());
+            assert(
+                find(test.dialog, 'button[data-dropdown="source-health-mode"]')
+                    .disabled,
+            );
+            await test.act(() => button(test.dialog, "读取最新信息").click());
+            assertEquals(
+                find(test.dialog, 'input[name="source-health-cooldown"]').value,
+                edited ? "3.001" : "8",
+            );
+            await test.act(() => button(test.dialog, "保存修改").click());
+            assertEquals(JSON.parse(String(test.requests[2]?.init?.body)), {
+                name: "本地名称",
+                ...(edited ? { healthPolicy: { cooldownMs: 3001 } } : {}),
+            });
+            assertEquals(
+                new Headers(test.requests[2]?.init?.headers).get("if-match"),
+                latest.versionstamp,
+            );
+        } finally {
+            await test.dispose();
+        }
+    }
+});
+
+Deno.test("quarantined health policy always submits a repair including null without clearing other configuration errors", async () => {
+    for (const custom of [false, true]) {
+        const test = await setup(undefined, {
+            source: {
+                ...source,
+                configurationError: "健康策略已损坏",
+                configurationErrorField: "healthPolicy",
+            },
+        });
+        try {
+            assert(
+                test.dialog.textContent.includes(
+                    "确认下方健康策略后保存即可修复",
+                ),
+            );
+            if (custom) {
+                await healthMode(test, "custom");
+                await test.act(() =>
+                    input(
+                        find(
+                            test.dialog,
+                            'input[name="source-health-auth-cooldown"]',
+                        ),
+                        "0",
+                    )
+                );
+            }
+            await test.act(() => button(test.dialog, "保存修改").click());
+            assertEquals(JSON.parse(String(test.requests[0]?.init?.body)), {
+                healthPolicy: custom ? { authCooldownMs: 0 } : null,
+            });
+            assertEquals(test.changes[0]?.source.configurationError, undefined);
+        } finally {
+            await test.dispose();
+        }
+    }
+    const test = await setup(undefined, {
+        source: {
+            ...source,
+            configurationError: "连接参数损坏",
+            configurationErrorField: "config",
+        },
+    });
+    try {
+        await healthMode(test, "custom");
+        await test.act(() =>
+            input(
+                find(test.dialog, 'input[name="source-health-cooldown"]'),
+                "0",
+            )
+        );
+        await test.act(() => button(test.dialog, "保存修改").click());
+        assertEquals(test.changes[0]?.source.configurationErrorField, "config");
+        assertEquals(
+            test.changes[0]?.source.configurationError,
+            "连接参数损坏",
+        );
+    } finally {
+        await test.dispose();
+    }
+});
+
+Deno.test("source middleware selection preserves inactive bindings, filters plugin kinds and saves order", async () => {
+    const test = await setup(undefined, {
+        source: {
+            ...source,
+            middleware: [
+                "middleware.first",
+                "middleware.paused",
+                "middleware.missing",
+            ],
+        },
+        plugins: [
+            {
+                id: "middleware.first",
+                name: "前处理",
+                kind: "middleware",
+                enabled: true,
+            },
+            {
+                id: "middleware.second",
+                name: "后处理",
+                kind: "middleware",
+                enabled: true,
+            },
+            {
+                id: "middleware.paused",
+                name: "暂停插件",
+                kind: "middleware",
+                enabled: false,
+            },
+            { id: "tool.other", name: "其他工具", kind: "tool", enabled: true },
+        ],
+    });
+    try {
+        assert(test.dialog.textContent.includes("已停用 · 保留绑定"));
+        assert(test.dialog.textContent.includes("插件不可用 · 保留绑定"));
+        assert(find(test.dialog, 'button[aria-label="上移 前处理"]').disabled);
+        await test.act(() =>
+            find(test.dialog, 'button[aria-label="上移 暂停插件"]').click()
+        );
+        await test.act(() =>
+            find(test.dialog, 'button[data-dropdown="source-middleware-add"]')
+                .click()
+        );
+        assertEquals(
+            test.dialog.querySelector('button[data-value="tool.other"]'),
+            null,
+        );
+        await test.act(() =>
+            find(test.dialog, 'button[data-value="middleware.second"]').click()
+        );
+        assertEquals(
+            test.dialog.querySelectorAll("[data-middleware-id]").map((row) =>
+                row.getAttribute("data-middleware-id")
+            ),
+            [
+                "middleware.paused",
+                "middleware.first",
+                "middleware.missing",
+                "middleware.second",
+            ],
+        );
+        await test.act(() => button(test.dialog, "保存修改").click());
+        assertEquals(JSON.parse(String(test.requests[0]?.init?.body)), {
+            middleware: [
+                "middleware.paused",
+                "middleware.first",
+                "middleware.missing",
+                "middleware.second",
+            ],
+        });
+        assertEquals(test.closes, 1);
+    } finally {
+        await test.dispose();
+    }
+});
+
+Deno.test("source middleware inheritance and empty override remain distinct", async () => {
+    for (const mode of ["inherit", "custom"]) {
+        const test = await setup(undefined, {
+            source: { ...source, middleware: ["middleware.first"] },
+        });
+        try {
+            if (mode === "inherit") {
+                await test.act(() =>
+                    find(
+                        test.dialog,
+                        'button[data-dropdown="source-middleware-mode"]',
+                    ).click()
+                );
+                await test.act(() =>
+                    find(
+                        test.dialog,
+                        'button[role="option"][data-value="inherit"]',
+                    ).click()
+                );
+            } else {
+                await test.act(() =>
+                    find(
+                        test.dialog,
+                        'button[aria-label="移除 middleware.first"]',
+                    ).click()
+                );
+            }
+            await test.act(() => button(test.dialog, "保存修改").click());
+            assertEquals(JSON.parse(String(test.requests[0]?.init?.body)), {
+                middleware: mode === "inherit" ? null : [],
+            });
+        } finally {
+            await test.dispose();
+        }
+    }
+});
+
+Deno.test("source middleware conflict reload preserves local ordering and adopts unedited remote bindings", async () => {
+    for (const reorder of [false, true]) {
+        const baseline = {
+            ...source,
+            middleware: ["middleware.first", "middleware.second"],
+        };
+        const latest = {
+            ...baseline,
+            middleware: ["middleware.remote"],
+            versionstamp: '"revision-2"',
+        };
+        const test = await setup(
+            (_request, index) =>
+                index === 0
+                    ? Response.json({ error: { message: "冲突" } }, {
+                        status: 409,
+                    })
+                    : index === 1
+                    ? Response.json({ sources: [latest] })
+                    : Response.json({ updated: true }),
+            { source: baseline },
+        );
+        try {
+            await test.edit("name", "本地名称");
+            if (reorder) {
+                await test.act(() =>
+                    find(
+                        test.dialog,
+                        'button[aria-label="上移 middleware.second"]',
+                    ).click()
+                );
+            }
+            await test.act(() => button(test.dialog, "保存修改").click());
+            assert(
+                find(
+                    test.dialog,
+                    'button[data-dropdown="source-middleware-mode"]',
+                ).disabled,
+            );
+            await test.act(() => button(test.dialog, "读取最新信息").click());
+            const expected = reorder
+                ? ["middleware.second", "middleware.first"]
+                : ["middleware.remote"];
+            assertEquals(
+                test.dialog.querySelectorAll("[data-middleware-id]").map((
+                    row,
+                ) => row.getAttribute("data-middleware-id")),
+                expected,
+            );
+            await test.act(() => button(test.dialog, "保存修改").click());
+            assertEquals(JSON.parse(String(test.requests[2]?.init?.body)), {
+                name: "本地名称",
+                ...(reorder ? { middleware: expected } : {}),
+            });
+            assertEquals(
+                new Headers(test.requests[2]?.init?.headers).get("if-match"),
+                latest.versionstamp,
+            );
+        } finally {
+            await test.dispose();
+        }
+    }
+});
+
+Deno.test("source management repairs quarantined middleware even when the projected empty list is unchanged", async () => {
+    for (const inherit of [false, true]) {
+        const corrupted: ListedSource = {
+            ...source,
+            enabled: false,
+            middleware: [],
+            configurationError: "中间件配置已损坏，此渠道已暂停，请重新配置。",
+            ...(inherit
+                ? { configurationErrorField: "middleware" as const }
+                : {}),
+        };
+        const test = await setup(undefined, { source: corrupted });
+        try {
+            assertEquals(
+                find(test.dialog, '[role="alert"]').textContent,
+                corrupted.configurationError,
+            );
+            assert(!button(test.dialog, "保存修改").disabled);
+            if (inherit) {
+                await test.act(() =>
+                    find(
+                        test.dialog,
+                        'button[data-dropdown="source-middleware-mode"]',
+                    ).click()
+                );
+                await test.act(() =>
+                    find(
+                        test.dialog,
+                        'button[role="option"][data-value="inherit"]',
+                    ).click()
+                );
+            }
+            await test.act(() => button(test.dialog, "保存修改").click());
+            assertEquals(test.requests.length, 1);
+            assertEquals(test.requests[0]?.init?.method, "PATCH");
+            assertEquals(JSON.parse(String(test.requests[0]?.init?.body)), {
+                middleware: inherit ? null : [],
+            });
+            assertEquals(
+                new Headers(test.requests[0]?.init?.headers).get("if-match"),
+                corrupted.versionstamp,
+            );
+            assertEquals(
+                test.changes[0]?.source.middleware,
+                inherit ? null : [],
+            );
+            assertEquals(test.changes[0]?.source.configurationError, undefined);
+            assertEquals(
+                test.changes[0]?.source.configurationErrorField,
+                undefined,
+            );
+            assertEquals(test.closes, 1);
+        } finally {
+            await test.dispose();
+        }
+    }
+});
+
+Deno.test("source management repairs corrupted model mapping with the empty projection or replacement rows", async () => {
+    for (const replace of [false, true]) {
+        const corrupted: ListedSource = {
+            ...source,
+            enabled: false,
+            middleware: [],
+            modelMap: {},
+            configurationError: "模型映射已损坏，请重新设置后保存。",
+            configurationErrorField: "modelMap",
+        };
+        const test = await setup(undefined, { source: corrupted });
+        try {
+            assert(test.dialog.textContent.includes("确认下方模型映射后保存"));
+            if (replace) {
+                await test.act(() =>
+                    button(test.dialog, "添加模型映射").click()
+                );
+                await test.act(() =>
+                    input(
+                        find(test.dialog, 'input[name="model-alias-0"]'),
+                        "fast",
+                    )
+                );
+                await test.act(() =>
+                    input(
+                        find(test.dialog, 'input[name="model-upstream-0"]'),
+                        "provider-fast",
+                    )
+                );
+            }
+            await test.act(() => button(test.dialog, "保存修改").click());
+            assertEquals(test.requests.length, 1);
+            assertEquals(test.requests[0]?.init?.method, "PATCH");
+            const modelMap: NonNullable<ListedSource["modelMap"]> = replace
+                ? { fast: "provider-fast" }
+                : {};
+            assertEquals(JSON.parse(String(test.requests[0]?.init?.body)), {
+                modelMap,
+            });
+            assertEquals(
+                new Headers(test.requests[0]?.init?.headers).get("if-match"),
+                corrupted.versionstamp,
+            );
+            assertEquals(test.changes[0]?.source.modelMap, modelMap);
+            assertEquals(test.changes[0]?.source.configurationError, undefined);
+            assertEquals(
+                test.changes[0]?.source.configurationErrorField,
+                undefined,
+            );
+            assertEquals(test.closes, 1);
+        } finally {
+            await test.dispose();
+        }
+    }
+});
+
+Deno.test("model mapping repair keeps the source quarantined and preserves rows across revision conflicts", async () => {
+    const corrupted: ListedSource = {
+        ...source,
+        enabled: false,
+        modelMap: {},
+        configurationError: "模型映射已损坏，请重新设置后保存。",
+        configurationErrorField: "modelMap",
+    };
+    const latest = { ...corrupted, versionstamp: '"revision-2"' };
+    const test = await setup(
+        (_request, index) =>
+            index === 0
+                ? Response.json({
+                    error: {
+                        code: "version_conflict",
+                        message: "渠道版本已变化",
+                    },
+                }, { status: 409 })
+                : index === 1
+                ? Response.json({ sources: [latest] })
+                : Response.json({ updated: true }),
+        { source: corrupted },
+    );
+    try {
+        await test.act(() => button(test.dialog, "添加模型映射").click());
+        await test.act(() =>
+            input(find(test.dialog, 'input[name="model-alias-0"]'), "fast")
+        );
+        await test.act(() =>
+            input(
+                find(test.dialog, 'input[name="model-upstream-0"]'),
+                "local-model",
+            )
+        );
+        await test.act(() => button(test.dialog, "保存修改").click());
+        assertEquals(test.requests.length, 1);
+        assertEquals(test.changes, []);
+        assertEquals(test.closes, 0);
+        assert(test.dialog.textContent.includes(corrupted.configurationError!));
+        assert(button(test.dialog, "保存修改").disabled);
+        assertEquals(
+            find(test.dialog, 'input[name="model-upstream-0"]').value,
+            "local-model",
+        );
+        await test.act(() => button(test.dialog, "读取最新信息").click());
+        assert(test.dialog.textContent.includes(corrupted.configurationError!));
+        assertEquals(
+            find(test.dialog, 'input[name="model-upstream-0"]').value,
+            "local-model",
+        );
+        await test.act(() => button(test.dialog, "保存修改").click());
+        assertEquals(JSON.parse(String(test.requests[2]?.init?.body)), {
+            modelMap: { fast: "local-model" },
+        });
+        assertEquals(
+            new Headers(test.requests[2]?.init?.headers).get("if-match"),
+            latest.versionstamp,
+        );
+        assertEquals(test.changes[0]?.source.configurationError, undefined);
+        assertEquals(
+            test.changes[0]?.source.configurationErrorField,
+            undefined,
+        );
+        assertEquals(test.closes, 1);
+    } finally {
+        await test.dispose();
+    }
+});
+
+Deno.test("provider configuration errors guide the config editor and are not cleared by metadata saves", async () => {
+    const corrupted: ListedSource = {
+        ...source,
+        enabled: false,
+        middleware: [],
+        modelMap: {},
+        configurationError: "连接参数无效，请重新配置。",
+        configurationErrorField: "config",
+    };
+    for (const changeMiddleware of [false, true]) {
+        const test = await setup(undefined, { source: corrupted });
+        try {
+            assert(test.dialog.textContent.includes("渠道卡的「配置」入口"));
+            await test.edit("name", "新名称");
+            if (changeMiddleware) {
+                await test.act(() =>
+                    find(
+                        test.dialog,
+                        'button[data-dropdown="source-middleware-mode"]',
+                    )
+                        .click()
+                );
+                await test.act(() =>
+                    find(
+                        test.dialog,
+                        'button[role="option"][data-value="inherit"]',
+                    )
+                        .click()
+                );
+            }
+            await test.act(() => button(test.dialog, "保存修改").click());
+            assertEquals(JSON.parse(String(test.requests[0]?.init?.body)), {
+                name: "新名称",
+                ...(changeMiddleware ? { middleware: null } : {}),
+            });
+            assertEquals(
+                test.changes[0]?.source.configurationError,
+                corrupted.configurationError,
+            );
+            assertEquals(
+                test.changes[0]?.source.configurationErrorField,
+                "config",
+            );
+        } finally {
+            await test.dispose();
+        }
+    }
+});
 
 Deno.test("source management saves only dirty fields then closes and restores focus", async () => {
     for (const field of ["name", "priority"] as const) {

@@ -7,6 +7,7 @@ import type { SourceProxySelection, SourceProxySummary } from "./proxies.ts";
 import type { UiJsonObject } from "./ui.ts";
 export type * from "./journal.ts";
 export type { SourceModelMap } from "./source-model-map.ts";
+export type { SourceMiddleware } from "./source-middleware.ts";
 
 export type {
     ProxyEntryView,
@@ -91,15 +92,21 @@ export interface PluginDto {
     readonly lastError?: string;
     readonly canToggle?: boolean;
     readonly managed?: boolean;
+    readonly revision?: string;
+    readonly rollbackVersion?: string;
 }
 
 /** Operator input for a new configured source instance. */
 export interface CreateSourceInput {
+    readonly healthPolicy?:
+        | import("./source-health.ts").SourceHealthPolicy
+        | null;
     readonly id: string;
     readonly name: string;
     readonly priority: number;
     readonly proxy?: SourceProxySelection;
     readonly modelMap?: import("./source-model-map.ts").SourceModelMap;
+    readonly middleware?: import("./source-middleware.ts").SourceMiddleware;
     readonly sourcePluginId: string;
     readonly presetId?: string;
     readonly config: unknown;
@@ -107,19 +114,36 @@ export interface CreateSourceInput {
 
 /** Host-owned instance settings; provider configuration has a separate endpoint. */
 export interface UpdateSourceInput {
+    readonly healthPolicy?:
+        | import("./source-health.ts").SourceHealthPolicy
+        | null;
     readonly name?: string;
     readonly priority?: number;
     readonly enabled?: boolean;
     readonly proxy?: SourceProxySelection;
     readonly modelMap?: import("./source-model-map.ts").SourceModelMap;
+    readonly middleware?: import("./source-middleware.ts").SourceMiddleware;
 }
 
 export interface SourceDto {
+    readonly healthPolicy?:
+        | import("./source-health.ts").SourceHealthPolicy
+        | null;
+    readonly effectiveHealthPolicy?:
+        import("./source-health.ts").EffectiveSourceHealthPolicy;
     readonly id: string;
+    /** Invalid host metadata suspends routing until the operator repairs it. */
+    readonly configurationError?: string;
+    readonly configurationErrorField?:
+        | "modelMap"
+        | "config"
+        | "middleware"
+        | "healthPolicy";
     readonly name?: string;
     readonly priority?: number;
     readonly proxy?: SourceProxySelection;
     readonly modelMap?: import("./source-model-map.ts").SourceModelMap;
+    readonly middleware?: import("./source-middleware.ts").SourceMiddleware;
     readonly proxySummary?: SourceProxySummary;
     readonly sourcePluginId?: string;
     readonly enabled: boolean;

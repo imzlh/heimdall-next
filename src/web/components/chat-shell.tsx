@@ -1,4 +1,5 @@
 import type { Child, FC } from "hono/jsx";
+import { HEIMDALL_ICON_URL } from "../shared/brand.ts";
 
 export interface ChatShellProps {
     readonly children?: Child;
@@ -19,6 +20,7 @@ export const ChatShell: FC<ChatShellProps> = (props) => (
             />
             <title>Heimdall Chat</title>
             <meta name="color-scheme" content="light dark" />
+            <link rel="icon" type="image/svg+xml" href={HEIMDALL_ICON_URL} />
             {props.stylesheet !== "" && (
                 <link
                     rel="stylesheet"

@@ -7,13 +7,24 @@ import { applySourceModelMap } from "./source-model-mapping.ts";
 const originalSources = new WeakMap<InferenceSource, InferenceSource>();
 const settingsSources = new WeakMap<InferenceSource, InferenceSource>();
 
+/** Quarantine diagnostics are host state; provider credentials never enter them. */
+export interface SourceConfigurationIssue {
+    readonly field: "modelMap" | "config" | "healthPolicy";
+    readonly message: string;
+}
+
 /** Instance metadata belongs to the host, outside provider-owned raw config. */
 export interface SourceRecordMetadata {
+    readonly healthPolicy?:
+        | import("@heimdall/contracts/source-health.ts").SourceHealthPolicy
+        | null;
     readonly name?: string;
     readonly priority?: number;
     readonly proxy?: SourceProxySelection;
     /** Client model alias to upstream model name, owned by the host. */
     readonly modelMap?: Readonly<Record<string, string>>;
+    /** Null/omitted inherits global middleware; an array replaces its order. */
+    readonly middleware?: readonly string[] | null;
 }
 
 export interface StoredSourceConfig extends SourceRecordMetadata {

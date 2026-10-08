@@ -171,6 +171,21 @@ export class TestElement extends TestNode {
 
     scrollTo(): void {}
 
+    /** Geometry is intentionally unmodeled; callers may still measure controls. */
+    getBoundingClientRect(): DOMRect {
+        return {
+            x: 0,
+            y: 0,
+            width: 0,
+            height: 0,
+            top: 0,
+            right: 0,
+            bottom: 0,
+            left: 0,
+            toJSON: () => ({}),
+        };
+    }
+
     querySelector(selector: string): TestElement | null {
         return this.querySelectorAll(selector)[0] ?? null;
     }
@@ -232,6 +247,7 @@ class TestSvgElement extends TestElement {}
 
 class TestDocument extends EventTarget {
     visibilityState: "visible" | "hidden" = "visible";
+    readonly documentElement = new TestElement("html", this);
     readonly body = new TestElement("body", this);
     readonly head = new TestElement("head", this);
     activeElement: TestElement | null = this.body;

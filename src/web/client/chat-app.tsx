@@ -17,7 +17,7 @@ import {
 import { downloadConversation } from "./chat/export.ts";
 import { MessageEditor } from "./chat/message-editor.tsx";
 import { ConversationBranches } from "./chat/conversation-branches.tsx";
-import { useChatExtensions } from "./chat/extensions.tsx";
+import { ChatClientSlots, useChatExtensions } from "./chat/extensions.tsx";
 
 function savedTheme(): "light" | "dark" {
     try {
@@ -60,7 +60,9 @@ function ConversationSettings(
         state.conversation?.systemPrompt ?? "",
     );
     const [settingsState, setSettingsState] = useState<TitleSaveState>("idle");
-    const settingsTimer = useRef<number | undefined>(undefined);
+    const settingsTimer = useRef<
+        ReturnType<typeof globalThis.setTimeout> | undefined
+    >(undefined);
     const conversationId = state.conversation?.id ?? "";
     useEffect(() => {
         setPromptDraft(state.conversation?.systemPrompt ?? "");
@@ -567,6 +569,13 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                         </li>
                     )}
                 </ul>
+                <ChatClientSlots
+                    slot="chat.sidebar"
+                    extensions={plugins.extensions}
+                    state={state}
+                    controller={controller}
+                    theme={theme}
+                />
                 {plugins.error && (
                     <p class="chat-plugin-notice" role="status">
                         {plugins.error}
@@ -852,6 +861,15 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                 <ChatComposer
                     state={state}
                     controller={controller}
+                    capabilities={
+                        <ChatClientSlots
+                            slot="chat.composer"
+                            extensions={plugins.extensions}
+                            state={state}
+                            controller={controller}
+                            theme={theme}
+                        />
+                    }
                 />
             </section>
             {management && (

@@ -9,17 +9,25 @@ import {
     type LifecycleHookContext,
     LifecycleHookRegistry,
     MiddlewareRegistry,
+    SourceMiddlewareError,
 } from "./hooks.ts";
 import type {
     Kernel,
     KernelExecution,
     KernelExecutionPorts,
     RequestLifecycle,
+    SourceMiddlewareBindings,
 } from "./mod.ts";
+import {
+    type ExecutionMiddleware,
+    sourceMiddlewareExecution,
+} from "./source-middleware.ts";
 
 /** Options for the semantic execution plane. Protocol routing is host-owned. */
 export interface KernelRuntimeOptions extends KernelExecutionPorts {
     readonly middleware?: MiddlewareRegistry;
+    /** Snapshot host-owned per-source overrides at the start of each request. */
+    readonly sourceMiddleware?: () => SourceMiddlewareBindings;
     readonly lifecycleHooks?: LifecycleHookRegistry;
     /** Require a terminal HIP event before a source iterable completes. */
     readonly requireTerminal?: boolean;
@@ -57,6 +65,7 @@ export class KernelRuntime implements Kernel {
     readonly sources: KernelExecutionPorts["sources"];
     readonly lifecycle: KernelExecutionPorts["lifecycle"];
     readonly middleware: MiddlewareRegistry;
+    readonly sourceMiddleware: (() => SourceMiddlewareBindings) | undefined;
     readonly lifecycleHooks: LifecycleHookRegistry;
     readonly requireTerminal: boolean;
     #now: () => Date;
@@ -69,6 +78,15 @@ export class KernelRuntime implements Kernel {
         this.sources = options.sources;
         this.lifecycle = options.lifecycle;
         this.middleware = options.middleware ?? new MiddlewareRegistry();
+        this.sourceMiddleware = options.sourceMiddleware;
+        if (
+            this.sourceMiddleware !== undefined &&
+            options.sources.runWith === undefined
+        ) {
+            throw new TypeError(
+                "source middleware requires a source router with runWith()",
+            );
+        }
         this.lifecycleHooks = options.lifecycleHooks ??
             new LifecycleHookRegistry();
         this.requireTerminal = options.requireTerminal ?? true;
@@ -80,7 +98,8 @@ export class KernelRuntime implements Kernel {
     /**
      * Prepare an execution before a host starts serializing it. Awaiting this
      * method guarantees that request middleware has already run and the returned
-     * request is the semantic request that the source will receive.
+     * request is the globally prepared semantic request. With source bindings,
+     * it stays the public routing request; the selected chain runs per attempt.
      */
     async run(
         request: OperationRequest,
@@ -89,7 +108,7 @@ export class KernelRuntime implements Kernel {
     ): Promise<KernelExecution> {
         validateLifecycle(request, lifecycle);
         lifecycle.signal.throwIfAborted();
-        const middleware = this.middleware.snapshot();
+        const middleware = this.snapshotMiddleware(request);
         const transformed = await this.transformRequest(
             request,
             options.requestContext,
@@ -114,11 +133,11 @@ export class KernelRuntime implements Kernel {
     ): KernelExecution {
         validateLifecycle(request, lifecycle);
         let prepared = request;
-        let middleware = this.middleware;
+        let middleware: ExecutionMiddleware;
         let preparation: Promise<void> | undefined;
         const prepare = async (): Promise<void> => {
             if (preparation === undefined) {
-                middleware = this.middleware.snapshot();
+                middleware = this.snapshotMiddleware(request);
                 preparation = this.transformRequest(
                     request,
                     options.requestContext,
@@ -164,15 +183,37 @@ export class KernelRuntime implements Kernel {
     private async transformRequest(
         request: OperationRequest,
         context: RequestContext | undefined,
-        middleware: MiddlewareRegistry,
+        middleware: ExecutionMiddleware,
     ): Promise<OperationRequest> {
-        if (middleware.list().length === 0) return request;
+        if (
+            middleware.perSource ||
+            middleware.global.list().length === 0
+        ) return request;
         if (context === undefined) {
             throw new KernelContextError(
                 "a RequestContext is required when middleware plugins are registered",
             );
         }
-        return await middleware.transformRequest(request, context);
+        return await middleware.global.transformRequest(request, context);
+    }
+
+    private snapshotMiddleware(request: OperationRequest): ExecutionMiddleware {
+        const bindings = new Map(
+            [...(this.sourceMiddleware?.() ?? [])].map((
+                [id, binding],
+            ) => [id, [...binding]]),
+        );
+        return {
+            global: this.middleware.snapshot(),
+            bindings,
+            // Unrelated bindings do not change global pre-routing transforms.
+            // Keep them in the snapshot so that a later model rewrite cannot
+            // bypass an explicitly bound source's independent chain.
+            perSource: bindings.size > 0 && (this.sources.hasMatchingSource?.(
+                request,
+                new Set(bindings.keys()),
+            ) ?? true),
+        };
     }
 
     private lazyFrames(
@@ -180,7 +221,7 @@ export class KernelRuntime implements Kernel {
         request: () => OperationRequest,
         lifecycle: RequestLifecycle,
         options: KernelExecuteOptions,
-        middleware: () => MiddlewareRegistry,
+        middleware: () => ExecutionMiddleware,
     ): AsyncIterable<StreamFrame> {
         return this.lazyFrameStream(
             prepare,
@@ -196,7 +237,7 @@ export class KernelRuntime implements Kernel {
         request: () => OperationRequest,
         lifecycle: RequestLifecycle,
         options: KernelExecuteOptions,
-        middleware: () => MiddlewareRegistry,
+        middleware: () => ExecutionMiddleware,
     ): AsyncIterable<StreamFrame> {
         lifecycle.signal.throwIfAborted();
         await prepare();
@@ -214,7 +255,7 @@ export class KernelRuntime implements Kernel {
         request: OperationRequest,
         lifecycle: RequestLifecycle,
         options: KernelExecuteOptions,
-        middleware: MiddlewareRegistry,
+        middleware: ExecutionMiddleware,
     ): AsyncIterable<StreamFrame> {
         return this.frameStream(request, lifecycle, options, middleware);
     }
@@ -223,7 +264,7 @@ export class KernelRuntime implements Kernel {
         request: OperationRequest,
         lifecycle: RequestLifecycle,
         options: KernelExecuteOptions,
-        middleware: MiddlewareRegistry,
+        middleware: ExecutionMiddleware,
     ): AsyncIterable<StreamFrame> {
         const context = options.requestContext;
         const hookContext: LifecycleHookContext = { request, lifecycle };
@@ -269,14 +310,31 @@ export class KernelRuntime implements Kernel {
                     ...(request.metadata ?? {}),
                 },
             };
-            let sourceFrames = this.sources.run(request, sourceContext);
-            if (middleware.list().length > 0) {
+            let sourceFrames = middleware.perSource
+                ? this.sources.runWith!(
+                    request,
+                    sourceContext,
+                    sourceMiddlewareExecution(middleware, context),
+                )
+                : middleware.bindings.size > 0
+                ? this.sources.runWith!(
+                    request,
+                    sourceContext,
+                    (source, input, sourceContext) =>
+                        source.execute(input, sourceContext),
+                    new Set(middleware.bindings.keys()),
+                )
+                : this.sources.run(request, sourceContext);
+            if (
+                !middleware.perSource &&
+                middleware.global.list().length > 0
+            ) {
                 if (context === undefined) {
                     throw new KernelContextError(
                         "a RequestContext is required when middleware plugins are registered",
                     );
                 }
-                sourceFrames = await middleware.transformFrames(
+                sourceFrames = await middleware.global.transformFrames(
                     request,
                     context,
                     sourceFrames,
@@ -435,6 +493,14 @@ function errorEventFrame(
 
 /** Map an arbitrary thrown value onto the provider-independent error envelope. */
 function toCanonicalError(error: unknown): CanonicalError {
+    if (error instanceof SourceMiddlewareError) {
+        return {
+            code: error.code,
+            message: error.message,
+            status: error.status,
+            retryable: false,
+        };
+    }
     if (isCanonicalError(error)) return error;
     const message = error instanceof Error && error.message.length > 0
         ? error.message

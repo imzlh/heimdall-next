@@ -104,6 +104,7 @@ export async function serve(options: ServeOptions = {}): Promise<void> {
         adminManifestTargets: builtins.apis.map(apiPluginTarget),
         sourceRegistry: builtins.sources,
         middleware: builtins.middleware,
+        sourceMiddleware: builtins.sourceMiddleware,
         lifecycle: createRequestLifecycle(requests),
         requestJournal: requests,
         systemLog,

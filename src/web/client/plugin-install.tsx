@@ -5,6 +5,7 @@ import { describeError } from "./api/admin.ts";
 import { PluginDialog } from "./plugin-dialog.tsx";
 import {
     type PluginPackagePreview,
+    pluginPackageUpgradeError,
     readPluginPackage,
 } from "./plugin-package-file.ts";
 import {
@@ -33,8 +34,13 @@ export function PluginInstallDialog({ plugins, busy, onInstall, onClose }: {
             revision.current = (revision.current ?? 0) + 1;
         };
     }, []);
-    const duplicate = preview &&
-        plugins.some((plugin) => plugin.id === preview.plugin.id);
+    const installed = preview
+        ? plugins.find((plugin) => plugin.id === preview.plugin.id)
+        : undefined;
+    const upgrading = installed?.managed === true;
+    const upgradeError = preview && installed
+        ? pluginPackageUpgradeError(preview.plugin, installed)
+        : "";
     const locked = busy || reading;
 
     async function select(file?: File) {
@@ -66,21 +72,31 @@ export function PluginInstallDialog({ plugins, busy, onInstall, onClose }: {
     async function install() {
         if (
             submitting.current || locked || !preview ||
-            selected.current !== preview || duplicate
+            selected.current !== preview || upgradeError
         ) return;
         submitting.current = true;
         setError("");
         try {
             await onInstall(preview);
         } catch (error) {
-            if (mounted.current) setError(`安装失败：${describeError(error)}`);
+            if (mounted.current) {
+                setError(
+                    `${upgrading ? "升级" : "安装"}失败：${
+                        describeError(error)
+                    }`,
+                );
+            }
         } finally {
             submitting.current = false;
         }
     }
 
     return (
-        <PluginDialog title="安装插件" busy={busy} onClose={onClose}>
+        <PluginDialog
+            title={upgrading ? "升级插件" : "安装插件"}
+            busy={busy}
+            onClose={onClose}
+        >
             <form
                 onSubmit={(event) => {
                     event.preventDefault();
@@ -88,7 +104,7 @@ export function PluginInstallDialog({ plugins, busy, onInstall, onClose }: {
                 }}
             >
                 <p class="plugin-install-description">
-                    选择本地插件包，安装后可在卡片中启用。当前支持隔离运行的工具插件。
+                    选择本地插件包，安装新插件或升级已安装的托管插件。当前支持隔离运行的工具插件。
                 </p>
                 <div class="plugin-package-picker">
                     <label for="plugin-package-file">JSON 插件包</label>
@@ -123,6 +139,28 @@ export function PluginInstallDialog({ plugins, busy, onInstall, onClose }: {
                             )}
                         </header>
                         <code>{preview.plugin.id}</code>
+                        {installed && (
+                            <div
+                                class="plugin-preview-section"
+                                aria-label="版本变更"
+                            >
+                                <p>
+                                    当前版本：{installed.version
+                                        ? `v${installed.version}`
+                                        : "未提供"}
+                                </p>
+                                <p>
+                                    目标版本：{preview.plugin.version
+                                        ? `v${preview.plugin.version}`
+                                        : "未提供"}
+                                </p>
+                                {upgrading && (
+                                    <p class="field-help">
+                                        升级后保留当前启停状态，可回滚至升级前的版本。
+                                    </p>
+                                )}
+                            </div>
+                        )}
                         {preview.plugin.description && (
                             <p>{preview.plugin.description}</p>
                         )}
@@ -180,9 +218,9 @@ export function PluginInstallDialog({ plugins, busy, onInstall, onClose }: {
                         </details>
                     </section>
                 )}
-                {duplicate && (
+                {upgradeError && (
                     <p class="form-error" role="alert">
-                        该插件已存在。安装其他版本前，请先卸载托管插件；内置插件不能覆盖。
+                        {upgradeError}
                     </p>
                 )}
                 {error && <p class="form-error" role="alert">{error}</p>}
@@ -198,9 +236,11 @@ export function PluginInstallDialog({ plugins, busy, onInstall, onClose }: {
                     <button
                         type="submit"
                         class="primary-button"
-                        disabled={locked || !preview || Boolean(duplicate)}
+                        disabled={locked || !preview || Boolean(upgradeError)}
                     >
-                        {busy ? "正在安装…" : "安装插件包"}
+                        {busy
+                            ? (upgrading ? "正在升级…" : "正在安装…")
+                            : (upgrading ? "升级插件包" : "安装插件包")}
                     </button>
                 </footer>
             </form>

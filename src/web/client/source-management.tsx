@@ -7,7 +7,19 @@ import type {
 } from "@heimdall/admin-contracts/proxies.ts";
 import { sourceProxyValue } from "../shared/proxy-presentation.ts";
 import { SourceProxySelect } from "./source-proxy-select.tsx";
+import {
+    sameSourceMiddleware,
+    SourceMiddlewareSelect,
+} from "./source-middleware-select.tsx";
+import type { ListedPlugin } from "@heimdall/admin-contracts/console.ts";
 import type { SourceModelMap } from "@heimdall/admin-contracts/source-model-map.ts";
+import type { SourceHealthPolicy } from "@heimdall/admin-contracts/source-health.ts";
+import {
+    readSourceHealthPolicyDraft,
+    sameSourceHealthPolicy,
+    sourceHealthPolicyDraft,
+    SourceHealthPolicyEditor,
+} from "./source-health-policy.tsx";
 import {
     readSourceModelMapRows,
     sameSourceModelMap,
@@ -38,6 +50,7 @@ export function sourceManagementError(error: unknown): string {
 interface SourceManagementProps {
     readonly source: ListedSource;
     readonly proxyPool?: ProxyPoolView | null;
+    readonly plugins?: readonly ListedPlugin[];
     readonly onClose: () => void;
     readonly onChanged: (
         kind: "saved" | "deleted",
@@ -47,7 +60,7 @@ interface SourceManagementProps {
 
 /** Instance identity, provider configuration and plugin state are separate edits. */
 export function SourceManagementDialog(
-    { source, proxyPool, onClose, onChanged }: SourceManagementProps,
+    { source, proxyPool, plugins, onClose, onChanged }: SourceManagementProps,
 ) {
     const dialog = useRef<HTMLDialogElement | null>(null);
     const nameInput = useRef<HTMLInputElement | null>(null);
@@ -63,6 +76,12 @@ export function SourceManagementDialog(
     const [proxy, setProxy] = useState<SourceProxySelection>(
         source.proxy ?? { mode: "inherit" },
     );
+    const [middleware, setMiddleware] = useState<readonly string[] | null>(
+        source.middleware ?? null,
+    );
+    const [healthDraft, setHealthDraft] = useState(() =>
+        sourceHealthPolicyDraft(source.healthPolicy)
+    );
     const [modelRows, setModelRows] = useState<readonly SourceModelMapRow[]>(
         sourceModelMapRows(source.modelMap),
     );
@@ -73,9 +92,12 @@ export function SourceManagementDialog(
     const [conflict, setConflict] = useState(false);
     const [notice, setNotice] = useState("");
     const [errorField, setErrorField] = useState<
-        "name" | "priority" | "modelMap" | ""
+        "name" | "priority" | "modelMap" | "healthPolicy" | ""
     >("");
     const busy = Boolean(action) || closing;
+    const configurationErrorField = baseline.configurationError
+        ? baseline.configurationErrorField ?? "middleware"
+        : undefined;
 
     useEffect(() => {
         const element = dialog.current;
@@ -154,6 +176,8 @@ export function SourceManagementDialog(
             priority?: number;
             proxy?: SourceProxySelection;
             modelMap?: SourceModelMap;
+            middleware?: readonly string[] | null;
+            healthPolicy?: SourceHealthPolicy | null;
         } = {};
         if (kind === "save") {
             if (!name.trim() || name.trim().length > 120) {
@@ -177,9 +201,31 @@ export function SourceManagementDialog(
             if (sourceProxyValue(proxy) !== sourceProxyValue(baseline.proxy)) {
                 changes.proxy = proxy;
             }
+            if (
+                configurationErrorField === "middleware" ||
+                !sameSourceMiddleware(middleware, baseline.middleware)
+            ) {
+                changes.middleware = middleware;
+            }
+            try {
+                const healthPolicy = readSourceHealthPolicyDraft(healthDraft);
+                if (
+                    configurationErrorField === "healthPolicy" ||
+                    !sameSourceHealthPolicy(healthPolicy, baseline.healthPolicy)
+                ) {
+                    changes.healthPolicy = healthPolicy;
+                }
+            } catch (cause) {
+                setError(describeError(cause));
+                setErrorField("healthPolicy");
+                return;
+            }
             try {
                 const modelMap = readSourceModelMapRows(modelRows);
-                if (!sameSourceModelMap(modelMap, baseline.modelMap)) {
+                if (
+                    configurationErrorField === "modelMap" ||
+                    !sameSourceModelMap(modelMap, baseline.modelMap)
+                ) {
                     changes.modelMap = modelMap;
                 }
             } catch (cause) {
@@ -212,6 +258,23 @@ export function SourceManagementDialog(
                 ) {
                     setProxy(latest.proxy ?? { mode: "inherit" });
                 }
+                if (sameSourceMiddleware(middleware, baseline.middleware)) {
+                    setMiddleware(latest.middleware ?? null);
+                }
+                try {
+                    if (
+                        sameSourceHealthPolicy(
+                            readSourceHealthPolicyDraft(healthDraft),
+                            baseline.healthPolicy,
+                        )
+                    ) {
+                        setHealthDraft(
+                            sourceHealthPolicyDraft(latest.healthPolicy),
+                        );
+                    }
+                } catch {
+                    /* Keep incomplete local seconds while adopting the latest revision. */
+                }
                 try {
                     if (
                         sameSourceModelMap(
@@ -239,12 +302,23 @@ export function SourceManagementDialog(
                 await deleteSource(baseline.id, baseline.versionstamp);
             }
             if (!mounted.current) return;
+            const updated = { ...baseline, ...changes };
+            if (
+                kind === "save" &&
+                ((configurationErrorField === "middleware" &&
+                    changes.middleware !== undefined) ||
+                    (configurationErrorField === "modelMap" &&
+                        changes.modelMap !== undefined) ||
+                    (configurationErrorField === "healthPolicy" &&
+                        changes.healthPolicy !== undefined))
+            ) {
+                delete updated.configurationError;
+                delete updated.configurationErrorField;
+                setBaseline(updated);
+            }
             callbacks.current?.onChanged(
                 kind === "save" ? "saved" : "deleted",
-                {
-                    ...baseline,
-                    ...changes,
-                },
+                updated,
             );
             setClosing(true);
         } catch (caught) {
@@ -294,6 +368,24 @@ export function SourceManagementDialog(
             <p class="source-management-id">
                 <code>{baseline.id}</code>
             </p>
+            {baseline.configurationError && (
+                <div class="source-configuration-error">
+                    <p class="form-error" role="alert">
+                        {baseline.configurationError}
+                    </p>
+                    {view === "edit" && (
+                        <p class="field-help">
+                            {configurationErrorField === "modelMap"
+                                ? "确认下方模型映射后保存即可修复；留空表示移除模型映射。"
+                                : configurationErrorField === "config"
+                                ? "请通过渠道卡的「配置」入口修复连接参数。"
+                                : configurationErrorField === "healthPolicy"
+                                ? "确认下方健康策略后保存即可修复；选择继承全局会清除损坏的策略。"
+                                : "确认下方中间件设置后保存即可修复配置；空列表表示不使用中间件。"}
+                        </p>
+                    )}
+                </div>
+            )}
             {view === "edit"
                 ? (
                     <form
@@ -359,6 +451,25 @@ export function SourceManagementDialog(
                             onChange={(rows) => {
                                 setModelRows(rows);
                                 if (errorField === "modelMap") {
+                                    setErrorField("");
+                                    setError("");
+                                }
+                            }}
+                        />
+                        <SourceMiddlewareSelect
+                            value={middleware}
+                            plugins={plugins}
+                            disabled={busy || conflict}
+                            onChange={setMiddleware}
+                        />
+                        <SourceHealthPolicyEditor
+                            value={healthDraft}
+                            effectivePolicy={baseline.effectiveHealthPolicy}
+                            disabled={busy || conflict}
+                            invalid={errorField === "healthPolicy"}
+                            onChange={(value) => {
+                                setHealthDraft(value);
+                                if (errorField === "healthPolicy") {
                                     setErrorField("");
                                     setError("");
                                 }

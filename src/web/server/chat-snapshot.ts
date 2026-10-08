@@ -4,6 +4,7 @@ import type {
     ChatInitial,
     ChatMessage,
 } from "@heimdall/admin-contracts/chat.ts";
+import { parseChatDisabledTools } from "@heimdall/admin-contracts/chat.ts";
 import { projectChatTools } from "@heimdall/admin-contracts/chat-ui.ts";
 import type { AdminDispatch } from "./bridge.ts";
 import { readBoundedBody } from "./request.ts";
@@ -58,6 +59,16 @@ export async function loadChatSnapshot(
         const input = record(value);
         if (!input || typeof input.id !== "string") return null;
         const branches = readChatBranches(input.branches);
+        let disabledTools: string[] | undefined;
+        if (input.disabledTools !== undefined) {
+            try {
+                disabledTools = parseChatDisabledTools(input.disabledTools);
+            } catch {
+                // Never project a partial selection as though every choice loaded.
+                errors.push("无法读取会话插件设置，请刷新重试。");
+                return null;
+            }
+        }
         return {
             id: string(input.id),
             title: string(input.title) || "新对话",
@@ -79,13 +90,7 @@ export async function loadChatSnapshot(
                     input.systemPrompt.length > 0
                 ? { systemPrompt: input.systemPrompt }
                 : {}),
-            ...(Array.isArray(input.disabledTools)
-                ? {
-                    disabledTools: input.disabledTools.filter((
-                        item,
-                    ) => typeof item === "string"),
-                }
-                : {}),
+            ...(disabledTools ? { disabledTools } : {}),
             ...(input.reasoningEffort === "low" ||
                     input.reasoningEffort === "medium" ||
                     input.reasoningEffort === "high"
@@ -327,10 +332,11 @@ export async function loadChatSnapshot(
                 : {}),
         }));
     }
-    initial.selectedModel =
+    if (
         options.selectedModel && initial.models.includes(options.selectedModel)
-            ? options.selectedModel
-            : initial.models[0];
+    ) {
+        initial.selectedModel = options.selectedModel;
+    }
     if (selected) {
         initial.conversation = conversation(selected.conversation);
         if (Array.isArray(selected.messages)) {

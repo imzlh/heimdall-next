@@ -70,6 +70,35 @@ Deno.test("source creation drafts copy only whitelisted fields and do not evalua
     assertEquals(JSON.stringify(draft).includes("secret"), false);
 });
 
+Deno.test("source middleware metadata stays ordered and detached across preset reselection", () => {
+    const selected = ["middleware.second", "middleware.first"];
+    const draft = createSourceSetupDraft({ ...PRESET, middleware: selected });
+    selected.reverse();
+    assertEquals(draft.middleware, ["middleware.second", "middleware.first"]);
+    const custom = createSourceSetupDraft(
+        { ...draft, mode: "custom" },
+        draft.id,
+    );
+    assertEquals(custom.middleware, draft.middleware);
+    assertEquals(
+        createSourceSetupDraft({ ...PRESET, middleware: null }).middleware,
+        null,
+    );
+    assertEquals(
+        createSourceSetupDraft({ ...PRESET, middleware: [] }).middleware,
+        [],
+    );
+    for (
+        const middleware of [["same", "same"], ["invalid id"], "plugin", [1]]
+    ) {
+        assertThrows(() =>
+            createSourceSetupDraft(
+                { ...PRESET, middleware } as SourceSetupSelection,
+            )
+        );
+    }
+});
+
 Deno.test("source creation works with blocked browser storage and never reads location", () => {
     const keys = ["localStorage", "sessionStorage", "location"] as const;
     const originals = keys.map((key) =>

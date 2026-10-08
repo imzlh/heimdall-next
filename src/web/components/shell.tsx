@@ -5,6 +5,7 @@
  */
 import type { Child, FC } from "hono/jsx";
 import { Icon, type IconName } from "../shared/icons.tsx";
+import { HEIMDALL_ICON_URL } from "../shared/brand.ts";
 
 export interface NavItem {
     readonly id: string;
@@ -59,6 +60,7 @@ export const AdminShell: FC<AdminShellProps> = (props) => (
             />
             <title>{props.title}</title>
             <meta name="color-scheme" content="light dark" />
+            <link rel="icon" type="image/svg+xml" href={HEIMDALL_ICON_URL} />
             {props.stylesheet !== "" && (
                 <link
                     rel="stylesheet"

@@ -89,6 +89,11 @@ Deno.test("source partial updates send only supplied fields and omit the default
         { proxy: { mode: "proxy" as const, proxyId: "office" } },
         { modelMap: { fast: "upstream-fast" } },
         { modelMap: {} },
+        { middleware: null },
+        { middleware: [] },
+        { middleware: ["middleware.second", "middleware.first"] },
+        { healthPolicy: null },
+        { healthPolicy: { cooldownMs: 0, authCooldownMs: 1250 } },
     ];
     await withTransport(
         () => Response.json({ updated: true }),
@@ -112,6 +117,33 @@ Deno.test("source partial updates send only supplied fields and omit the default
                     new Headers(request.init?.headers).has("if-match"),
                     false,
                 );
+            }
+        },
+    );
+});
+
+Deno.test("source creation sends ordered middleware separately from preset configuration", async () => {
+    await withTransport(
+        () => Response.json({ created: true }),
+        async (requests) => {
+            for (
+                const middleware of [undefined, null, [], [
+                    "middleware.second",
+                    "middleware.first",
+                ]]
+            ) {
+                await createSource({
+                    id: "source-with-middleware",
+                    name: "渠道",
+                    priority: 1,
+                    sourcePluginId: "heimdall.source.openai-compatible",
+                    presetId: "heimdall.preset.newapi",
+                    middleware,
+                    config: { baseUrl: "https://provider.example/v1" },
+                });
+                const body = JSON.parse(String(requests.at(-1)?.init?.body));
+                assertEquals(body.middleware, middleware);
+                assertEquals(body.config.middleware, undefined);
             }
         },
     );

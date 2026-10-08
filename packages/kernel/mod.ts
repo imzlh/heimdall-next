@@ -27,11 +27,32 @@ export interface ProtocolRouter {
 
 export interface SourceRouter {
     select(request: OperationRequest): InferenceSource;
+    /** Check capability matches without consuming routing/round-robin state. */
+    hasMatchingSource?(
+        request: OperationRequest,
+        sourceIds: ReadonlySet<string>,
+    ): boolean;
     run(
         request: OperationRequest,
         context: SourceContext,
     ): AsyncIterable<StreamFrame>;
+    /** Host execution decoration applied independently to every routing attempt. */
+    runWith?(
+        request: OperationRequest,
+        context: SourceContext,
+        execute: SourceExecution,
+        excludedSourceIds?: ReadonlySet<string>,
+    ): AsyncIterable<StreamFrame>;
 }
+
+export type SourceExecution = (
+    source: InferenceSource,
+    request: OperationRequest,
+    context: SourceContext,
+) => AsyncIterable<StreamFrame>;
+
+/** Absent keys inherit the global chain; arrays replace it in the saved order. */
+export type SourceMiddlewareBindings = ReadonlyMap<string, readonly string[]>;
 
 export interface RequestLifecycle {
     readonly requestId: string;
@@ -113,6 +134,7 @@ export {
     type LifecycleHookContext,
     LifecycleHookRegistry,
     MiddlewareRegistry,
+    SourceMiddlewareError,
 } from "./hooks.ts";
 export {
     createKernelRuntime,

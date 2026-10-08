@@ -2,6 +2,66 @@ import { assert, assertEquals, assertFalse } from "@std/assert";
 import { UI_LIMITS } from "@heimdall/admin-contracts/ui.ts";
 import { loadConsoleSnapshot } from "@heimdall/core/web/server/snapshot.ts";
 
+Deno.test("SSR preserves health policy overrides, effective defaults and repair identity without forwarding malformed policy", async () => {
+    const snapshot = await loadConsoleSnapshot({
+        authorized: true,
+        dispatch(request) {
+            return Response.json(
+                new URL(request.url).pathname === "/api/admin/status"
+                    ? {
+                        sources: [
+                            {
+                                id: "custom",
+                                healthPolicy: { cooldownMs: 0 },
+                                effectiveHealthPolicy: {
+                                    cooldownMs: 0,
+                                    authCooldownMs: 65000,
+                                },
+                            },
+                            {
+                                id: "inherit",
+                                healthPolicy: null,
+                                effectiveHealthPolicy: {
+                                    cooldownMs: 2500,
+                                    authCooldownMs: 30000,
+                                },
+                            },
+                            {
+                                id: "broken",
+                                healthPolicy: {
+                                    cooldownMs: -1,
+                                    credential: "policy-secret",
+                                },
+                                effectiveHealthPolicy: {
+                                    cooldownMs: "oops",
+                                    authCooldownMs: 0,
+                                },
+                                configurationError: "健康策略损坏",
+                                configurationErrorField: "healthPolicy",
+                            },
+                        ],
+                    }
+                    : {},
+            );
+        },
+    });
+    const [custom, inherited, broken] = snapshot.dashboard.status.sources;
+    assertEquals(custom?.healthPolicy, { cooldownMs: 0 });
+    assertEquals(custom?.effectiveHealthPolicy, {
+        cooldownMs: 0,
+        authCooldownMs: 65000,
+    });
+    assertEquals(inherited?.healthPolicy, null);
+    assertEquals(inherited?.effectiveHealthPolicy, {
+        cooldownMs: 2500,
+        authCooldownMs: 30000,
+    });
+    assertEquals(broken?.healthPolicy, undefined);
+    assertEquals(broken?.effectiveHealthPolicy, undefined);
+    assertEquals(broken?.configurationErrorField, "healthPolicy");
+    assertFalse(JSON.stringify(snapshot).includes("policy-secret"));
+});
+
 Deno.test("unauthenticated SSR only reads public health and supplies a tokenless empty dashboard", async () => {
     const requested: string[] = [];
     const snapshot = await loadConsoleSnapshot({
@@ -247,6 +307,45 @@ Deno.test("SSR source metadata accepts only strings and safe integer priorities"
         assertEquals(source.sourcePluginId, undefined);
     }
     assertFalse(JSON.stringify(snapshot).includes("PRIVATE-CONFIG"));
+});
+
+Deno.test("SSR preserves ordered middleware overrides, empty chains and global inheritance", async () => {
+    const snapshot = await loadConsoleSnapshot({
+        authorized: true,
+        includeActivity: false,
+        dispatch(request) {
+            return Response.json(
+                new URL(request.url).pathname === "/api/admin/status"
+                    ? {
+                        sources: [
+                            {
+                                id: "ordered",
+                                middleware: [
+                                    "middleware.second",
+                                    "middleware.first",
+                                ],
+                            },
+                            { id: "empty", middleware: [] },
+                            { id: "inherited", middleware: null },
+                            { id: "legacy" },
+                        ],
+                    }
+                    : {},
+            );
+        },
+    });
+    assertEquals(
+        snapshot.dashboard.status.sources.map((source) => source.middleware),
+        [
+            ["middleware.second", "middleware.first"],
+            [],
+            null,
+            undefined,
+        ],
+    );
+    assertFalse(
+        Object.hasOwn(snapshot.dashboard.status.sources[3]!, "middleware"),
+    );
 });
 
 Deno.test("SSR marks expired authorization while keeping the public health visible", async () => {

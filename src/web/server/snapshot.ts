@@ -25,6 +25,12 @@ import {
     parseSourceModelMap,
     type SourceModelMap,
 } from "@heimdall/admin-contracts/source-model-map.ts";
+import { parseSourceMiddleware } from "@heimdall/admin-contracts/source-middleware.ts";
+import {
+    type EffectiveSourceHealthPolicy,
+    parseSourceHealthPolicy,
+    type SourceHealthPolicy,
+} from "@heimdall/admin-contracts/source-health.ts";
 import {
     readMaintenanceStatus,
     readRetentionDays,
@@ -191,8 +197,39 @@ export async function loadConsoleSnapshot(
                 (source): ListedSource => {
                     const probe = record(source.probe);
                     const ui = sourceUiSnapshot(source.ui, redact);
+                    const healthPolicy = readHealthPolicy(source.healthPolicy);
+                    const effectiveHealthPolicy = readEffectiveHealthPolicy(
+                        source.effectiveHealthPolicy,
+                    );
                     return {
                         id: text(source.id),
+                        ...(typeof source.configurationError === "string"
+                            ? {
+                                configurationError: redact(
+                                    source.configurationError,
+                                ),
+                                ...([
+                                        "modelMap",
+                                        "config",
+                                        "middleware",
+                                        "healthPolicy",
+                                    ]
+                                        .includes(
+                                            String(
+                                                source.configurationErrorField,
+                                            ),
+                                        )
+                                    ? {
+                                        configurationErrorField: source
+                                            .configurationErrorField as
+                                                | "modelMap"
+                                                | "config"
+                                                | "middleware"
+                                                | "healthPolicy",
+                                    }
+                                    : {}),
+                            }
+                            : {}),
                         name: text(source.name),
                         priority: typeof source.priority === "number" &&
                                 Number.isSafeInteger(source.priority)
@@ -205,6 +242,16 @@ export async function loadConsoleSnapshot(
                         versionstamp: text(source.versionstamp),
                         proxy: sourceProxySelection(source.proxy, redact),
                         modelMap: readModelMap(source.modelMap, redact),
+                        ...(healthPolicy === undefined ? {} : { healthPolicy }),
+                        ...(effectiveHealthPolicy === undefined
+                            ? {}
+                            : { effectiveHealthPolicy }),
+                        ...(source.middleware === undefined ? {} : {
+                            middleware: readMiddleware(
+                                source.middleware,
+                                redact,
+                            ),
+                        }),
                         proxySummary: sourceProxySummary(
                             source.proxySummary,
                             redact,
@@ -401,6 +448,41 @@ function readModelMap(
     } catch {
         return {};
     }
+}
+
+function readMiddleware(value: unknown, redact: (value: string) => string) {
+    try {
+        const selection = parseSourceMiddleware(value);
+        return selection === null
+            ? null
+            : parseSourceMiddleware(selection.map(redact));
+    } catch {
+        return [];
+    }
+}
+
+function readHealthPolicy(
+    value: unknown,
+): SourceHealthPolicy | null | undefined {
+    if (value === undefined) return undefined;
+    try {
+        return parseSourceHealthPolicy(value);
+    } catch {
+        return undefined;
+    }
+}
+
+function readEffectiveHealthPolicy(
+    value: unknown,
+): EffectiveSourceHealthPolicy | undefined {
+    const policy = readHealthPolicy(value);
+    return typeof policy?.cooldownMs === "number" &&
+            typeof policy.authCooldownMs === "number"
+        ? {
+            cooldownMs: policy.cooldownMs,
+            authCooldownMs: policy.authCooldownMs,
+        }
+        : undefined;
 }
 
 function sourceProxySelection(

@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { upgradeWebSocket } from "hono/deno";
 import type { RequestContext } from "@heimdall/contracts";
 import type { ChatAttachment } from "@heimdall/storage";
+import { parseChatDisabledTools } from "@heimdall/admin-contracts/chat.ts";
 import type { ServerApp, ServerEnv } from "./app.ts";
 import { chatSocketProtocol } from "./chat-auth.ts";
 import { createChatAssetRoutes } from "./chat-asset-routes.ts";
@@ -135,21 +136,15 @@ export function createChatRoutes(options: ChatRouteOptions): ServerApp {
         }
         let disabledTools: readonly string[] | undefined;
         if (hasDisabledTools) {
-            if (
-                !Array.isArray(body.disabledTools) ||
-                body.disabledTools.length > 32 ||
-                !body.disabledTools.every((item) =>
-                    typeof item === "string" && item.length > 0 &&
-                    item.length <= 128
-                )
-            ) {
+            try {
+                disabledTools = parseChatDisabledTools(body.disabledTools);
+            } catch (error) {
                 throw new ChatRouteError(
                     400,
                     "invalid_request",
-                    "disabledTools must be an array of at most 32 plugin ids",
+                    (error as Error).message,
                 );
             }
-            disabledTools = [...new Set(body.disabledTools)];
         }
         return await withChatConversation(options.store, id, () => {
             const conversation = options.store.getConversation(id);

@@ -5,6 +5,7 @@ import type {
     ChatEvent,
     ChatMessage,
 } from "@heimdall/admin-contracts/chat.ts";
+import { parseChatDisabledTools } from "@heimdall/admin-contracts/chat.ts";
 import { AdminApiError, getAdminToken, request } from "./admin.ts";
 import { payloadRecord } from "./transport.ts";
 import { readChatBranches } from "../../shared/chat-branches.ts";
@@ -69,11 +70,13 @@ function readConversation(value: unknown): ChatConversation {
         body.reasoningEffort === "high"
     ) conversation.reasoningEffort = body.reasoningEffort;
     if (body.disabledTools !== undefined) {
-        if (
-            !Array.isArray(body.disabledTools) ||
-            !body.disabledTools.every((item) => typeof item === "string")
-        ) return invalidResponse();
-        conversation.disabledTools = body.disabledTools;
+        try {
+            conversation.disabledTools = parseChatDisabledTools(
+                body.disabledTools,
+            );
+        } catch {
+            return invalidResponse();
+        }
     }
     if (body.activeMessageId !== undefined) {
         conversation.activeMessageId = text(body.activeMessageId);
@@ -430,7 +433,7 @@ export async function updateChatConversationSettings(
         body.reasoningEffort = patch.reasoningEffort;
     }
     if (patch.disabledTools !== undefined) {
-        body.disabledTools = patch.disabledTools;
+        body.disabledTools = parseChatDisabledTools(patch.disabledTools);
     }
     const payload = record(
         await chatRequest(

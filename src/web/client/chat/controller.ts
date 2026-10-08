@@ -7,6 +7,10 @@ import type {
 } from "../api/chat.ts";
 import { createChatApi } from "./api.ts";
 import {
+    MAX_CHAT_TOOLS,
+    parseChatDisabledTools,
+} from "@heimdall/admin-contracts/chat.ts";
+import {
     type ChatDraft as Draft,
     readStoredDraft,
     writeStoredDraft,
@@ -61,16 +65,20 @@ export function createChatController(
 ): ChatController {
     const { initial, onSelect } = options;
     const api = options.api ?? createChatApi();
-    // Remembered per-conversation models apply on selection; SSR state wins at
-    // construction so a deep link never gets overridden by local preferences.
+    // An explicit model deep link wins; an ordinary reload restores this
+    // conversation's last valid choice instead of resetting to the first model.
     const storedModels = readStoredModels();
+    const validModel = (model: string | undefined) =>
+        model && initial.models.includes(model) ? model : undefined;
     let state: ChatState = {
         conversations: initial.conversations,
         conversation: initial.conversation,
         selectedId: initial.conversation?.id ?? "",
         messages: initial.messages,
         models: initial.models,
-        model: initial.selectedModel ?? initial.models[0] ?? "",
+        model: validModel(initial.selectedModel) ??
+            validModel(storedModels[initial.conversation?.id ?? ""]) ??
+            initial.models[0] ?? "",
         tools: initial.tools ?? [],
         draft: "",
         attachments: [],
@@ -270,6 +278,8 @@ export function createChatController(
             writeStoredDraft("", emptyDraft());
         }
         const draft = draftFor(conversation.id);
+        const model = modelFor(conversation.id);
+        rememberModel(conversation.id, model);
         patch({
             conversation,
             selectedId: conversation.id,
@@ -277,7 +287,7 @@ export function createChatController(
             messages: [],
             draft: draft.text,
             attachments: draft.attachments,
-            model: modelFor(conversation.id),
+            model,
             streamText: "",
             toolCalls: [],
             streamReasoning: "",
@@ -502,9 +512,20 @@ export function createChatController(
         ) return false;
         const current = state.conversation?.disabledTools ??
             state.pendingDisabledTools ?? [];
-        const disabledTools = enabled
-            ? current.filter((value) => value !== id)
-            : [...new Set([...current, id])];
+        let disabledTools: string[];
+        try {
+            disabledTools = parseChatDisabledTools(
+                enabled
+                    ? current.filter((value) => value !== id)
+                    : [...new Set([...current, id])],
+            );
+        } catch {
+            patch({
+                error:
+                    `每个会话最多停用 ${MAX_CHAT_TOOLS} 个工具插件，请先调整已有选择。`,
+            });
+            return false;
+        }
         if (!state.selectedId) {
             patch({ pendingDisabledTools: disabledTools });
             return true;

@@ -1,4 +1,5 @@
 import type { ChatConversation, ChatToolInfo } from "./chat.ts";
+import { MAX_CHAT_TOOLS } from "./chat.ts";
 import {
     parseUiContributions,
     safeUiAssetPath,
@@ -25,16 +26,17 @@ export function isChatSlot(slot: string): boolean {
 export function projectChatTools(value: unknown): ChatToolInfo[] {
     if (!Array.isArray(value)) return [];
     const seen = new Set<string>();
-    return value.slice(0, 128).flatMap((item) => {
+    const tools: ChatToolInfo[] = [];
+    for (const item of value) {
         if (
             !item || typeof item !== "object" || item.kind !== "tool" ||
             item.enabled !== true ||
             typeof item.id !== "string" ||
             !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,79}$/.test(item.id) ||
             seen.has(item.id)
-        ) return [];
+        ) continue;
         seen.add(item.id);
-        return [{
+        tools.push({
             id: item.id,
             name: typeof item.name === "string" && item.name.trim()
                 ? item.name.slice(0, 80)
@@ -42,8 +44,10 @@ export function projectChatTools(value: unknown): ChatToolInfo[] {
             ...(typeof item.description === "string"
                 ? { description: item.description.slice(0, 512) }
                 : {}),
-        }];
-    });
+        });
+        if (tools.length === MAX_CHAT_TOOLS) break;
+    }
+    return tools;
 }
 
 /** Tool metadata gets a generic control; a manifest may replace that slot's UI. */

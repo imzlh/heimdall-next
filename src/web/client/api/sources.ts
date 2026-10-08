@@ -10,6 +10,8 @@ import type {
 } from "@heimdall/admin-contracts";
 import type { SourceDraftProbeResult } from "@heimdall/admin-contracts/source-probe.ts";
 import type { SourceHealthResetDto } from "@heimdall/admin-contracts/source-health.ts";
+import { parseSourceMiddleware } from "@heimdall/admin-contracts/source-middleware.ts";
+import { parseSourceHealthPolicy } from "@heimdall/admin-contracts/source-health.ts";
 
 /** Restore routing eligibility while preserving the last actual probe result. */
 export async function clearSourceCooldown(
@@ -65,6 +67,12 @@ export function updateSource(
                 ? { priority: input.priority }
                 : {}),
             ...(input.enabled !== undefined ? { enabled: input.enabled } : {}),
+            ...(input.middleware !== undefined
+                ? { middleware: parseSourceMiddleware(input.middleware) }
+                : {}),
+            ...(input.healthPolicy !== undefined
+                ? { healthPolicy: parseSourceHealthPolicy(input.healthPolicy) }
+                : {}),
             ...(input.proxy !== undefined ? { proxy: input.proxy } : {}),
             ...(input.modelMap !== undefined
                 ? { modelMap: input.modelMap }
@@ -94,7 +102,13 @@ export function createSource(input: CreateSourceInput): Promise<unknown> {
             name: input.name,
             priority: input.priority,
             sourcePluginId: input.sourcePluginId,
+            ...(input.middleware !== undefined
+                ? { middleware: parseSourceMiddleware(input.middleware) }
+                : {}),
             ...(input.presetId ? { presetId: input.presetId } : {}),
+            ...(input.healthPolicy !== undefined
+                ? { healthPolicy: parseSourceHealthPolicy(input.healthPolicy) }
+                : {}),
             ...(input.proxy !== undefined ? { proxy: input.proxy } : {}),
             ...(input.modelMap !== undefined
                 ? { modelMap: input.modelMap }

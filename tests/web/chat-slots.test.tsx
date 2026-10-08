@@ -25,6 +25,7 @@ import {
     type UiContribution,
 } from "@heimdall/admin-contracts/ui.ts";
 import { ChatPageView } from "@heimdall/core/web/pages/chat.tsx";
+import { ChatApp } from "@heimdall/core/web/client/chat-app.tsx";
 import { createChatController } from "@heimdall/core/web/client/chat/controller.ts";
 import { createChatApi } from "@heimdall/core/web/client/chat/api.ts";
 import {
@@ -170,6 +171,51 @@ Deno.test("Chat SSR renders both slots and current toggle state without executab
         ChatPageView({ initial: initial({ extensions, authenticated: false }) })
             .toString().includes("data-ui-slot"),
     );
+});
+
+Deno.test("ChatApp keeps both SSR slots after enhancement and updates their shared tool state", async () => {
+    const dom = installTestDom();
+    const previousFetch = globalThis.fetch;
+    const snapshot = initial({
+        conversation: null,
+        conversations: [],
+        extensions: buildChatExtensions([sidebar], [tool]),
+    });
+    globalThis.fetch = (input) => {
+        assertEquals(input, "/admin/chat/ui");
+        return Promise.resolve(Response.json(snapshot.extensions));
+    };
+    let unmount = () => {};
+    function Root() {
+        const [mounted, setMounted] = useState(true);
+        unmount = () => setMounted(false);
+        return mounted ? <ChatApp initial={snapshot} /> : null;
+    }
+    try {
+        await dom.act(() =>
+            render(<Root />, dom.root as unknown as HTMLElement)
+        );
+        const sidebarSlot = dom.root.querySelector(
+            '[data-ui-slot="chat.sidebar"]',
+        );
+        const composerSlot = dom.root.querySelector(
+            '[data-ui-slot="chat.composer"]',
+        );
+        assert(sidebarSlot, "The app must mount the sidebar slot after SSR");
+        assert(composerSlot, "The composer must receive its plugin slot");
+        assertStringIncludes(sidebarSlot.textContent, "本会话已启用");
+        const toggle = composerSlot.querySelector('[role="switch"]');
+        assert(toggle);
+        assertFalse(toggle.disabled);
+        assertEquals(toggle.getAttribute("aria-checked"), "true");
+        await dom.act(() => toggle.click());
+        assertEquals(toggle.getAttribute("aria-checked"), "false");
+        assertStringIncludes(sidebarSlot.textContent, "本会话已停用");
+    } finally {
+        await dom.act(unmount);
+        globalThis.fetch = previousFetch;
+        dom.restore();
+    }
 });
 
 Deno.test("Chat action bridge rejects stale conversations, peer-target payloads, disabled plugins and arbitrary actions", async () => {
@@ -393,6 +439,68 @@ Deno.test("Chat metadata invalidation refreshes after an in-flight read, unloads
         await dom.act();
         await dom.act();
         assertEquals(controller.getState().tools, []);
+    } finally {
+        await dom.act(unmount);
+        globalThis.fetch = previousFetch;
+        controller.dispose();
+        dom.restore();
+    }
+});
+
+Deno.test("Chat extensions recover the original catalog after a session expires and signs in again", async () => {
+    const dom = installTestDom();
+    const previousFetch = globalThis.fetch;
+    const snapshot = initial({
+        conversation: null,
+        extensions: buildChatExtensions([sidebar], [tool]),
+    });
+    const controller = createChatController({ initial: snapshot });
+    let authenticated = false;
+    globalThis.fetch = () =>
+        Promise.resolve(
+            authenticated
+                ? Response.json(snapshot.extensions)
+                : new Response(null, { status: 401 }),
+        );
+    let unmount = () => {};
+    function App() {
+        const plugins = useChatExtensions(snapshot, controller);
+        const [state, setState] = useState(controller.getState());
+        useEffect(() => controller.subscribe(setState), []);
+        return (
+            <>
+                <p role="status">{plugins.error}</p>
+                <ChatClientSlots
+                    slot="chat.sidebar"
+                    extensions={plugins.extensions}
+                    state={state}
+                    controller={controller}
+                    theme="light"
+                />
+            </>
+        );
+    }
+    function Root() {
+        const [mounted, setMounted] = useState(true);
+        unmount = () => setMounted(false);
+        return mounted ? <App /> : null;
+    }
+    try {
+        await dom.act(() =>
+            render(<Root />, dom.root as unknown as HTMLElement)
+        );
+        await dom.act();
+        assertEquals(controller.getState().tools, []);
+        assertEquals(dom.root.querySelector("[data-ui-extension]"), null);
+        assertStringIncludes(dom.root.textContent, "插件能力暂不可用");
+
+        authenticated = true;
+        await dom.act(() => notifyPluginCatalogChanged());
+        await dom.act();
+        assertEquals(controller.getState().tools, [tool]);
+        assert(dom.root.querySelector("[data-ui-extension]"));
+        assertStringIncludes(dom.root.textContent, "本会话已启用");
+        assertFalse(dom.root.textContent.includes("插件能力暂不可用"));
     } finally {
         await dom.act(unmount);
         globalThis.fetch = previousFetch;

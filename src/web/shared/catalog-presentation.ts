@@ -9,6 +9,9 @@ export interface CatalogState {
 }
 
 export function sourceState(source: ListedSource): CatalogState {
+    if (source.configurationError) {
+        return { label: "配置异常", tone: "amber" };
+    }
     if (source.instanceEnabled === false) {
         return { label: "已停用", tone: "muted" };
     }
@@ -37,6 +40,7 @@ export function shortSourceId(id: string): string {
 }
 
 export function sourceAvailabilityText(source: ListedSource): string {
+    if (source.configurationError) return source.configurationError;
     if (source.pluginEnabled === false) {
         return "源插件已停用，此渠道暂不可用。";
     }
@@ -74,6 +78,12 @@ export function canTogglePlugin(plugin: ListedPlugin): boolean {
 /** Only the host's managed marker grants package removal; built-ins stay installed. */
 export function canUninstallPlugin(plugin: ListedPlugin): boolean {
     return plugin.managed === true;
+}
+
+/** The host only exposes a rollback target when a retained package exists. */
+export function canRollbackPlugin(plugin: ListedPlugin): boolean {
+    return plugin.managed === true && Boolean(plugin.rollbackVersion?.trim()) &&
+        Boolean(plugin.revision?.trim());
 }
 
 export function pluginDependents(

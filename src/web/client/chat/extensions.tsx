@@ -136,6 +136,9 @@ export function useChatExtensions(
                     failure && typeof failure === "object" &&
                     "status" in failure && failure.status === 401
                 ) {
+                    // Compare the next refresh with what is actually rendered.
+                    // Signing in again may return the exact pre-expiry catalog.
+                    signature = JSON.stringify(EMPTY_CHAT_EXTENSIONS);
                     controller.replaceTools([]);
                     setExtensions(EMPTY_CHAT_EXTENSIONS);
                 }

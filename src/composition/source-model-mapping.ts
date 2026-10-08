@@ -111,6 +111,11 @@ export function sourceModelSettings(config: unknown, explicit?: unknown): {
     if (!config || typeof config !== "object" || Array.isArray(config)) {
         return { config, modelMap: parseSourceModelMap(explicit) };
     }
+    if (Object.hasOwn(config, "middleware")) {
+        throw new TypeError(
+            "中间件属于渠道基础配置，请在顶层 middleware 设置，不要放入源参数 config。",
+        );
+    }
     const { modelMap: legacy, ...provider } = config as Record<string, unknown>;
     return {
         config: provider,

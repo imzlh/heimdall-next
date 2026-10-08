@@ -33,6 +33,8 @@ export function projectListedPlugins(
             lastError: text(item.lastError),
             canToggle: bool(item.canToggle),
             managed: bool(item.managed),
+            revision: text(item.revision),
+            rollbackVersion: text(item.rollbackVersion),
         }];
     });
 }

@@ -48,8 +48,11 @@ import { probeSourceDraft } from "./source-draft-probe.ts";
 import { createProxyPool } from "./proxy-pool.ts";
 import { SourceProxyBindings } from "./source-proxy.ts";
 import { BuiltinMiddlewarePlugins } from "./middleware-plugins.ts";
+import { SourceHealthPersistence } from "./source-health-runtime.ts";
+import { parseSourceHealthPolicy } from "@heimdall/contracts/source-health.ts";
 import {
     applySourceSettings,
+    type SourceConfigurationIssue,
     type StoredSourceConfig,
 } from "./source-records.ts";
 import {
@@ -57,6 +60,7 @@ import {
     sourceModelSettings,
 } from "./source-model-mapping.ts";
 import { parseSourceModelMap } from "@heimdall/admin-contracts/source-model-map.ts";
+import type { SourceMiddleware } from "@heimdall/admin-contracts/source-middleware.ts";
 import {
     hydrateRuntimeSettings,
     redactRuntimeSettings,
@@ -111,8 +115,9 @@ export interface BuiltinComposition {
     /** Resolve enabled tool capabilities at the beginning of each chat turn. */
     readonly toolPlugins: () => readonly ToolPlugin[];
     readonly sources: SourceRegistry;
-    /** Live global HIP middleware; source bindings are not inferred. */
+    /** Live enabled HIP middleware, selected through host source bindings. */
     readonly middleware: MiddlewareRegistry;
+    readonly sourceMiddleware: () => ReadonlyMap<string, readonly string[]>;
     /** Live source-to-plugin ownership for UI slots, without source credentials. */
     readonly sourcePluginIds: () => Promise<Readonly<Record<string, string>>>;
     readonly catalog: AdminCatalogOptions;
@@ -138,6 +143,7 @@ export async function loadBuiltinComposition(
     const presets: PresetPlugin[] = [];
     const toolPlugins = new Map<string, ToolPlugin>();
     const middlewarePlugins = new BuiltinMiddlewarePlugins();
+    const sourceErrors = new Map<string, SourceConfigurationIssue>();
     const manifests = new Map<string, PluginManifest>();
     const pluginErrors = new Map<string, string>();
     const pluginStates = new Map<string, boolean>();
@@ -283,7 +289,18 @@ export async function loadBuiltinComposition(
     await restorePluginStates(store, pluginStates);
     middlewarePlugins.restore(pluginStates);
     await pluginHost.restore?.();
-    await restoreSources(store, sourceFactories, sources, env, pluginStates);
+    await middlewarePlugins.restoreBindings(store);
+    await restoreSources(
+        store,
+        sourceFactories,
+        sources,
+        env,
+        pluginStates,
+        middlewarePlugins,
+        sourceErrors,
+    );
+    const healthPersistence = new SourceHealthPersistence(store, sources);
+    await healthPersistence.restore();
     if (options.runtimeSettings !== undefined) {
         await hydrateRuntimeSettings(store, options.runtimeSettings);
     }
@@ -300,6 +317,7 @@ export async function loadBuiltinComposition(
         toolPlugins,
         middlewarePlugins,
         proxyBindings,
+        sourceErrors,
     );
     const management = createManagement(
         store,
@@ -312,8 +330,10 @@ export async function loadBuiltinComposition(
         toolPlugins,
         middlewarePlugins,
         proxyBindings,
+        sourceErrors,
         options.runtimeSettings,
         options.maintenanceStatus,
+        healthPersistence,
     );
     return {
         protocols,
@@ -325,6 +345,10 @@ export async function loadBuiltinComposition(
                 ),
         sources,
         middleware: middlewarePlugins.registry,
+        sourceMiddleware: () =>
+            middlewarePlugins.sourceSnapshot((id) =>
+                sources.get(id) !== undefined
+            ),
         sourcePluginIds: () => readSourcePluginIds(store, sourceFactories),
         catalog,
         management: {
@@ -334,10 +358,20 @@ export async function loadBuiltinComposition(
                     _context: AdminRouteContext,
                     input: unknown,
                 ) => managedPlugins.install(input),
+                upgradePlugin: (_context, id, input, revision) =>
+                    managedPlugins.upgrade(id, input, revision),
+                rollbackPlugin: (_context, id, revision) =>
+                    managedPlugins.host.rollback!(id, revision),
             }),
         },
         pluginHost,
-        close: () => pluginHost.close?.() ?? Promise.resolve(),
+        close: async () => {
+            try {
+                await healthPersistence.close();
+            } finally {
+                await pluginHost.close?.();
+            }
+        },
     };
 }
 
@@ -375,6 +409,7 @@ function createCatalog(
     toolPlugins: ReadonlyMap<string, ToolPlugin>,
     middlewarePlugins: BuiltinMiddlewarePlugins,
     proxyBindings: SourceProxyBindings,
+    sourceErrors: Map<string, SourceConfigurationIssue>,
 ): AdminCatalogOptions {
     const sourceStore = store.namespace("heimdall", "source-config");
     return {
@@ -428,6 +463,8 @@ function createCatalog(
                     capabilities: record.manifest.capabilities,
                     canToggle: true,
                     managed: true,
+                    revision: record.revision,
+                    rollbackVersion: record.rollback?.version,
                     enabled: record.enabled,
                     trust: record.manifest.trust,
                     ...(record.digest === undefined
@@ -451,6 +488,13 @@ function createCatalog(
                 versionstamp?: string,
             ): SourceDto => {
                 const active = sources.get(source.id);
+                const issue = sourceErrors.get(source.id);
+                const middlewareError = middlewarePlugins.sourceError(
+                    source.id,
+                );
+                const configurationError = issue?.message ?? middlewareError;
+                const configurationErrorField = issue?.field ??
+                    (middlewareError === undefined ? undefined : "middleware");
                 const ui = sourceUiSnapshot(active);
                 const probe = active === undefined
                     ? undefined
@@ -466,6 +510,8 @@ function createCatalog(
                     .sort();
                 return {
                     id: source.id,
+                    healthPolicy: sourceHealthPolicyView(record?.healthPolicy),
+                    effectiveHealthPolicy: sources.healthPolicy(source.id),
                     proxy: record?.proxy ?? { mode: "inherit" },
                     proxySummary: proxyBindings.summary(record?.proxy),
                     ...(record === undefined ? {} : {
@@ -480,9 +526,17 @@ function createCatalog(
                         ...(record.priority === undefined
                             ? {}
                             : { priority: record.priority }),
-                        modelMap: record.modelMap ?? {},
+                        modelMap: sourceModelMapView(record.modelMap),
+                        ...(record.middleware === undefined ? {} : {
+                            middleware: middlewarePlugins.sourceSelection(
+                                source.id,
+                            ),
+                        }),
                     }),
-                    enabled,
+                    enabled: enabled && configurationError === undefined,
+                    ...(configurationError === undefined
+                        ? {}
+                        : { configurationError, configurationErrorField }),
                     models,
                     capabilities: [
                         ...new Set(
@@ -527,7 +581,40 @@ function createCatalog(
                         ),
                     );
                 } catch {
-                    // Invalid persisted records are cleaned during restoration.
+                    // Quarantined records remain manageable even when their
+                    // provider cannot be constructed for capability discovery.
+                    if (!sourceErrors.has(sourceId)) {
+                        let field: SourceConfigurationIssue["field"] = "config";
+                        try {
+                            sourceModelSettings(
+                                entry.value.config,
+                                entry.value.modelMap,
+                            );
+                        } catch {
+                            field = "modelMap";
+                        }
+                        sourceErrors.set(
+                            sourceId,
+                            sourceConfigurationIssue(field),
+                        );
+                    }
+                    result.set(
+                        sourceId,
+                        dto(
+                            {
+                                id: sourceId,
+                                capabilities: [],
+                                execute() {
+                                    throw new Error(
+                                        "quarantined source cannot execute",
+                                    );
+                                },
+                            },
+                            false,
+                            entry.value,
+                            entry.versionstamp,
+                        ),
+                    );
                 }
             }
             return [...result.values()].sort((left, right) =>
@@ -543,6 +630,35 @@ function createCatalog(
                 description: preset.manifest.capabilities?.join(", "),
             })),
     };
+}
+
+function sourceConfigurationIssue(
+    field: SourceConfigurationIssue["field"],
+): SourceConfigurationIssue {
+    return {
+        field,
+        message: field === "healthPolicy"
+            ? "渠道健康策略配置损坏，已停止路由；请在基础配置中修复冷却时间。"
+            : field === "modelMap"
+            ? "渠道模型映射配置损坏，已停止路由；请在基础配置中修复模型映射。"
+            : "渠道源参数无效，已停止路由；请在渠道配置中修复源参数。",
+    };
+}
+
+function sourceModelMapView(value: unknown) {
+    try {
+        return parseSourceModelMap(value);
+    } catch {
+        return {};
+    }
+}
+
+function sourceHealthPolicyView(value: unknown) {
+    try {
+        return parseSourceHealthPolicy(value);
+    } catch {
+        return null;
+    }
 }
 
 function sourceUiSnapshot(
@@ -571,8 +687,10 @@ function createManagement(
     toolPlugins: ReadonlyMap<string, ToolPlugin>,
     middlewarePlugins: BuiltinMiddlewarePlugins,
     proxyBindings: SourceProxyBindings,
+    sourceErrors: Map<string, SourceConfigurationIssue>,
     runtimeSettings?: RuntimeSettingsHandle,
     maintenanceStatus?: () => MaintenanceStatusView | undefined,
+    healthPersistence?: SourceHealthPersistence,
 ): AdminManagementOptions {
     const sourceStore = store.namespace("heimdall", "source-config");
     const pluginStateStore = store.namespace("heimdall", "plugin-state");
@@ -591,6 +709,29 @@ function createManagement(
     };
     const getRecord = async (sourceId: string) =>
         await sourceStore.get<StoredSourceConfig>([sourceId]);
+    const healthSelection = (value: unknown) => {
+        try {
+            return parseSourceHealthPolicy(value);
+        } catch {
+            throw new ManagementError(
+                400,
+                "invalid_source_health_policy",
+                "冷却时间必须为 0 至 86400000 毫秒的整数。",
+            );
+        }
+    };
+
+    const middlewareSelection = (value: unknown): SourceMiddleware => {
+        try {
+            return middlewarePlugins.validateSelection(value);
+        } catch (error) {
+            throw new ManagementError(
+                400,
+                "invalid_source_middleware",
+                error instanceof Error ? error.message : "渠道中间件无效。",
+            );
+        }
+    };
 
     const requireRecord = async (sourceId: string) => {
         const record = await getRecord(sourceId);
@@ -628,6 +769,20 @@ function createManagement(
                 "channel was deleted; create a new channel",
             );
         }
+        if (sourceErrors.get(sourceId)?.field === "modelMap") {
+            throw new ManagementError(
+                409,
+                "source_model_map_invalid",
+                "请先在基础配置中修复模型映射，再修改源参数。",
+            );
+        }
+        if (sourceErrors.get(sourceId)?.field === "healthPolicy") {
+            throw new ManagementError(
+                409,
+                "source_health_policy_invalid",
+                "请先在基础配置中修复健康策略，再修改源参数。",
+            );
+        }
         const settings = sourceModelSettings(input, current?.value.modelMap);
         const merged = mergeSourceConfig(
             settings.config,
@@ -645,6 +800,12 @@ function createManagement(
             ...(current?.value.proxy === undefined
                 ? {}
                 : { proxy: current.value.proxy }),
+            ...(current?.value.middleware === undefined
+                ? {}
+                : { middleware: current.value.middleware }),
+            ...(current?.value.healthPolicy === undefined
+                ? {}
+                : { healthPolicy: current.value.healthPolicy }),
             sourcePluginId: factory.manifest.id,
             config,
             enabled: current?.value.enabled !== false,
@@ -664,8 +825,13 @@ function createManagement(
             },
         );
         proxyBindings.set(sourceId, value.proxy);
+        middlewarePlugins.setSource(sourceId, value.middleware);
+        sources.setHealthPolicy(sourceId, value.healthPolicy);
+        await healthPersistence?.bind(sourceId, value);
+        sourceErrors.delete(sourceId);
         if (
             value.enabled !== false &&
+            middlewarePlugins.sourceError(sourceId) === undefined &&
             pluginStates.get(factory.manifest.id) !== false
         ) {
             sources.upsert(source);
@@ -759,6 +925,8 @@ function createManagement(
                     input.config,
                     input.modelMap,
                 );
+                const middleware = middlewareSelection(input.middleware);
+                const healthPolicy = healthSelection(input.healthPolicy);
                 let raw = submitted.config;
                 if (input.presetId !== undefined) {
                     const preset = presets.find((item) =>
@@ -801,6 +969,8 @@ function createManagement(
                     enabled: true,
                     instanceStateVersion: 1,
                     modelMap: settings.modelMap,
+                    middleware,
+                    healthPolicy,
                 };
                 const source = applySourceSettings(
                     factory.create(config),
@@ -829,6 +999,9 @@ function createManagement(
                     throw error;
                 }
                 proxyBindings.set(input.id, value.proxy);
+                middlewarePlugins.setSource(input.id, value.middleware);
+                sources.setHealthPolicy(input.id, value.healthPolicy);
+                await healthPersistence?.bind(input.id, value);
                 if (pluginStates.get(factory.manifest.id) !== false) {
                     sources.register(source);
                 }
@@ -849,7 +1022,15 @@ function createManagement(
             if (
                 !input || Object.keys(input).length === 0 ||
                 Object.keys(input).some((key) =>
-                    !["name", "priority", "enabled", "proxy", "modelMap"]
+                    ![
+                        "name",
+                        "priority",
+                        "enabled",
+                        "proxy",
+                        "modelMap",
+                        "middleware",
+                        "healthPolicy",
+                    ]
                         .includes(key)
                 ) ||
                 (Object.hasOwn(input, "name") &&
@@ -867,7 +1048,7 @@ function createManagement(
                 );
             }
             const current = await requireRecord(sourceId);
-            const value: StoredSourceConfig = {
+            let value: StoredSourceConfig = {
                 ...current.value,
                 instanceStateVersion: 1,
                 ...(input.name === undefined
@@ -887,6 +1068,14 @@ function createManagement(
                         modelMap: parseSourceModelMap(input.modelMap),
                     }
                     : {}),
+                ...(Object.hasOwn(input, "middleware")
+                    ? {
+                        middleware: middlewareSelection(input.middleware),
+                    }
+                    : {}),
+                ...(Object.hasOwn(input, "healthPolicy")
+                    ? { healthPolicy: healthSelection(input.healthPolicy) }
+                    : {}),
             };
             const factory = sourceFactories.get(value.sourcePluginId);
             if (factory === undefined) {
@@ -896,8 +1085,49 @@ function createManagement(
                     "source plugin is unavailable",
                 );
             }
+            let nextIssue = sourceErrors.get(sourceId);
+            const repairsModelMap = Object.hasOwn(input, "modelMap");
+            if (repairsModelMap) {
+                // Only an explicit host mapping edit may replace a damaged
+                // mapping, including the legacy provider-config location.
+                const settings = sourceModelSettings(
+                    value.config,
+                    value.modelMap,
+                );
+                value = {
+                    ...value,
+                    config: settings.config,
+                    modelMap: settings.modelMap,
+                };
+                nextIssue = undefined;
+                try {
+                    factory.validate(value.config);
+                } catch {
+                    nextIssue = sourceConfigurationIssue("config");
+                }
+            }
+            // Repairing one field must not accidentally lift another quarantine.
+            nextIssue = undefined;
+            try {
+                parseSourceHealthPolicy(value.healthPolicy);
+            } catch {
+                nextIssue = sourceConfigurationIssue("healthPolicy");
+            }
+            try {
+                sourceModelSettings(value.config, value.modelMap);
+            } catch {
+                nextIssue ??= sourceConfigurationIssue("modelMap");
+            }
+            try {
+                factory.validate(value.config);
+            } catch {
+                nextIssue ??= sourceConfigurationIssue("config");
+            }
             const active = sources.get(sourceId);
             const eligible = value.enabled !== false &&
+                nextIssue === undefined &&
+                (Object.hasOwn(input, "middleware") ||
+                    middlewarePlugins.sourceError(sourceId) === undefined) &&
                 pluginStates.get(value.sourcePluginId) !== false;
             // Metadata edits keep the running provider instance and any live
             // contexts. Only a newly enabled instance needs a fresh factory.
@@ -917,6 +1147,13 @@ function createManagement(
                     current.versionstamp,
             });
             proxyBindings.set(sourceId, value.proxy);
+            middlewarePlugins.setSource(sourceId, value.middleware);
+            if (nextIssue?.field !== "healthPolicy") {
+                sources.setHealthPolicy(sourceId, value.healthPolicy);
+            }
+            await healthPersistence?.bind(sourceId, value);
+            if (nextIssue === undefined) sourceErrors.delete(sourceId);
+            else sourceErrors.set(sourceId, nextIssue);
             if (source === undefined) sources.unregister(sourceId);
             else if (source !== active) {
                 sources.upsert(source, {
@@ -963,7 +1200,11 @@ function createManagement(
                         current.versionstamp,
                 });
                 sources.unregister(sourceId);
+                sources.setHealthPolicy(sourceId, null);
+                await healthPersistence?.flush(sourceId);
                 proxyBindings.delete(sourceId);
+                middlewarePlugins.setSource(sourceId, null);
+                sourceErrors.delete(sourceId);
                 return { data: { sourceId, deleted: true }, versionstamp };
             }),
         getSourceConfig: async (
@@ -998,10 +1239,15 @@ function createManagement(
                 ? findFactory(sourceId)
                 : sourceFactories.get(record.value.sourcePluginId) ??
                     findFactory(sourceId);
+            const settings = sourceModelSettings(input, record?.value.modelMap);
             return redactSourceConfig(
                 factory.validate(
                     withSourceId(
-                        mergeSourceConfig(input, record?.value.config, factory),
+                        mergeSourceConfig(
+                            settings.config,
+                            record?.value.config,
+                            factory,
+                        ),
                         sourceId,
                     ),
                 ),
@@ -1139,7 +1385,12 @@ function createManagement(
                         if (entry.value.sourcePluginId !== pluginId) continue;
                         if (entry.value.deleted) continue;
                         const sourceId = String(entry.key.at(-1) ?? "");
-                        if (!enabled || entry.value.enabled === false) {
+                        if (
+                            !enabled || entry.value.enabled === false ||
+                            middlewarePlugins.sourceError(sourceId) !==
+                                undefined ||
+                            sourceErrors.has(sourceId)
+                        ) {
                             sources.unregister(sourceId);
                         } else {sources.upsert(
                                 applySourceSettings(
@@ -1179,7 +1430,7 @@ function createManagement(
                 proxies: proxyBindings.pool,
             }),
         clearSourceCooldown: (_context, sourceId) =>
-            sourceWrite(() => {
+            sourceWrite(async () => {
                 if (!sources.get(sourceId)) {
                     throw new ManagementError(
                         404,
@@ -1188,11 +1439,13 @@ function createManagement(
                     );
                 }
                 const cleared = sources.healthOf(sourceId) === "cooldown";
-                return Promise.resolve({
+                const result = {
                     sourceId,
                     cleared,
                     ...sources.clearCooldown(sourceId),
-                });
+                };
+                await healthPersistence?.flush(sourceId);
+                return result;
             }),
         probeSource: async (context, sourceId) => {
             const source = sources.get(sourceId);
@@ -1255,6 +1508,8 @@ async function restoreSources(
     sources: SourceRegistry,
     env: (name: string) => string | undefined,
     pluginStates: Map<string, boolean>,
+    middlewarePlugins: BuiltinMiddlewarePlugins,
+    sourceErrors: Map<string, SourceConfigurationIssue>,
 ): Promise<void> {
     const sourceStore = store.namespace("heimdall", "source-config");
     for await (const entry of sourceStore.list<StoredSourceConfig>()) {
@@ -1273,24 +1528,35 @@ async function restoreSources(
                     pluginStates.get(entry.value.sourcePluginId) === false,
                 instanceStateVersion: 1,
             };
-        const settings = sourceModelSettings(value.config, value.modelMap);
-        if (isRecord(value.config) && Object.hasOwn(value.config, "modelMap")) {
-            value = {
-                ...value,
-                config: settings.config,
-                modelMap: settings.modelMap,
-            };
-        }
-        if (value !== entry.value) {
-            await sourceStore.set([sourceId], value, {
-                expectedVersionstamp: entry.versionstamp,
-            });
-        }
-        if (
-            value.enabled === false ||
-            pluginStates.get(value.sourcePluginId) === false
-        ) continue;
+        let field: SourceConfigurationIssue["field"] = "healthPolicy";
         try {
+            sources.setHealthPolicy(sourceId, value.healthPolicy);
+            field = "modelMap";
+            const settings = sourceModelSettings(value.config, value.modelMap);
+            if (
+                isRecord(value.config) &&
+                Object.hasOwn(value.config, "modelMap")
+            ) {
+                value = {
+                    ...value,
+                    config: settings.config,
+                    modelMap: settings.modelMap,
+                };
+            }
+            field = "config";
+            // Validate disabled records without starting a provider. They stay
+            // visible and cannot crash startup when an operator later enables them.
+            factory.validate(value.config);
+            if (value !== entry.value) {
+                await sourceStore.set([sourceId], value, {
+                    expectedVersionstamp: entry.versionstamp,
+                });
+            }
+            if (
+                value.enabled === false ||
+                pluginStates.get(value.sourcePluginId) === false ||
+                middlewarePlugins.sourceError(sourceId) !== undefined
+            ) continue;
             sources.upsert(
                 applySourceSettings(
                     factory.create(value.config),
@@ -1302,7 +1568,8 @@ async function restoreSources(
                 pluginStates.get(entry.value.sourcePluginId) ?? true,
             );
         } catch {
-            await sourceStore.delete([sourceId]);
+            sources.unregister(sourceId);
+            sourceErrors.set(sourceId, sourceConfigurationIssue(field));
         }
     }
     if (sources.list().length > 0) return;

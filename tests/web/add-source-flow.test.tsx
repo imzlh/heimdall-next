@@ -25,6 +25,8 @@ import { mountPresetEditor } from "../../src/web/client/forms/preset-bridge.ts";
 import { mount } from "../../plugins/newapi-preset/ui.tsx";
 import { PRESET_UI_FEEDBACK_EVENT } from "@heimdall/admin-contracts/preset-ui.ts";
 import { installTestDom, TestElement } from "./helpers/jsx-dom.ts";
+import { SourceCreateDialog } from "../../src/web/client/source-create-dialog.tsx";
+import { configureAdminTransport } from "../../src/web/client/api/admin.ts";
 
 const sourcePluginId = "heimdall.source.openai-compatible";
 const presetId = "heimdall.preset.newapi";
@@ -122,6 +124,7 @@ async function setup(
         onSave?: AddSourceFlowProps["onSave"];
         onProbe?: AddSourceFlowProps["onProbe"];
         reducedMotion?: boolean;
+        plugins?: AddSourceFlowProps["plugins"];
     } = {},
 ) {
     const dom = installTestDom({ reducedMotion: options.reducedMotion });
@@ -144,6 +147,7 @@ async function setup(
                     <AddSourceFlow
                         sources={sources}
                         presets={presets}
+                        plugins={options.plugins}
                         onProbe={options.onProbe}
                         onSave={async (value) => {
                             saved.push(value);
@@ -195,6 +199,72 @@ async function setup(
         },
     };
 }
+
+Deno.test("source creation keeps health policy in host metadata for preset and custom saves and validates before proceeding", async () => {
+    for (const choice of ["NewAPI", "自定义配置"]) {
+        const test = await setup();
+        try {
+            await test.act(() =>
+                find(test.dialog, 'button[data-dropdown="source-health-mode"]')
+                    .click()
+            );
+            await test.act(() =>
+                find(test.dialog, 'button[role="option"][data-value="custom"]')
+                    .click()
+            );
+            await test.act(() =>
+                input(
+                    find(test.dialog, 'input[name="source-health-cooldown"]'),
+                    "-1",
+                )
+            );
+            await test.details();
+            assert(test.dialog.textContent.includes("普通失败冷却必须"));
+            assertEquals(test.saved.length, 0);
+            await test.act(() =>
+                input(
+                    find(test.dialog, 'input[name="source-health-cooldown"]'),
+                    "0.001",
+                )
+            );
+            await test.act(() =>
+                input(
+                    find(
+                        test.dialog,
+                        'input[name="source-health-auth-cooldown"]',
+                    ),
+                    "0",
+                )
+            );
+            await test.act(() => button(test.dialog, "下一步").click());
+            await test.act(() => button(test.dialog, choice).click());
+            await test.act(() => button(test.dialog, "上一步").click());
+            await test.act(() => button(test.dialog, "上一步").click());
+            assertEquals(
+                find(test.dialog, 'input[name="source-health-cooldown"]').value,
+                "0.001",
+            );
+            await test.act(() => button(test.dialog, "下一步").click());
+            await test.act(() => button(test.dialog, choice).click());
+            await test.act(() =>
+                input(
+                    find(test.dialog, 'input[name="baseUrl"]'),
+                    "https://provider.example/v1",
+                )
+            );
+            await test.act(() => button(test.dialog, "保存渠道").click());
+            assertEquals(test.saved[0]?.draft.healthPolicy, {
+                cooldownMs: 1,
+                authCooldownMs: 0,
+            });
+            assertEquals(test.saved[0]?.config.healthPolicy, undefined);
+            assertEquals(test.navigation, []);
+            assertEquals(test.dialog.showModalCalls, 1);
+        } finally {
+            await test.dispose();
+        }
+    }
+});
 
 Deno.test("source creation keeps one dialog while switching preset JSX and custom fields", async () => {
     const test = await setup();
@@ -284,6 +354,193 @@ Deno.test("basic model mappings validate before advancing and survive preset and
         } finally {
             await test.dispose();
         }
+    }
+});
+
+Deno.test("middleware bindings survive preset JSX and custom configuration in the same creation dialog", async () => {
+    for (const choice of ["NewAPI", "自定义配置"]) {
+        const test = await setup({
+            plugins: [
+                {
+                    id: "middleware.first",
+                    name: "前处理",
+                    kind: "middleware",
+                    enabled: true,
+                },
+                {
+                    id: "middleware.second",
+                    name: "后处理",
+                    kind: "middleware",
+                    enabled: false,
+                },
+            ],
+        });
+        const select = async (name: string, value: string) => {
+            await test.act(() =>
+                find(test.dialog, `button[data-dropdown="${name}"]`).click()
+            );
+            await test.act(() =>
+                find(
+                    test.dialog,
+                    `button[role="option"][data-value="${value}"]`,
+                ).click()
+            );
+        };
+        try {
+            await select("source-middleware-mode", "custom");
+            await select("source-middleware-add", "middleware.first");
+            await select("source-middleware-add", "middleware.second");
+            await test.act(() =>
+                find(test.dialog, 'button[aria-label="上移 后处理"]').click()
+            );
+            await select("source-middleware-mode", "inherit");
+            await select("source-middleware-mode", "custom");
+            await test.details();
+            await test.act(() => button(test.dialog, choice).click());
+            assertStrictEquals(find(test.root, "dialog"), test.dialog);
+            await test.act(() => button(test.dialog, "上一步").click());
+            await test.act(() => button(test.dialog, "上一步").click());
+            assertEquals(
+                test.dialog.querySelectorAll("[data-middleware-id]").map((
+                    row,
+                ) => row.getAttribute("data-middleware-id")),
+                ["middleware.second", "middleware.first"],
+            );
+            await test.act(() => button(test.dialog, "下一步").click());
+            await test.act(() => button(test.dialog, choice).click());
+            await test.act(() =>
+                input(
+                    find(test.dialog, 'input[name="baseUrl"]'),
+                    "https://provider.example/v1",
+                )
+            );
+            await test.act(() => button(test.dialog, "保存渠道").click());
+            assertEquals(test.saved[0]?.draft.middleware, [
+                "middleware.second",
+                "middleware.first",
+            ]);
+            assertEquals(test.saved[0]?.config.middleware, undefined);
+            assertEquals(test.navigation, []);
+            assertEquals(test.dialog.showModalCalls, 1);
+        } finally {
+            await test.dispose();
+        }
+    }
+});
+
+Deno.test("source creation catalog wires host middleware into the create request without executing it during probing", async () => {
+    const dom = installTestDom();
+    const requests: { path: string; body: Record<string, unknown> }[] = [];
+    configureAdminTransport((path, init) => {
+        requests.push({
+            path: String(path),
+            body: JSON.parse(String(init?.body)),
+        });
+        return Promise.resolve(
+            Response.json(
+                String(path).endsWith("source-draft-probe")
+                    ? {
+                        probe: {
+                            ok: true,
+                            message: "连接成功",
+                            checkedAt: "2026-10-01T00:00:00.000Z",
+                            models: [],
+                        },
+                    }
+                    : { created: true },
+            ),
+        );
+    });
+    try {
+        await dom.act(() =>
+            render(
+                <SourceCreateDialog
+                    dashboard={{
+                        health: { status: "ok" },
+                        models: [],
+                        authRequired: false,
+                        errors: {
+                            health: "",
+                            models: "",
+                            status: "",
+                            presets: "",
+                            source: "",
+                        },
+                        status: {
+                            sources: [],
+                            managed: [],
+                            presets: [],
+                            plugins: [
+                                {
+                                    id: sourcePluginId,
+                                    kind: "source",
+                                    enabled: true,
+                                },
+                                {
+                                    id: "middleware.first",
+                                    name: "前处理",
+                                    kind: "middleware",
+                                    enabled: true,
+                                },
+                            ],
+                        },
+                    }}
+                    schemas={{ [sourcePluginId]: sources[0]!.schema }}
+                    presetPages={{}}
+                    onClose={() => {}}
+                    onSaved={() => {}}
+                />,
+                dom.root as unknown as HTMLElement,
+            )
+        );
+        const dialog = find(dom.root, "dialog");
+        const select = async (name: string, value: string) => {
+            await dom.act(() =>
+                find(dialog, `button[data-dropdown="${name}"]`).click()
+            );
+            await dom.act(() =>
+                find(dialog, `button[role="option"][data-value="${value}"]`)
+                    .click()
+            );
+        };
+        await select("source-middleware-mode", "custom");
+        await select("source-middleware-add", "middleware.first");
+        await select("source-health-mode", "custom");
+        await dom.act(() =>
+            input(find(dialog, 'input[name="source-health-cooldown"]'), "1.25")
+        );
+        await dom.act(() => input(find(dialog, "input"), "主力渠道"));
+        await dom.act(() => button(dialog, "下一步").click());
+        await dom.act(() => button(dialog, "自定义配置").click());
+        await dom.act(() =>
+            input(
+                find(dialog, 'input[name="baseUrl"]'),
+                "https://provider.example/v1",
+            )
+        );
+        await dom.act(() => button(dialog, "测试连接并获取模型").click());
+        await dom.act(() => button(dialog, "保存渠道").click());
+        assertEquals(requests.map((request) => request.path), [
+            "/api/admin/source-draft-probe",
+            "/api/admin/sources",
+        ]);
+        assertEquals(requests[0]?.body.middleware, undefined);
+        assertEquals(requests[1]?.body.middleware, ["middleware.first"]);
+        assertEquals(requests[0]?.body.healthPolicy, { cooldownMs: 1250 });
+        assertEquals(requests[1]?.body.healthPolicy, { cooldownMs: 1250 });
+        assertEquals(
+            (requests[1]?.body.config as Record<string, unknown>).healthPolicy,
+            undefined,
+        );
+        assertEquals(
+            (requests[1]?.body.config as Record<string, unknown>).middleware,
+            undefined,
+        );
+        assertEquals(dom.navigation, []);
+    } finally {
+        await dom.act(() => render(null, dom.root as unknown as HTMLElement));
+        configureAdminTransport();
+        dom.restore();
     }
 });
 

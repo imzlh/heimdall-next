@@ -890,6 +890,7 @@ export function ChannelsPanel(
                     key={selected.id}
                     source={selected}
                     proxyPool={proxyPool}
+                    plugins={dashboard.status.plugins}
                     onClose={() => setSelected(null)}
                     onChanged={(kind, source) => {
                         focusListAfterClose.current = kind === "deleted";

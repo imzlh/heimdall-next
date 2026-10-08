@@ -16,6 +16,23 @@ const message = {
     createdAt: conversation.createdAt,
 };
 
+Deno.test("chat snapshots distinguish explicit model links from the catalog fallback", async () => {
+    for (const selectedModel of [undefined, "missing", "model-b"]) {
+        const snapshot = await loadChatSnapshot({
+            authorized: true,
+            available: true,
+            selectedModel,
+            dispatch: () =>
+                Response.json({ data: [{ id: "model-a" }, { id: "model-b" }] }),
+        });
+        assertEquals(snapshot.models, ["model-a", "model-b"]);
+        assertEquals(
+            snapshot.selectedModel,
+            selectedModel === "model-b" ? "model-b" : undefined,
+        );
+    }
+});
+
 Deno.test("chat SSR snapshots retain all leaf choices while excluding private branch metadata", async () => {
     const branches = [
         { messageId: "user-leaf", label: "提问版本", selected: false },

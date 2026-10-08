@@ -5,6 +5,11 @@ import {
 } from "@heimdall/admin-contracts/source-model-map.ts";
 import type { SourceProxySelection } from "@heimdall/admin-contracts/proxies.ts";
 import { sourceProxySelection } from "../shared/proxy-presentation.ts";
+import { parseSourceMiddleware } from "@heimdall/admin-contracts/source-middleware.ts";
+import {
+    parseSourceHealthPolicy,
+    type SourceHealthPolicy,
+} from "@heimdall/admin-contracts/source-health.ts";
 
 export interface SourceSetupSelection {
     readonly name: string;
@@ -13,6 +18,8 @@ export interface SourceSetupSelection {
     readonly presetId?: string;
     readonly proxy?: SourceProxySelection;
     readonly modelMap?: SourceModelMap;
+    readonly middleware?: readonly string[] | null;
+    readonly healthPolicy?: SourceHealthPolicy | null;
 }
 
 /** Creation identity and choices live only for the lifetime of the dialog. */
@@ -47,6 +54,14 @@ export function createSourceSetupDraft(
     }
     const mode = ownValue(selection, "mode");
     const modelMap = parseSourceModelMap(ownValue(selection, "modelMap"));
+    const selectedMiddleware = ownValue(selection, "middleware");
+    const middleware = selectedMiddleware === undefined
+        ? undefined
+        : parseSourceMiddleware(selectedMiddleware);
+    const selectedHealthPolicy = ownValue(selection, "healthPolicy");
+    const healthPolicy = selectedHealthPolicy === undefined
+        ? undefined
+        : parseSourceHealthPolicy(selectedHealthPolicy);
     if (mode !== "preset" && mode !== "custom") {
         throw new Error("请选择预设或自定义渠道。");
     }
@@ -96,5 +111,7 @@ export function createSourceSetupDraft(
         ...(presetId ? { presetId } : {}),
         ...(proxy ? { proxy } : {}),
         ...(Object.keys(modelMap).length ? { modelMap } : {}),
+        ...(middleware !== undefined ? { middleware } : {}),
+        ...(healthPolicy !== undefined ? { healthPolicy } : {}),
     };
 }

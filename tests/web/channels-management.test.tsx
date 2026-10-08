@@ -68,6 +68,49 @@ Deno.test("SSR source cards expose disabled instance controls and distinguish a 
     assertEquals(sourceInstanceEnabled({ enabled: true }), true);
 });
 
+Deno.test("SSR and island channel cards expose quarantined configuration errors and retain the repair entry", async () => {
+    const corrupted: ListedSource = {
+        ...source,
+        pluginEnabled: true,
+        enabled: false,
+        middleware: [],
+        configurationError: "中间件配置已损坏，此渠道已暂停，请重新配置。",
+    };
+    const html = SourceCard({ source: corrupted, editing: true }).toString();
+    assertStringIncludes(html, "配置异常");
+    assertStringIncludes(html, corrupted.configurationError!);
+    assertEquals(sourceState(corrupted), { label: "配置异常", tone: "amber" });
+    const dom = installTestDom();
+    try {
+        const data = dashboard();
+        data.status.sources = [corrupted];
+        await dom.act(() =>
+            render(
+                <ChannelsPanel
+                    dashboard={data}
+                    onConfigure={() => {}}
+                    onRefresh={() => Promise.resolve()}
+                />,
+                dom.root as unknown as HTMLElement,
+            )
+        );
+        assertStringIncludes(
+            dom.root.textContent,
+            corrupted.configurationError!,
+        );
+        assertStringIncludes(dom.root.textContent, "配置异常");
+        assert(!button(dom.root, "管理").disabled);
+        await dom.act(() => button(dom.root, "管理").click());
+        const dialog = dom.root.querySelector("dialog");
+        assert(dialog?.open);
+        assertStringIncludes(dialog.textContent, corrupted.configurationError!);
+        assert(!button(dialog, "保存修改").disabled);
+    } finally {
+        await dom.act(() => render(null, dom.root as unknown as HTMLElement));
+        dom.restore();
+    }
+});
+
 Deno.test("channel toggle patches instance state with its revision while its plugin is disabled", async () => {
     const dom = installTestDom();
     const calls: { path: string; body: unknown; revision: string | null }[] =

@@ -119,6 +119,10 @@ Deno.test("statistics render each endpoint's calendar and totals independently i
     assertStringIncludes(markup, "<strong>1,500</strong>");
     assertStringIncludes(markup, "25 次请求");
     assertStringIncludes(markup, "model-a");
+    assertFalse(
+        markup.includes(" style="),
+        "SSR charts must obey style-src 'self'",
+    );
     assertStringIncludes(markup, '<details class="usage-history">');
     // SSR renders the mode switch inert until the island takes over.
     assertStringIncludes(markup, 'aria-label="趋势范围"');

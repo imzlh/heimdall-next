@@ -1,3 +1,12 @@
+export {
+    DEFAULT_SOURCE_HEALTH_POLICY,
+    parseSourceHealthPolicy,
+} from "../contracts/source-health.ts";
+export type {
+    EffectiveSourceHealthPolicy,
+    SourceHealthPolicy,
+} from "../contracts/source-health.ts";
+
 /** Public host-owned categories. Upstream response bodies never cross this DTO. */
 export interface SourceCooldownDto {
     readonly reason:

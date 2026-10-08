@@ -86,15 +86,17 @@ function ModelRows({ models, offset = 0, maximum }: {
                             {count(item.requestCount)} 次
                         </span>
                     </div>
-                    <div class="rank-bar" aria-hidden="true">
-                        <div
+                    <svg class="rank-bar" aria-hidden="true" focusable="false">
+                        <rect
                             class="rank-bar-fill"
-                            style={`width:${
+                            width={`${
                                 Math.max(item.requestCount / maximum * 100, 1)
                                     .toFixed(1)
                             }%`}
+                            height="100%"
+                            rx="3"
                         />
-                    </div>
+                    </svg>
                 </div>
             ))}
         </div>

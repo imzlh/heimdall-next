@@ -1,5 +1,6 @@
 import type { ListedPlugin } from "@heimdall/admin-contracts/console.ts";
 import {
+    canRollbackPlugin,
     canTogglePlugin,
     canUninstallPlugin,
     pluginCapabilityLabel,
@@ -12,13 +13,22 @@ import {
 
 /** One card for the initial SSR HTML and the live management island. */
 export function PluginCard(
-    { plugin, plugins, busy = false, pending = false, onToggle, onUninstall }: {
+    {
+        plugin,
+        plugins,
+        busy = false,
+        pending = false,
+        onToggle,
+        onUninstall,
+        onRollback,
+    }: {
         plugin: ListedPlugin;
         plugins: ListedPlugin[];
         busy?: boolean;
         pending?: boolean;
         onToggle?: (plugin: ListedPlugin) => void;
         onUninstall?: (plugin: ListedPlugin) => void;
+        onRollback?: (plugin: ListedPlugin) => void;
     },
 ) {
     const state = pluginState(plugin);
@@ -136,6 +146,23 @@ export function PluginCard(
                             onClick={() => onUninstall?.(plugin)}
                         >
                             卸载
+                        </button>
+                    )}
+                    {plugin.managed === true && plugin.rollbackVersion && (
+                        <button
+                            class="text-button"
+                            type="button"
+                            disabled={busy || !onRollback ||
+                                !canRollbackPlugin(plugin)}
+                            title={!plugin.revision?.trim()
+                                ? "缺少当前插件的版本记录，请刷新插件列表后重试"
+                                : !onRollback
+                                ? "交互加载后可用"
+                                : undefined}
+                            aria-label={`回滚 ${label} 至 v${plugin.rollbackVersion}`}
+                            onClick={() => onRollback?.(plugin)}
+                        >
+                            回滚至 v{plugin.rollbackVersion}
                         </button>
                     )}
                 </div>

@@ -91,6 +91,11 @@ export interface PluginRuntime {
      * are synchronous; intentional stop/restart must not emit a failure. */
     onFailure?(listener: (error: Error) => void): () => void;
     start(artifact: PluginArtifact): Promise<void>;
+    /** Publish staged capabilities after the durable lifecycle write succeeds. */
+    activate?(): void;
+    /** Reserve current capability names across replacement and recovery, without
+     * advertising or executing them. Release when the transition settles. */
+    reserveCapabilities?(): () => void;
     invoke(invocation: PluginInvocation): Promise<JsonValue | undefined>;
     /** Release all resources, including active invocations. Must allow retry
      * after a partial failure; rejection prevents a replacement from starting.
@@ -108,6 +113,8 @@ export interface PluginRecord {
     readonly isolated: boolean;
     readonly updatedAt: string;
     readonly lastError?: string;
+    /** One durable previous package, consumed by a successful rollback. */
+    readonly rollback?: { readonly version: string; readonly digest?: string };
 }
 
 /** Runtime-neutral persistence port for installed plugin metadata. */
@@ -121,6 +128,14 @@ export interface PluginRecordStore {
     /** Commit metadata only after the complete immutable artifact is durable. */
     install?(record: PluginRecord, artifact: PluginArtifact): Promise<void>;
     readArtifact?(id: string): Promise<PluginArtifact | undefined>;
+    /** CAS package replacement with an optional single rollback snapshot.
+     * All supplied bytes must be durable before the record commit. */
+    replace?(
+        record: PluginRecord,
+        artifact: PluginArtifact,
+        previous?: PluginArtifact,
+    ): Promise<PluginRecord>;
+    readRollbackArtifact?(id: string): Promise<PluginArtifact | undefined>;
 }
 
 export interface PluginHostOptions {
@@ -142,6 +157,12 @@ export interface PluginHostOptions {
 
 export interface PluginHost {
     install(artifact: PluginArtifact): Promise<PluginRecord>;
+    upgrade?(
+        id: string,
+        artifact: PluginArtifact,
+        expectedRevision: string,
+    ): Promise<PluginRecord>;
+    rollback?(id: string, expectedRevision: string): Promise<PluginRecord>;
     enable(id: string): Promise<PluginRecord>;
     disable(id: string): Promise<PluginRecord>;
     uninstall(id: string): Promise<boolean>;
@@ -181,6 +202,8 @@ export type PluginLifecycleErrorCode =
     | "revision_conflict"
     | "dependency_unavailable"
     | "dependency_in_use"
+    | "invalid_upgrade"
+    | "rollback_unavailable"
     | "policy_denied";
 
 export class PluginLifecycleError extends Error {
@@ -208,3 +231,4 @@ export {
     InMemoryPluginHost,
     InMemoryPluginRecordStore,
 } from "./runtime.ts";
+export { comparePluginVersions } from "./version.ts";

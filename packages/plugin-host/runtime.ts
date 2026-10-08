@@ -18,6 +18,7 @@ import type {
     PluginRuntime,
 } from "./mod.ts";
 import {
+    comparePluginVersions,
     DefaultPluginVerifier,
     PluginLifecycleError,
     PluginVerificationError,
@@ -44,6 +45,9 @@ function cloneRecord(record: PluginRecord): PluginRecord {
     return Object.freeze({
         ...record,
         manifest: cloneManifest(record.manifest),
+        ...(record.rollback
+            ? { rollback: Object.freeze({ ...record.rollback }) }
+            : {}),
     });
 }
 
@@ -63,6 +67,46 @@ function cloneArtifact(artifact: PluginArtifact): PluginArtifact {
 /** Deterministic in-memory metadata store useful for tests and local startup. */
 export class InMemoryPluginRecordStore implements PluginRecordStore {
     #records = new Map<string, PluginRecord>();
+    #artifacts = new Map<string, PluginArtifact>();
+    #previous = new Map<string, PluginArtifact>();
+
+    install(record: PluginRecord, artifact: PluginArtifact): Promise<void> {
+        return this.replace(record, artifact).then(() => {});
+    }
+
+    replace(
+        record: PluginRecord,
+        artifact: PluginArtifact,
+        previous?: PluginArtifact,
+    ): Promise<PluginRecord> {
+        const id = record.manifest.id;
+        if (this.#records.get(id)?.revision !== record.revision) {
+            return Promise.reject(
+                lifecycleError(
+                    "revision_conflict",
+                    id,
+                    "record changed before package replacement",
+                ),
+            );
+        }
+        const snapshot = cloneArtifact(artifact);
+        if (previous) this.#previous.set(id, cloneArtifact(previous));
+        else this.#previous.delete(id);
+        this.#artifacts.set(id, snapshot);
+        const saved = cloneRecord({ ...record, revision: crypto.randomUUID() });
+        this.#records.set(id, saved);
+        return Promise.resolve(cloneRecord(saved));
+    }
+
+    readArtifact(id: string): Promise<PluginArtifact | undefined> {
+        const artifact = this.#artifacts.get(id);
+        return Promise.resolve(artifact && cloneArtifact(artifact));
+    }
+
+    readRollbackArtifact(id: string): Promise<PluginArtifact | undefined> {
+        const artifact = this.#previous.get(id);
+        return Promise.resolve(artifact && cloneArtifact(artifact));
+    }
 
     get(id: string): Promise<PluginRecord | undefined> {
         const record = this.#records.get(id);
@@ -103,6 +147,8 @@ export class InMemoryPluginRecordStore implements PluginRecordStore {
             );
         }
         this.#records.delete(id);
+        this.#artifacts.delete(id);
+        this.#previous.delete(id);
         return Promise.resolve();
     }
 
@@ -266,6 +312,294 @@ export class InMemoryPluginHost implements PluginHost {
         return cloneRecord((await this.#store.get(manifest.id)) ?? record);
     }
 
+    async upgrade(
+        id: string,
+        artifact: PluginArtifact,
+        expectedRevision: string,
+    ): Promise<PluginRecord> {
+        this.#assertOpen();
+        const snapshot = cloneArtifact({
+            ...artifact,
+            manifest: validatePluginManifest(artifact.manifest),
+        });
+        return await this.#replacementLocks(
+            id,
+            snapshot,
+            () => this.#replace(id, snapshot, expectedRevision, false),
+        );
+    }
+
+    async rollback(
+        id: string,
+        expectedRevision: string,
+    ): Promise<PluginRecord> {
+        this.#assertOpen();
+        let snapshot: PluginArtifact;
+        // Admit before reading durable bytes so shutdown also drains a rollback
+        // whose snapshot read is still pending.
+        return await this.#schedule(async () => {
+            const artifact = await this.#store.readRollbackArtifact?.(id);
+            if (!artifact) {
+                throw lifecycleError(
+                    "rollback_unavailable",
+                    id,
+                    "has no previous package",
+                );
+            }
+            snapshot = cloneArtifact(artifact);
+            return [
+                id,
+                ...(snapshot.manifest.dependencies ?? []),
+                ...((await this.#store.get(id))?.manifest.dependencies ?? []),
+            ];
+        }, () => this.#replace(id, snapshot, expectedRevision, true));
+    }
+
+    #replacementLocks<T>(
+        id: string,
+        artifact: PluginArtifact,
+        operation: () => Promise<T>,
+    ): Promise<T> {
+        return this.#schedule(
+            async () => [
+                id,
+                ...(artifact.manifest.dependencies ?? []),
+                ...((await this.#store.get(id))?.manifest.dependencies ?? []),
+            ],
+            operation,
+        );
+    }
+
+    async #replace(
+        id: string,
+        artifact: PluginArtifact,
+        expectedRevision: string,
+        rollback: boolean,
+    ): Promise<PluginRecord> {
+        const record = await this.#require(id);
+        if (!expectedRevision || record.revision !== expectedRevision) {
+            throw lifecycleError(
+                "revision_conflict",
+                id,
+                "changed; refresh before replacing its package",
+            );
+        }
+        if (!this.#store.replace) {
+            throw lifecycleError(
+                "policy_denied",
+                id,
+                "store does not support package replacement",
+            );
+        }
+        const verification = await this.#verifier.verify(artifact);
+        if (verification.status === "rejected") {
+            throw new PluginVerificationError(
+                "verification_rejected",
+                verification.reason,
+            );
+        }
+        const manifest = verification.manifest ??
+            validatePluginManifest(artifact.manifest);
+        if (
+            manifest.id !== id || artifact.manifest.id !== id ||
+            manifest.kind !== record.manifest.kind ||
+            manifest.trust !== record.manifest.trust
+        ) {
+            throw lifecycleError(
+                "invalid_upgrade",
+                id,
+                "replacement must preserve plugin ID, kind and trust",
+            );
+        }
+        if (rollback) {
+            if (
+                !record.rollback ||
+                record.rollback.version !== manifest.version ||
+                record.rollback.digest !== verification.digest
+            ) {
+                throw lifecycleError(
+                    "revision_conflict",
+                    id,
+                    "rollback snapshot changed",
+                );
+            }
+        } else if (
+            comparePluginVersions(manifest.version, record.manifest.version) <=
+                0
+        ) {
+            throw lifecycleError(
+                "invalid_upgrade",
+                id,
+                "upgrade version must be newer than the installed version",
+            );
+        }
+        const target: PluginRecord = {
+            ...record,
+            manifest,
+            digest: verification.digest,
+            signerKeyId: verification.signerKeyId,
+            rollback: rollback
+                ? undefined
+                : { version: record.manifest.version, digest: record.digest },
+            updatedAt: this.#now(),
+            lastError: undefined,
+        };
+        // Restarting a prerequisite could invalidate its consumers' runtime contract.
+        await this.#requireNoDependents(id, true);
+        if (record.enabled) await this.#requireDependencies(target);
+        const snapshot = cloneArtifact({
+            ...artifact,
+            manifest,
+            digest: verification.digest,
+        });
+        const oldArtifact = await this.#loadArtifact(record);
+        if (!oldArtifact) {
+            throw lifecycleError(
+                "runtime_required",
+                id,
+                "has no recoverable current package",
+            );
+        }
+        const oldRollbackArtifact = record.rollback
+            ? await this.#store.readRollbackArtifact?.(id)
+            : undefined;
+        let interrupted = false;
+        let committed: PluginRecord | undefined;
+        const releaseCapabilities = this.#runtimes.get(id)?.runtime
+            .reserveCapabilities?.();
+        try {
+            if (record.enabled || this.#runtimes.has(id)) {
+                interrupted = true;
+                this.#abortInvocations(id);
+                await this.#stopRuntime(id);
+                this.#failures.delete(id);
+            }
+            if (record.enabled) await this.#startReplacement(target, snapshot);
+            committed = await this.#store.replace(
+                target,
+                snapshot,
+                rollback ? undefined : oldArtifact,
+            );
+            this.#artifacts.set(id, snapshot);
+            await this.#activateReplacement(committed);
+            return cloneRecord(committed);
+        } catch (error) {
+            if (interrupted) {
+                try {
+                    await this.#stopRuntime(id);
+                    this.#failures.delete(id);
+                    const latest = await this.#store.get(id);
+                    // Compensation uses the exact committed revision. A concurrent
+                    // disable or package replacement always wins over recovery.
+                    const sameOldPackage = latest?.enabled &&
+                        latest.digest === record.digest &&
+                        JSON.stringify(latest.manifest) ===
+                            JSON.stringify(record.manifest);
+                    const mayCompensate = committed &&
+                        latest?.revision === committed.revision;
+                    if (mayCompensate || !committed && sameOldPackage) {
+                        await this.#requireDependencies(record);
+                        await this.#startReplacement(record, oldArtifact);
+                        let recovered = latest!;
+                        if (mayCompensate) {
+                            recovered = await this.#store.replace(
+                                {
+                                    ...record,
+                                    revision: committed!.revision,
+                                    updatedAt: this.#now(),
+                                },
+                                oldArtifact,
+                                oldRollbackArtifact,
+                            );
+                        }
+                        this.#artifacts.set(id, oldArtifact);
+                        await this.#activateReplacement(recovered);
+                    }
+                } catch (recoveryError) {
+                    // Retain failed-stop references for a later cleanup retry.
+                    try {
+                        await this.#stopRuntime(id);
+                    } catch { /* retry on next lifecycle operation */ }
+                    throw new PluginLifecycleError(
+                        "runtime_failed",
+                        `plugin ${id} package replacement and recovery failed`,
+                        {
+                            cause: new AggregateError([error, recoveryError]),
+                        },
+                    );
+                }
+            }
+            throw error;
+        } finally {
+            releaseCapabilities?.();
+        }
+    }
+
+    async #activateReplacement(record: PluginRecord): Promise<void> {
+        const id = record.manifest.id;
+        // Durable stores may yield during post-commit cleanup, and recovery
+        // startup also yields. A concurrent disable always wins before publish.
+        const latest = await this.#store.get(id);
+        if (
+            !latest || latest.revision !== record.revision ||
+            latest.enabled !== record.enabled
+        ) {
+            throw lifecycleError(
+                "revision_conflict",
+                id,
+                "changed before replacement activation",
+            );
+        }
+        if (!record.enabled) return;
+        const state = this.#runtimes.get(id);
+        if (
+            !state || this.#failures.has(id) ||
+            state.runtime.isActive?.() === false
+        ) {
+            throw lifecycleError(
+                "runtime_failed",
+                id,
+                "replacement stopped before activation",
+            );
+        }
+        state.runtime.activate?.();
+        state.active = true;
+    }
+
+    async #startReplacement(
+        record: PluginRecord,
+        artifact: PluginArtifact,
+    ): Promise<void> {
+        const id = record.manifest.id;
+        if (!this.#runtimeFactory) {
+            throw lifecycleError(
+                "runtime_required",
+                id,
+                "has no runtime factory",
+            );
+        }
+        const runtime = await this.#runtimeFactory(cloneArtifact(artifact));
+        const state: RuntimeState = {
+            runtime,
+            active: false,
+            dependencies: record.manifest.dependencies ?? [],
+        };
+        this.#runtimes.set(id, state);
+        state.unsubscribe = runtime.onFailure?.((error) =>
+            this.#runtimeFailed(id, state, error)
+        );
+        await runtime.start(cloneArtifact(artifact));
+        const failure = this.#failures.get(id);
+        if (failure) throw failure.error;
+        if (runtime.isActive?.() === false) {
+            throw lifecycleError(
+                "runtime_failed",
+                id,
+                "runtime stopped during replacement",
+            );
+        }
+    }
+
     async enable(id: string): Promise<PluginRecord> {
         this.#assertOpen();
         return await this.#withDependencies(id, () => this.#enable(id));
@@ -396,7 +730,10 @@ export class InMemoryPluginHost implements PluginHost {
             );
         }
         const enabledRuntime = this.#runtimes.get(id);
-        if (enabledRuntime !== undefined) enabledRuntime.active = true;
+        if (enabledRuntime !== undefined) {
+            enabledRuntime.runtime.activate?.();
+            enabledRuntime.active = true;
+        }
         return cloneRecord(saved);
     }
 

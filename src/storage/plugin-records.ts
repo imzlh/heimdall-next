@@ -9,22 +9,29 @@ import { StorageConflictError } from "@heimdall/storage";
 const CHUNK_BYTES = 48 * 1024;
 const MAX_PACKAGE_BYTES = 1024 * 1024;
 interface StoredPluginRecord extends PluginRecord {
-    readonly artifact?: {
-        readonly key: string;
-        readonly chunks: number;
-        readonly size: number;
-        readonly entrypoint: string;
-        readonly digest?: string;
-        readonly signature?: Uint8Array;
-        readonly signerKeyId?: string;
-    };
+    readonly artifact?: StoredArtifactDescriptor;
+    readonly previous?:
+        & Pick<PluginRecord, "manifest" | "digest" | "signerKeyId">
+        & {
+            readonly artifact: StoredArtifactDescriptor;
+        };
+}
+
+interface StoredArtifactDescriptor {
+    readonly key: string;
+    readonly chunks: number;
+    readonly size: number;
+    readonly entrypoint: string;
+    readonly digest?: string;
+    readonly signature?: Uint8Array;
+    readonly signerKeyId?: string;
 }
 
 function publicRecord(
     record: StoredPluginRecord,
     revision: string,
 ): PluginRecord {
-    const { artifact: _artifact, ...metadata } = record;
+    const { artifact: _artifact, previous: _previous, ...metadata } = record;
     return { ...metadata, revision };
 }
 
@@ -65,6 +72,9 @@ export class ConfigPluginRecordStore implements PluginRecordStore {
             ...(previous?.value.artifact === undefined
                 ? {}
                 : { artifact: previous.value.artifact }),
+            ...(previous?.value.previous === undefined
+                ? {}
+                : { previous: previous.value.previous }),
         }, { expectedVersionstamp: previous?.versionstamp ?? null });
     }
 
@@ -84,6 +94,12 @@ export class ConfigPluginRecordStore implements PluginRecordStore {
         // Delete only the old immutable generation, never every package for this ID.
         if (previous?.value.artifact !== undefined) {
             await this.#cleanArtifacts(id, previous.value.artifact.key);
+        }
+        if (previous?.value.previous !== undefined) {
+            await this.#cleanArtifacts(
+                id,
+                previous.value.previous.artifact.key,
+            );
         }
     }
 
@@ -109,8 +125,109 @@ export class ConfigPluginRecordStore implements PluginRecordStore {
         record: PluginRecord,
         artifact: PluginArtifact,
     ): Promise<void> {
+        await this.#writePackage(record, artifact);
+    }
+
+    async replace(
+        record: PluginRecord,
+        artifact: PluginArtifact,
+        rollbackArtifact?: PluginArtifact,
+    ): Promise<PluginRecord> {
+        assertPluginId(record.manifest.id);
+        const previous = await this.#store.get<StoredPluginRecord>([
+            record.manifest.id,
+        ]);
+        if (
+            !record.revision || previous?.versionstamp !== record.revision ||
+            !previous.value.artifact
+        ) {
+            throw new StorageConflictError(
+                "plugin record changed before package replacement",
+            );
+        }
+        return await this.#writePackage(
+            record,
+            artifact,
+            previous.value,
+            rollbackArtifact,
+        );
+    }
+
+    async #writePackage(
+        record: PluginRecord,
+        artifact: PluginArtifact,
+        previous?: StoredPluginRecord,
+        rollbackArtifact?: PluginArtifact,
+    ): Promise<PluginRecord> {
         const id = record.manifest.id;
         assertPluginId(id);
+        const created: string[] = [];
+        let committed: StoredPluginRecord;
+        let revision: string;
+        try {
+            const current = await this.#writeArtifact(id, artifact, created);
+            let rollback: StoredPluginRecord["previous"];
+            if (rollbackArtifact) {
+                if (rollbackArtifact.manifest.id !== id) {
+                    throw new TypeError("rollback package identity mismatch");
+                }
+                const reusable = [previous, previous?.previous].find((item) =>
+                    item?.artifact && item.digest === rollbackArtifact.digest &&
+                    JSON.stringify(item.manifest) ===
+                        JSON.stringify(rollbackArtifact.manifest)
+                );
+                rollback = {
+                    manifest: rollbackArtifact.manifest,
+                    digest: rollbackArtifact.digest,
+                    signerKeyId: rollbackArtifact.signerKeyId,
+                    artifact: reusable?.artifact ??
+                        await this.#writeArtifact(
+                            id,
+                            rollbackArtifact,
+                            created,
+                        ),
+                };
+            }
+            const { revision: _revision, ...metadata } = record;
+            committed = {
+                ...metadata,
+                rollback: rollbackArtifact
+                    ? {
+                        version: rollbackArtifact.manifest.version,
+                        digest: rollbackArtifact.digest,
+                    }
+                    : undefined,
+                artifact: current,
+                ...(rollback ? { previous: rollback } : {}),
+            };
+            // One CAS publishes both complete generations and their metadata.
+            revision = await this.#store.set([id], committed, {
+                expectedVersionstamp: previous ? record.revision! : null,
+            });
+        } catch (error) {
+            for (const key of created) await this.#cleanArtifacts(id, key);
+            throw error;
+        }
+        const retained = new Set([
+            committed.artifact?.key,
+            committed.previous?.artifact.key,
+        ]);
+        for (
+            const key of [
+                previous?.artifact?.key,
+                previous?.previous?.artifact.key,
+            ]
+        ) {
+            if (key && !retained.has(key)) await this.#cleanArtifacts(id, key);
+        }
+        return publicRecord(committed, revision);
+    }
+
+    async #writeArtifact(
+        id: string,
+        artifact: PluginArtifact,
+        created: string[],
+    ): Promise<StoredArtifactDescriptor> {
         if (
             artifact.bytes === undefined || artifact.bytes.byteLength === 0 ||
             artifact.bytes.byteLength > MAX_PACKAGE_BYTES
@@ -120,47 +237,52 @@ export class ConfigPluginRecordStore implements PluginRecordStore {
             );
         }
         const key = crypto.randomUUID();
+        created.push(key);
         const bytes = new Uint8Array(artifact.bytes);
         const chunks = Math.ceil(bytes.length / CHUNK_BYTES);
-        try {
-            for (let index = 0; index < chunks; index++) {
-                await this.#artifacts.set(
-                    [id, key, index],
-                    bytes.slice(index * CHUNK_BYTES, (index + 1) * CHUNK_BYTES),
-                );
-            }
-            // The single record is the commit point. Readers never observe a partial package.
-            await this.#store.set(
-                [id],
-                {
-                    ...record,
-                    artifact: {
-                        key,
-                        chunks,
-                        size: bytes.length,
-                        entrypoint: artifact.entrypoint,
-                        ...(artifact.digest === undefined
-                            ? {}
-                            : { digest: artifact.digest }),
-                        ...(artifact.signature === undefined
-                            ? {}
-                            : { signature: artifact.signature }),
-                        ...(artifact.signerKeyId === undefined
-                            ? {}
-                            : { signerKeyId: artifact.signerKeyId }),
-                    },
-                } satisfies StoredPluginRecord,
-                { expectedVersionstamp: null },
+        for (let index = 0; index < chunks; index++) {
+            await this.#artifacts.set(
+                [id, key, index],
+                bytes.slice(index * CHUNK_BYTES, (index + 1) * CHUNK_BYTES),
             );
-        } catch (error) {
-            await this.#cleanArtifacts(id, key);
-            throw error;
         }
+        return {
+            key,
+            chunks,
+            size: bytes.length,
+            entrypoint: artifact.entrypoint,
+            ...(artifact.digest === undefined
+                ? {}
+                : { digest: artifact.digest }),
+            ...(artifact.signature === undefined
+                ? {}
+                : { signature: artifact.signature }),
+            ...(artifact.signerKeyId === undefined
+                ? {}
+                : { signerKeyId: artifact.signerKeyId }),
+        };
     }
 
     async readArtifact(id: string): Promise<PluginArtifact | undefined> {
         assertPluginId(id);
         const record = (await this.#store.get<StoredPluginRecord>([id]))?.value;
+        return await this.#readPackage(id, record);
+    }
+
+    async readRollbackArtifact(
+        id: string,
+    ): Promise<PluginArtifact | undefined> {
+        assertPluginId(id);
+        const record = (await this.#store.get<StoredPluginRecord>([id]))?.value;
+        return await this.#readPackage(id, record?.previous);
+    }
+
+    async #readPackage(
+        id: string,
+        record:
+            | Pick<StoredPluginRecord, "manifest" | "digest" | "artifact">
+            | undefined,
+    ): Promise<PluginArtifact | undefined> {
         const descriptor = record?.artifact;
         if (record === undefined || descriptor === undefined) return undefined;
         if (

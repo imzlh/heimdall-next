@@ -2,7 +2,7 @@
     "id": "heimdall.preset.newapi",
     "version": "0.1.0",
     "apiVersion": "1",
-    "name": "NewAPI source preset",
+    "name": "NewAPI 快速接入",
     "description": "在添加渠道的模态内快速填写 NewAPI 地址和密钥。",
     "kind": "preset",
     "presetPage": {

@@ -1,5 +1,24 @@
 /** JSON-only chat presentation and transport records, shared by SSR and islands. */
 import type { ChatExtensions } from "./chat-ui.ts";
+
+/** Shared by the tool catalog, conversation settings and pending Chat choices. */
+export const MAX_CHAT_TOOLS = 128;
+
+/** Reject invalid selections as a whole; truncation could enable a muted tool. */
+export function parseChatDisabledTools(value: unknown): string[] {
+    if (
+        !Array.isArray(value) || value.length > MAX_CHAT_TOOLS ||
+        !value.every((item) =>
+            typeof item === "string" && item.length > 0 && item.length <= 128
+        )
+    ) {
+        throw new TypeError(
+            `disabledTools must be an array of at most ${MAX_CHAT_TOOLS} plugin ids`,
+        );
+    }
+    return [...new Set(value)];
+}
+
 export interface ChatConversation {
     id: string;
     title: string;
@@ -136,6 +155,7 @@ export interface ChatInitial {
     conversation: ChatConversation | null;
     messages: ChatMessage[];
     models: string[];
+    /** An explicit valid URL selection; absent when the catalog default is shown. */
     selectedModel?: string;
     /** Tool plugins the settings popover can toggle for this conversation. */
     tools?: readonly ChatToolInfo[];

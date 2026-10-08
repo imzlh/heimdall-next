@@ -33,7 +33,8 @@ const ROUTES: Readonly<Record<string, readonly string[]>> = {
     "/api/admin/preset-preview": ["POST"],
     "/api/admin/preset-apply": ["POST"],
     "/api/admin/plugin-state": ["POST"],
-    "/api/admin/plugin-package": ["POST"],
+    "/api/admin/plugin-package": ["POST", "PATCH"],
+    "/api/admin/plugin-rollback": ["POST"],
     "/api/admin/plugin": ["DELETE"],
     "/api/admin/source-probe": ["POST"],
     "/api/admin/source-health/reset": ["POST"],
@@ -155,7 +156,8 @@ export function createUiBridge(options: UiBridgeOptions) {
                 body = JSON.stringify(input.body);
                 if (
                     packageInstall &&
-                    new TextEncoder().encode(body).length > MAX_PACKAGE_BYTES
+                    new TextEncoder().encode(body).length >
+                        MAX_PACKAGE_BYTES + (method === "PATCH" ? 4096 : 0)
                 ) {
                     throw new WebRequestError(
                         413,

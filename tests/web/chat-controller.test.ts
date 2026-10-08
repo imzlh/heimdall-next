@@ -230,6 +230,73 @@ Deno.test("chat controller keeps SSR state without refetching or replaying on co
     controller.dispose();
 });
 
+Deno.test("chat reload restores a saved conversation model while explicit links and removed models stay predictable", () => {
+    const snapshot = initial();
+    localStorage.setItem(
+        "heimdall.chat.models",
+        JSON.stringify({ one: "model-b" }),
+    );
+    for (
+        const [patch, expected] of [
+            [{}, "model-b"],
+            [{ selectedModel: "model-a" }, "model-a"],
+            [{ selectedModel: "missing" }, "model-b"],
+            [{ models: ["model-a"] }, "model-a"],
+            [{ models: [] }, ""],
+        ] as const
+    ) {
+        const controller = createChatController({
+            initial: {
+                ...snapshot,
+                ...patch,
+                models: [
+                    ...("models" in patch ? patch.models : snapshot.models),
+                ],
+            },
+            api: fakeApi().api,
+        });
+        try {
+            assertEquals(controller.getState().model, expected);
+        } finally {
+            controller.dispose();
+        }
+    }
+    clearChatStorage();
+});
+
+Deno.test("the model chosen before the first message transfers to the saved conversation and survives reload", async () => {
+    const snapshot = initial({ conversation: null });
+    const fake = fakeApi();
+    const controller = createChatController({
+        initial: snapshot,
+        api: fake.api,
+    });
+    try {
+        controller.setModel("model-b");
+        controller.setDraft("first message");
+        const sent = controller.send();
+        await waitForState(controller, (state) => Boolean(state.conversation));
+        fake.streams[0]!.completion.resolve("done");
+        await sent;
+        assertEquals(fake.commands[0]?.model, "model-b");
+        const restored = createChatController({
+            initial: {
+                ...snapshot,
+                conversation: controller.getState().conversation,
+            },
+            api: fake.api,
+        });
+        try {
+            assertEquals(restored.getState().model, "model-b");
+        } finally {
+            restored.dispose();
+        }
+    } finally {
+        controller.dispose();
+        clearChatStorage();
+    }
+});
+
 Deno.test("chat controller sends once, clears only acknowledged draft, then uses persisted history", async () => {
     const fake = fakeApi();
     const controller = createChatController({

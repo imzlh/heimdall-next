@@ -1,42 +1,60 @@
 # TODO — 功能迁移与内核完善
 
-核实日期：2026-09-29。以当前实现和验证结果更新；“已完成”表示下列具体能力已落地，
-不表示整个项目或真实浏览器体验已经验收。旧版消息操作参考：`../ui/chat.html`
+核实日期：2026-10-01。以当前实现和验证结果更新；“已完成”表示下列具体能力已落地，
+不表示整个项目已完成；真实浏览器验收范围见下方记录。旧版消息操作参考：`../ui/chat.html`
 640–850 行、`../ui/chat.js`（`deleteMsg` / `openMessageEditor` / `forkMessage` /
 `switchBranch` / `continueMessage` / `addReferenceAsset`）。
 
-## 进行中：核心模型映射与 Chat 插件槽位
+## 已完成：核心模型映射与 Chat 插件槽位
 
-- [ ] **每源基础配置的模型映射**：公开模型名到上游模型名由核心负责，统一目录、
-      路由、执行和探测；从旧 provider config
-      迁移，并保持请求身份和公开响应模型。
-      添加和编辑仍在原模态内，不能在源插件配置表单里重复维护映射。
-- [ ] **Chat 输入框和侧栏槽位**：复用 schema/trusted/iframe 的 JSON 契约，
-      由插件声明能力部件，随插件和会话开关变化更新。搜索、memory、账号额度不进
-      Chat 内核；SSR、动态撤销、动作授权与会话切换都须验证。
+- [x] **每源基础配置的模型映射**：`modelMap` 与名称、优先级、代理选择同属 host
+      元数据，已从旧 `config.modelMap` 原子迁移；源插件只读取核心解析后的
+      `traits.model`。目录、路由、执行和探测使用同一跳映射，公开请求及响应保留
+      调用方的模型名。添加、编辑、清空及冲突重载均在原模态，切换 preset 不丢失
+      基础映射。验证：`tests/source-model-mapping.test.ts`、
+      `tests/web/source-model-map.test.ts`、`tests/web/source-management-dialog.test.tsx`。
+- [x] **损坏源配置隔离与修复**：单个源的模型映射（包括已停用的旧
+      `config.modelMap`）或连接参数损坏只隔离该源，不再阻止启动或删除记录。
+      目录通过 `configurationErrorField` 区分映射、连接参数和中间件错误；基础
+      模态可显式保存空映射或新映射，连接参数通过配置入口修复。CAS 失败保留原
+      记录和隔离状态，普通改名、启停或配置编辑不会擅自清除坏映射。验证：
+      `tests/source-restoration-errors.test.ts`、`tests/web/source-management-dialog.test.tsx`。
+- [x] **Chat 输入框和侧栏槽位**：`chat.composer` / `chat.sidebar` 复用
+      schema/trusted/iframe 和 JSON 契约；Web 工具已声明开关和能力说明，其他工具
+      自动获得通用会话开关。SSR 可读，island 按会话绑定并刷新插件目录；停用撤销
+      部件及监听，旧会话动作不能改写新会话。Chat 内核不内建搜索、memory 或账号
+      额度。验证：`tests/web/chat-slots.test.tsx`、`tests/managed-plugin-ui.test.ts`。
+- [x] **Chat 增强后的槽位与工具选择恢复**：`ChatApp` 持续挂载 SSR 的两个槽位，
+      401 清空后重新认证可恢复相同目录；工具目录、待创建会话和 HTTP 设置共享 128
+      个工具的限额，超额明确拒绝，不截断停用清单。SQLite 重开、分叉和 SSR
+      保留全部选择。验证：`tests/web/chat-slots.test.tsx`、
+      `tests/chat-tool-selection.test.ts`。
+- [x] **模型选择随会话恢复**：新建会话继承首次发送前选择的模型，刷新从本机保存
+      恢复；有效链接参数优先，已移除模型回退到当前目录。验证：
+      `tests/web/chat-controller.test.ts`、`tests/web/chat-snapshot.test.ts`。
+- [x] **每源中间件绑定与生命周期**：基础配置中的 `middleware` 使用 `null`
+      继承全局、`[]` 禁用、ID 数组指定顺序；添加/编辑模态已接入。全部协议和 Chat
+      共用执行链，每个请求持有绑定和启用状态快照，故障转移不串用前一个源的修改。
+      全局停用保留每源绑定，重启从磁盘恢复；配置更新有 CAS，插件中间件错误不会
+      错误触发上游冷却或重试，取消会释放流。验证：`tests/source-middleware.test.ts`、
+      `tests/kernel-source-middleware.test.ts`、`tests/chat-middleware.test.ts`、
+      `tests/web/source-management-dialog.test.tsx`。
 
 ## 下一优先项
 
 - [ ] **更多动态插件类型与升级**：当前离线托管包仅支持 `isolated` 工具插件。
-      source、middleware、UI 等类型的动态安装、升级/回滚尚未完成；不可达
-      artifact 分块也尚无后台回收。不能把内置目录加载等同于动态安装。
-- [ ] **中间件生产生命周期验收与每源绑定**：可信目录加载、持久开关及全局执行链
-      已接入
-      `src/composition/builtins.ts`、`src/composition/middleware-plugins.ts`、
-      `src/composition/server.ts`、`packages/kernel/runtime.ts`，Chat
-      也共用该链。 `tests/chat-middleware.test.ts` 和
-      `tests/kernel-runtime.test.ts` 已有执行测试； 仍需目录加载 → 管理启停 →
-      重启恢复的集成覆盖。每源绑定尚缺，不能用全局链替代。
+      工具包 manifest 的 schema UI 已动态接入；独立 source、middleware、UI
+      等类型及可执行 UI 资产的动态安装、升级/回滚尚未完成；不可达 artifact
+      分块也尚无后台回收。不能把内置目录加载等同于动态安装。
 - [ ] **非标准上游传输**：`plugins/openai-source/config.ts` 当前使用 Bearer、 无
       query 的 base URL/endpoint 和非敏感额外请求头；仍缺 Azure deployment、
       `api-version`、`api-key`/自定义认证及 NDJSON。能力应由源插件和 preset
       提供， 保持 HIP 内核与供应商协议分离，探测和执行使用相同配置。
 - [ ] **每源健康策略**：冷却原因、截止时间、手动解除与并发结果隔离已经实现；
       当前仍使用全局冷却时长。每源策略和重启后冷却状态持久化尚未实现。
-- [ ] **真实浏览器验收**：Hono JSX 注水、同模态 preset 授权/探测、焦点和
-      Escape、
-      中文输入法、窄屏/触屏、深浅色、灵动输入框动画及减少动态效果偏好。SSR
-      HTML、 类型和 DOM 模拟测试不能代替浏览器交互验收。
+- [ ] **剩余真实环境验收**：ChatHub 外部账号的真实授权、中文输入法、真触屏及
+      完整键盘/动画细节仍需验收。下方 Chrome 自动化已经覆盖关键闭环；本地模拟
+      上游、窄屏和减少动态效果截图不能代替这些实际环境。
 
 ## 已完成：原消息操作清单
 
@@ -102,6 +120,10 @@
       故障主动撤销贡献并保存错误； 宿主独立校验 JSON
       响应，避免插件绕开自身线程中的校验。入口：
       `src/http/plugin-package-routes.ts`、`src/composition/managed-plugins.ts`。
+- [x] **托管包的动态 UI 声明**：`src/composition/ui-contributions.ts` 读取已启用
+      包的 manifest，合并到运行中 UI 目录；停用、卸载撤销，重启恢复。声明无权
+      自行提升为可信 JSX，未获宿主许可时使用 schema；坏声明不影响其他插件。
+      验证：`tests/managed-plugin-ui.test.ts`、`tests/web/ui-catalog.test.ts`。
 - [x] **渠道模态草稿探测与模型获取**：`source-config-form.tsx` 与两种 preset JSX
       已支持测试、获取模型、重试和跳过测试保存；配置变更不会采用旧结果。验证：
       `tests/source-draft-probe.test.ts`、`tests/web/add-source-flow.test.tsx`、
@@ -120,6 +142,15 @@
       可见，系统日志只记录维护摘要。两种历史永久保留时仍回收闲置附件。验证：
       `tests/retention-policy.test.ts`、`tests/web/retention-settings.test.tsx`、
       `tests/web/retention-snapshot.test.ts`。
+- [x] **崩溃请求恢复与 inline 资产回收**：正式启动把前一进程遗留的
+      pending/running 请求标记为
+      `process_interrupted`，保留已有帧和用量，恢复后可参与保留清理；
+      写入锁防止另一进程误恢复正在运行的请求。inline
+      转换原子写入租约及回收候选，
+      部分失败和重启后均可回收无引用副本，已提交消息和独立草稿租约继续保护图片。
+      系统日志只写恢复数量，不写请求 ID 或内容。验证：
+      `tests/storage/request-journal-recovery.test.ts`、
+      `tests/chat-inline-asset-recovery.test.ts`、`tests/chat-deletion-recovery.test.ts`。
 - [x] **渠道冷却可观测与手动解除**：渠道卡显示固定错误类别、截止时间和剩余时间；
       解除冷却只恢复调度资格，不伪造探测成功。新检查尚未完成时不会屏蔽已完成故障，
       旧结果也不能覆盖更新完成结果或手动操作。验证：`tests/source-health-controls.test.ts`、
@@ -144,6 +175,24 @@
 
 ## 核实与回归记录
 
+- 2026-10-01 最终 `deno task verify` 退出 0：格式、lint、服务端/浏览器/包/
+  插件/测试/脚本类型检查、浏览器构建，以及 **1149 passed（129 steps），0
+  failed**。 日志：`%TEMP%/heimdall-final-verify.txt`；此结果取代本轮早期的 1094
+  项记录。
+- 同日浏览器脚本 `scripts/browser-smoke.ts` 在 **Chrome 154.0.8037.58** 退出 0，
+  `success: true`、`failures: []`。实际走通同模态 preset
+  JSX、本地网络探测与保存、 `public-model → upstream-model`
+  执行且响应保留公开名、自定义 schema 保存、 顶层 `middleware: []` 和 `modelMap`
+  落盘、Escape 关闭。
+- Chrome 同时验证 Chat 双槽位注水、工具开关随会话保存、刷新保留模型；离线 JSON
+  包安装 → 启用 → 通用输入区开关和 manifest 侧栏出现 → 真实 Worker 工具调用 →
+  停用后跨 Tab 撤销 → 卸载。已记录深浅色、390 px 无横向溢出、减少动态效果和 禁用
+  JS 后双槽位可读的截图。
+- 浏览器发现的统计图内联样式 CSP 错误已改为 SVG
+  宽度属性；最终浏览器控制台零错误。 场景使用本地上游和内存
+  KV/SQLite，不碰用户数据库。结果与截图：
+  `%TEMP%/heimdall-browser-914bd909a72554df/result.json` 及同目录 PNG。 外部
+  ChatHub 授权、中文输入法和真触屏未纳入此次通过范围。
 - 2026-09-29 聊天资产、分支、编辑、工具、存储及图片协议适配定向测试通过。
   `chat-snapshot` 的旧 fixture 已区分可展示 reasoning 与内部 raw
   字段，并保留密钥 脱敏检查；修复后连同请求页、总览统计、网关密钥测试重跑： **39
@@ -153,5 +202,3 @@
   本次检查与执行均通过。`deno check --config deno.browser.json
   src/web/client/chat/messages.tsx`
   通过，旧 6 个 TS2786 错误已不复现。
-- 当前记录仅覆盖本文件审计的定向范围；完整 `deno task verify`
-  由本轮集成收口确认。

@@ -17,7 +17,16 @@ export interface ListedModel {
 }
 
 export interface ListedSource {
+    healthPolicy?: import("./source-health.ts").SourceHealthPolicy | null;
+    effectiveHealthPolicy?:
+        import("./source-health.ts").EffectiveSourceHealthPolicy;
     id?: string;
+    configurationError?: string;
+    configurationErrorField?:
+        | "modelMap"
+        | "config"
+        | "middleware"
+        | "healthPolicy";
     name?: string;
     priority?: number;
     sourcePluginId?: string;
@@ -34,6 +43,7 @@ export interface ListedSource {
     proxy?: SourceProxySelection;
     proxySummary?: SourceProxySummary;
     modelMap?: import("./source-model-map.ts").SourceModelMap;
+    middleware?: import("./source-middleware.ts").SourceMiddleware;
 }
 
 export interface ListedPlugin {
@@ -51,6 +61,8 @@ export interface ListedPlugin {
     canToggle?: boolean;
     /** Installed through the plugin host rather than shipped in the service. */
     managed?: boolean;
+    revision?: string;
+    rollbackVersion?: string;
 }
 
 export interface ListedPreset {

@@ -101,6 +101,8 @@ Deno.test("SSR plugin projection keeps only valid declared metadata and host boo
                             dependencies: ["plugin-a", 42],
                             canToggle: "yes",
                             managed: true,
+                            revision: "revision-3",
+                            rollbackVersion: "0.9.0",
                             config: { token: "PRIVATE" },
                         }],
                     }
@@ -114,6 +116,8 @@ Deno.test("SSR plugin projection keeps only valid declared metadata and host boo
     assertEquals(dto.dependencies, ["plugin-a"]);
     assertEquals(dto.canToggle, undefined);
     assertEquals(dto.managed, true);
+    assertEquals(dto.revision, "revision-3");
+    assertEquals(dto.rollbackVersion, "0.9.0");
     assertFalse(JSON.stringify(dto).includes("PRIVATE"));
 });
 
@@ -129,6 +133,8 @@ Deno.test("browser catalog refresh and initial SSR use the same public plugin pr
         capabilities: ["tools", 3, { private: "SECRET" }],
         dependencies: "not-an-array",
         canToggle: "true",
+        revision: "revision-3",
+        rollbackVersion: "0.9.0",
         secret: "SECRET",
     }];
     const snapshot = await loadConsoleSnapshot({
@@ -146,12 +152,134 @@ Deno.test("browser catalog refresh and initial SSR use the same public plugin pr
         );
         assertEquals(dashboard.status.plugins.length, 1);
         assertEquals(dashboard.status.plugins[0]?.dependencies, []);
+        assertEquals(dashboard.status.plugins[0]?.revision, "revision-3");
+        assertEquals(dashboard.status.plugins[0]?.rollbackVersion, "0.9.0");
         assertFalse(canTogglePlugin(dashboard.status.plugins[0]!));
         assertFalse(
             JSON.stringify(dashboard.status.plugins).includes("SECRET"),
         );
     } finally {
         configureAdminTransport();
+    }
+});
+
+Deno.test("plugin projections discard malformed revision and rollback metadata in SSR and browser refresh", async () => {
+    const input = [{
+        ...plugin,
+        managed: true,
+        revision: { secret: "PRIVATE" },
+        rollbackVersion: ["0.9.0"],
+    }];
+    const snapshot = await loadConsoleSnapshot({
+        authorized: true,
+        dispatch: () => Response.json({ plugins: input }),
+    });
+    configureAdminTransport(() =>
+        Promise.resolve(Response.json({ plugins: input }))
+    );
+    try {
+        const dashboard = await loadDashboard();
+        assertEquals(
+            dashboard.status.plugins,
+            snapshot.dashboard.status.plugins,
+        );
+        assertEquals(dashboard.status.plugins[0]?.revision, undefined);
+        assertEquals(dashboard.status.plugins[0]?.rollbackVersion, undefined);
+        assertFalse(
+            JSON.stringify(dashboard.status.plugins).includes("PRIVATE"),
+        );
+    } finally {
+        configureAdminTransport();
+    }
+});
+
+Deno.test("SSR cards expose disabled rollback only for managed plugins with a retained version", () => {
+    const managed = {
+        ...plugin,
+        managed: true,
+        revision: "revision-3",
+        rollbackVersion: "0.9.0",
+    };
+    const html = PluginCards({
+        plugins: [
+            { ...managed, name: "可回滚工具" },
+            {
+                ...managed,
+                id: "missing-revision",
+                name: "未同步工具",
+                revision: undefined,
+            },
+            { ...managed, id: "builtin", name: "内置工具", managed: false },
+            {
+                ...managed,
+                id: "no-target",
+                name: "新装工具",
+                rollbackVersion: undefined,
+            },
+        ],
+    }).toString();
+    for (const name of ["可回滚工具", "未同步工具"]) {
+        const tag = html.match(
+            new RegExp(
+                `<button\\b[^>]*aria-label="回滚 ${name} 至 v0.9.0"[^>]*>`,
+            ),
+        )?.[0];
+        assert(tag, `Missing SSR rollback button for ${name}`);
+        assertStringIncludes(tag, "disabled");
+    }
+    assertFalse(html.includes('aria-label="回滚 内置工具'));
+    assertFalse(html.includes('aria-label="回滚 新装工具'));
+    assertStringIncludes(html, "交互加载后可用");
+});
+
+Deno.test("browser rollback stays disabled until the host supplies a revision", async () => {
+    const dom = installTestDom();
+    let requests = 0;
+    configureAdminTransport(() => {
+        requests++;
+        return Promise.resolve(Response.json({}));
+    });
+    const managed = {
+        ...plugin,
+        managed: true,
+        rollbackVersion: "0.9.0",
+    };
+    try {
+        await dom.act(() =>
+            render(
+                <PluginsPanel
+                    plugins={[
+                        managed,
+                        {
+                            ...managed,
+                            id: "available",
+                            name: "可回滚工具",
+                            revision: "revision-3",
+                        },
+                    ]}
+                    loadError=""
+                    onRefresh={() => Promise.resolve()}
+                />,
+                dom.root as unknown as HTMLElement,
+            )
+        );
+        const blocked = find(
+            dom.root,
+            'button[aria-label="回滚 测试工具 至 v0.9.0"]',
+        );
+        assert(blocked.disabled);
+        assertStringIncludes(blocked.getAttribute("title") ?? "", "刷新");
+        assertFalse(
+            find(dom.root, 'button[aria-label="回滚 可回滚工具 至 v0.9.0"]')
+                .disabled,
+        );
+        await dom.act(() => blocked.click());
+        assertEquals(requests, 0);
+        assertEquals(dom.root.querySelector("dialog"), null);
+    } finally {
+        await dom.act(() => render(null, dom.root as unknown as HTMLElement));
+        configureAdminTransport();
+        dom.restore();
     }
 });
 

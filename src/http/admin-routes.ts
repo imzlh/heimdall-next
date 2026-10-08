@@ -11,9 +11,17 @@ import type {
 } from "@heimdall/admin-contracts";
 import { StorageConflictError } from "@heimdall/storage";
 import {
+    parseSourceHealthPolicy,
+    type SourceHealthPolicy,
+} from "@heimdall/admin-contracts/source-health.ts";
+import {
     parseSourceModelMap,
     type SourceModelMap,
 } from "@heimdall/admin-contracts/source-model-map.ts";
+import {
+    parseSourceMiddleware,
+    type SourceMiddleware,
+} from "@heimdall/admin-contracts/source-middleware.ts";
 import type { RequestStore } from "@heimdall/storage";
 import type { MountableApp, ServerApp, ServerEnv } from "./app.ts";
 import type { ModelsResponse } from "./public-routes.ts";
@@ -22,6 +30,8 @@ import { createSystemLogRoutes } from "./system-log-routes.ts";
 import {
     createPluginPackageRoutes,
     type InstallPluginHandler,
+    type RollbackPluginHandler,
+    type UpgradePluginHandler,
 } from "./plugin-package-routes.ts";
 import type { SystemLog } from "@heimdall/core/observability/system-log.ts";
 import { assertNoRouteConflicts, mountRouteGroup } from "./route-validation.ts";
@@ -229,6 +239,8 @@ export interface AdminManagementOptions {
         pluginId: string,
     ) => MaybePromise<unknown>;
     readonly installPlugin?: InstallPluginHandler;
+    readonly upgradePlugin?: UpgradePluginHandler;
+    readonly rollbackPlugin?: RollbackPluginHandler;
     readonly probeSource?: (
         context: AdminRouteContext,
         sourceId: string,
@@ -853,19 +865,55 @@ export function createAdminRoutes(
     }
 
     const installPlugin = options.management?.installPlugin;
-    if (installPlugin !== undefined) {
+    if (
+        installPlugin !== undefined ||
+        options.management?.upgradePlugin !== undefined ||
+        options.management?.rollbackPlugin !== undefined
+    ) {
         mountRouteGroup(
             app,
             "/",
-            createPluginPackageRoutes(async (context, input) => {
-                const result = await installPlugin(context, input);
-                recordAction(
-                    options.systemLog,
-                    "插件",
-                    "已安装本地插件包，等待启用",
-                );
-                return result;
-            }),
+            createPluginPackageRoutes(
+                installPlugin === undefined
+                    ? undefined
+                    : async (context, input) => {
+                        const result = await installPlugin(context, input);
+                        recordAction(
+                            options.systemLog,
+                            "插件",
+                            "已安装本地插件包，等待启用",
+                        );
+                        return result;
+                    },
+                options.management?.upgradePlugin === undefined
+                    ? undefined
+                    : async (context, id, input, revision) => {
+                        const result = await options.management!.upgradePlugin!(
+                            context,
+                            id,
+                            input,
+                            revision,
+                        );
+                        recordAction(
+                            options.systemLog,
+                            "插件",
+                            `已升级插件 ${id}`,
+                        );
+                        return result;
+                    },
+                options.management?.rollbackPlugin === undefined
+                    ? undefined
+                    : async (context, id, revision) => {
+                        const result = await options.management!
+                            .rollbackPlugin!(context, id, revision);
+                        recordAction(
+                            options.systemLog,
+                            "插件",
+                            `已回滚插件 ${id}`,
+                        );
+                        return result;
+                    },
+            ),
         );
     }
 
@@ -1187,6 +1235,12 @@ function parseCreateSource(body: Record<string, unknown>): CreateSourceInput {
         ...(body.modelMap === undefined
             ? {}
             : { modelMap: parseModelMap(body.modelMap) }),
+        ...(body.middleware === undefined
+            ? {}
+            : { middleware: parseMiddleware(body.middleware) }),
+        ...(body.healthPolicy === undefined
+            ? {}
+            : { healthPolicy: parseHealthPolicy(body.healthPolicy) }),
         sourcePluginId,
         ...(presetId === undefined ? {} : { presetId }),
         config: body.config,
@@ -1196,13 +1250,22 @@ function parseCreateSource(body: Record<string, unknown>): CreateSourceInput {
 function parseUpdateSource(body: Record<string, unknown>): UpdateSourceInput {
     if (
         Object.keys(body).some((key) =>
-            !["name", "priority", "enabled", "proxy", "modelMap"].includes(key)
+            ![
+                "name",
+                "priority",
+                "enabled",
+                "proxy",
+                "modelMap",
+                "middleware",
+                "healthPolicy",
+            ]
+                .includes(key)
         )
     ) {
         throw new AdminRouteError(
             400,
             "invalid_request",
-            "only name, priority, enabled, proxy and modelMap can be updated",
+            "only name, priority, enabled, proxy, modelMap, middleware and healthPolicy can be updated",
         );
     }
     if (Object.keys(body).length === 0) {
@@ -1218,12 +1281,20 @@ function parseUpdateSource(body: Record<string, unknown>): UpdateSourceInput {
         enabled?: boolean;
         proxy?: SourceProxySelection;
         modelMap?: SourceModelMap;
+        middleware?: SourceMiddleware;
+        healthPolicy?: SourceHealthPolicy | null;
     } = {};
     if (Object.hasOwn(body, "proxy")) {
         input.proxy = parseSourceProxy(body.proxy);
     }
     if (Object.hasOwn(body, "modelMap")) {
         input.modelMap = parseModelMap(body.modelMap);
+    }
+    if (Object.hasOwn(body, "middleware")) {
+        input.middleware = parseMiddleware(body.middleware);
+    }
+    if (Object.hasOwn(body, "healthPolicy")) {
+        input.healthPolicy = parseHealthPolicy(body.healthPolicy);
     }
     if (Object.hasOwn(body, "name")) {
         input.name = boundedString(body.name, "name", 120);
@@ -1286,6 +1357,30 @@ function parseModelMap(input: unknown): SourceModelMap {
             400,
             "invalid_source_model_map",
             error instanceof Error ? error.message : "模型映射无效。",
+        );
+    }
+}
+
+function parseMiddleware(input: unknown): SourceMiddleware {
+    try {
+        return parseSourceMiddleware(input);
+    } catch (error) {
+        throw new AdminRouteError(
+            400,
+            "invalid_source_middleware",
+            error instanceof Error ? error.message : "渠道中间件无效。",
+        );
+    }
+}
+
+function parseHealthPolicy(input: unknown): SourceHealthPolicy | null {
+    try {
+        return parseSourceHealthPolicy(input);
+    } catch {
+        throw new AdminRouteError(
+            400,
+            "invalid_source_health_policy",
+            "冷却时间必须为 0 至 86400000 毫秒的整数。",
         );
     }
 }

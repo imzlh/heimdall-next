@@ -5,6 +5,38 @@ import type {
 } from "../contracts/mod.ts";
 import type { OperationRequest, StreamFrame } from "../hip/mod.ts";
 import type { RequestLifecycle } from "./mod.ts";
+import { withCancellation } from "./cancellation.ts";
+import { MiddlewareFrameStreams } from "./middleware-frames.ts";
+
+/** A host middleware failure must not cool, retry or fail over an upstream. */
+export class SourceMiddlewareError extends Error {
+    override readonly name = "SourceMiddlewareError";
+    readonly code: string;
+    readonly status: number;
+
+    constructor(cause: unknown) {
+        super("source middleware execution failed", { cause });
+        let code: unknown;
+        let status: unknown;
+        try {
+            if (typeof cause === "object" && cause !== null) {
+                code = Object.getOwnPropertyDescriptor(cause, "code")?.value;
+                status = Object.getOwnPropertyDescriptor(cause, "status")
+                    ?.value;
+            }
+        } catch {
+            /* An arbitrary thrown value cannot break fault isolation. */
+        }
+        this.code =
+            typeof code === "string" && /^[a-zA-Z0-9_.-]{1,96}$/.test(code)
+                ? code
+                : "middleware_error";
+        this.status = typeof status === "number" && Number.isInteger(status) &&
+                status >= 400 && status <= 599
+            ? status
+            : 500;
+    }
+}
 
 /** Ordered in-process request and frame middleware. */
 export class MiddlewareRegistry {
@@ -77,6 +109,28 @@ export class MiddlewareRegistry {
         return snapshot;
     }
 
+    /** Explicit bindings override declaration order and never re-enable plugins. */
+    select(ids: readonly string[]): MiddlewareRegistry {
+        const selection = new MiddlewareRegistry();
+        for (const [order, id] of ids.entries()) {
+            const plugin = this.#plugins.get(id);
+            if (plugin === undefined || selection.get(id) !== undefined) {
+                continue;
+            }
+            selection.register({
+                ...plugin,
+                order,
+                ...(plugin.transformRequest === undefined ? {} : {
+                    transformRequest: plugin.transformRequest.bind(plugin),
+                }),
+                ...(plugin.transformFrames === undefined ? {} : {
+                    transformFrames: plugin.transformFrames.bind(plugin),
+                }),
+            });
+        }
+        return selection;
+    }
+
     async transformRequest(
         input: OperationRequest,
         request: RequestContext,
@@ -85,18 +139,22 @@ export class MiddlewareRegistry {
         validateOperationEnvelope(current);
         for (const plugin of this.ordered()) {
             if (plugin.transformRequest === undefined) continue;
-            const next = await plugin.transformRequest(
-                current,
-                hookContext(request, plugin),
+            const next = await withCancellation(
+                () =>
+                    plugin.transformRequest!(
+                        current,
+                        hookContext(request, plugin),
+                    ),
+                request.signal,
             );
-            if (next === undefined) continue;
-            validateOperationEnvelope(next);
-            if (next.requestId !== request.requestId) {
+            request.signal.throwIfAborted();
+            if (next !== undefined) current = next;
+            validateOperationEnvelope(current);
+            if (current.requestId !== request.requestId) {
                 throw new TypeError(
                     `middleware ${plugin.manifest.id} changed the request id`,
                 );
             }
-            current = next;
         }
         return current;
     }
@@ -106,23 +164,41 @@ export class MiddlewareRegistry {
         request: RequestContext,
         frames: AsyncIterable<StreamFrame>,
     ): Promise<AsyncIterable<StreamFrame>> {
-        let current = frames;
-        for (const plugin of this.ordered()) {
-            if (plugin.transformFrames === undefined) continue;
-            const next = await plugin.transformFrames(
-                input,
-                hookContext(request, plugin),
-                current,
-            );
-            if (next === undefined) continue;
-            if (!isAsyncIterable(next)) {
-                throw new TypeError(
-                    `middleware ${plugin.manifest.id} did not return an async frame stream`,
+        const owner = new MiddlewareFrameStreams(request.signal);
+        try {
+            let current = owner.own(frames);
+            for (const plugin of this.ordered()) {
+                if (plugin.transformFrames === undefined) continue;
+                const next = await withCancellation(
+                    () =>
+                        Promise.resolve(
+                            plugin.transformFrames!(
+                                input,
+                                hookContext(request, plugin),
+                                current,
+                            ),
+                        )
+                            .then((next) => {
+                                if (next === undefined) return undefined;
+                                if (!isAsyncIterable(next)) {
+                                    throw new TypeError(
+                                        `middleware ${plugin.manifest.id} did not return an async frame stream`,
+                                    );
+                                }
+                                return owner.own(next);
+                            }),
+                    request.signal,
                 );
+                request.signal.throwIfAborted();
+                if (next !== undefined) current = next;
             }
-            current = next;
+            return owner.finish(current);
+        } catch (error) {
+            try {
+                await owner.dispose();
+            } catch { /* Preserve the failing hook. */ }
+            throw error;
         }
-        return current;
     }
 
     private ordered(): MiddlewarePlugin[] {

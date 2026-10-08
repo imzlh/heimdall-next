@@ -55,6 +55,7 @@ export function SourceCreateDialog(props: SourceCreateDialogProps) {
         priority: draft.priority,
         proxy: draft.proxy,
         modelMap: draft.modelMap,
+        healthPolicy: draft.healthPolicy,
         sourcePluginId,
         ...(draft.mode === "preset" ? { presetId: draft.presetId } : {}),
         config,
@@ -64,6 +65,7 @@ export function SourceCreateDialog(props: SourceCreateDialogProps) {
             sources={sources}
             presets={presets}
             proxyPool={props.proxyPool}
+            plugins={dashboard.status.plugins}
             onClose={props.onClose}
             onSaved={props.onSaved}
             onProbe={probe}
@@ -74,6 +76,8 @@ export function SourceCreateDialog(props: SourceCreateDialogProps) {
                     priority: draft.priority,
                     proxy: draft.proxy,
                     modelMap: draft.modelMap,
+                    middleware: draft.middleware,
+                    healthPolicy: draft.healthPolicy,
                     sourcePluginId,
                     ...(draft.mode === "preset"
                         ? { presetId: draft.presetId }

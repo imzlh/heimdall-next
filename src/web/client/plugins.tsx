@@ -6,16 +6,24 @@ import {
     setPluginEnabled,
     uninstallPlugin,
 } from "./api/admin.ts";
-import { installPluginPackage } from "./api/plugin-packages.ts";
+import {
+    installPluginPackage,
+    rollbackPluginPackage,
+    upgradePluginPackage,
+} from "./api/plugin-packages.ts";
 import { PluginCard } from "../shared/plugin-card.tsx";
 import {
+    canRollbackPlugin,
     canTogglePlugin,
     canUninstallPlugin,
     pluginDependents,
 } from "../shared/catalog-presentation.ts";
 import { PluginInstallDialog } from "./plugin-install.tsx";
 import { PluginDialog } from "./plugin-dialog.tsx";
-import type { PluginPackagePreview } from "./plugin-package-file.ts";
+import {
+    type PluginPackagePreview,
+    pluginPackageUpgradeError,
+} from "./plugin-package-file.ts";
 
 interface PluginsProps {
     plugins: ListedPlugin[];
@@ -23,11 +31,18 @@ interface PluginsProps {
     onRefresh: () => Promise<void>;
 }
 
+type PluginActionDialog = {
+    kind: "remove" | "rollback";
+    plugin: ListedPlugin;
+};
+
 export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
     const [pendingId, setPendingId] = useState("");
     const [actionError, setActionError] = useState("");
     const [message, setMessage] = useState("");
-    const [dialog, setDialog] = useState<"install" | ListedPlugin | null>(null);
+    const [dialog, setDialog] = useState<"install" | PluginActionDialog | null>(
+        null,
+    );
     const [refreshFailed, setRefreshFailed] = useState(false);
     const busy = useRef(false);
     const mounted = useRef(true);
@@ -37,7 +52,19 @@ export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
             mounted.current = false;
         };
     }, []);
-    const deleting = dialog && dialog !== "install" ? dialog : null;
+    const actionDialog = dialog && dialog !== "install" ? dialog : null;
+    const deleting = actionDialog?.kind === "remove"
+        ? actionDialog.plugin
+        : null;
+    const rollingBack = actionDialog?.kind === "rollback"
+        ? actionDialog.plugin
+        : null;
+    const rollbackStale = rollingBack &&
+        !plugins.some((plugin) =>
+            plugin.id === rollingBack.id &&
+            plugin.revision === rollingBack.revision &&
+            plugin.rollbackVersion === rollingBack.rollbackVersion
+        );
     const dependents = deleting ? pluginDependents(deleting, plugins) : [];
 
     function dismiss() {
@@ -61,13 +88,19 @@ export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
         }
     }
 
-    async function change(kind: "toggle" | "remove", plugin: ListedPlugin) {
+    async function change(
+        kind: "toggle" | "remove" | "rollback",
+        plugin: ListedPlugin,
+    ) {
         if (busy.current) return;
         if (kind === "toggle" && !canTogglePlugin(plugin)) return;
         if (
             kind === "remove" &&
             (!canUninstallPlugin(plugin) ||
                 pluginDependents(plugin, plugins).length)
+        ) return;
+        if (
+            kind === "rollback" && (!canRollbackPlugin(plugin) || rollbackStale)
         ) return;
         busy.current = true;
         setPendingId(plugin.id);
@@ -76,22 +109,38 @@ export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
         try {
             if (kind === "toggle") {
                 await setPluginEnabled(plugin.id, !plugin.enabled);
+            } else if (kind === "rollback") {
+                await rollbackPluginPackage(plugin.id, plugin.revision!);
             } else await uninstallPlugin(plugin.id);
             if (!mounted.current) return;
             const action = kind === "remove"
                 ? "卸载"
+                : kind === "rollback"
+                ? "回滚"
                 : plugin.enabled
                 ? "停用"
                 : "启用";
-            setMessage(`已${action} ${plugin.name || plugin.id}。`);
-            if (kind === "remove") setDialog(null);
-            await refresh(kind === "remove" ? "插件已卸载" : "插件状态已更新");
+            setMessage(
+                kind === "rollback"
+                    ? `已将 ${
+                        plugin.name || plugin.id
+                    } 回滚至 v${plugin.rollbackVersion}，已保留原有启停状态。`
+                    : `已${action} ${plugin.name || plugin.id}。`,
+            );
+            if (kind !== "toggle") setDialog(null);
+            await refresh(
+                kind === "toggle" ? "插件状态已更新" : `插件已${action}`,
+            );
         } catch (error) {
             if (mounted.current) {
                 setActionError(
-                    `${kind === "remove" ? "卸载插件" : "更新插件状态"}失败：${
-                        describeError(error)
-                    }`,
+                    `${
+                        kind === "remove"
+                            ? "卸载插件"
+                            : kind === "rollback"
+                            ? "回滚插件"
+                            : "更新插件状态"
+                    }失败：${describeError(error)}`,
                 );
                 // A lifecycle failure may have persisted lastError or stopped a worker.
                 // Refresh the actual host state while retaining the operation failure.
@@ -107,20 +156,47 @@ export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
 
     async function install(preview: PluginPackagePreview) {
         if (busy.current) return;
+        const installed = plugins.find((plugin) =>
+            plugin.id === preview.plugin.id
+        );
+        if (installed) {
+            const error = pluginPackageUpgradeError(preview.plugin, installed);
+            if (error) throw new Error(error);
+        }
         busy.current = true;
         setPendingId("@install");
         setActionError("");
         setMessage("");
         try {
-            await installPluginPackage(preview.input);
+            if (installed) {
+                try {
+                    await upgradePluginPackage(
+                        installed.id,
+                        installed.revision!,
+                        preview.input,
+                    );
+                } catch (error) {
+                    // A rejected activation can change host state; keep its error visible.
+                    try {
+                        await onRefresh();
+                    } catch {
+                        /* The package operation error is retained by the dialog. */
+                    }
+                    throw error;
+                }
+            } else await installPluginPackage(preview.input);
             if (!mounted.current) return;
             setDialog(null);
             setMessage(
-                `已安装 ${
-                    preview.plugin.name || preview.plugin.id
-                }，可在插件卡片中启用。`,
+                installed
+                    ? `已升级 ${
+                        preview.plugin.name || preview.plugin.id
+                    } 至 v${preview.plugin.version}，已保留原有启停状态。`
+                    : `已安装 ${
+                        preview.plugin.name || preview.plugin.id
+                    }，可在插件卡片中启用。`,
             );
-            await refresh("插件已安装");
+            await refresh(installed ? "插件已升级" : "插件已安装");
         } finally {
             busy.current = false;
             if (mounted.current) setPendingId("");
@@ -170,7 +246,7 @@ export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
                 </div>
             </div>
             {loadError && <p class="form-error" role="alert">{loadError}</p>}
-            {actionError && !deleting && (
+            {actionError && !actionDialog && (
                 <p class="form-error" role="alert">{actionError}</p>
             )}
             {message && <p class="form-success" role="status">{message}</p>}
@@ -199,7 +275,16 @@ export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
                                 onUninstall={(plugin) => {
                                     if (!busy.current) {
                                         setActionError("");
-                                        setDialog(plugin);
+                                        setDialog({ kind: "remove", plugin });
+                                    }
+                                }}
+                                onRollback={(plugin) => {
+                                    if (
+                                        !busy.current &&
+                                        canRollbackPlugin(plugin)
+                                    ) {
+                                        setActionError("");
+                                        setDialog({ kind: "rollback", plugin });
                                     }
                                 }}
                             />
@@ -266,6 +351,56 @@ export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
                             onClick={() => void change("remove", deleting)}
                         >
                             {pendingId ? "正在卸载…" : "确认卸载"}
+                        </button>
+                    </footer>
+                </PluginDialog>
+            )}
+            {rollingBack && (
+                <PluginDialog
+                    title="回滚插件"
+                    busy={Boolean(pendingId)}
+                    onClose={dismiss}
+                >
+                    <p class="plugin-remove-description">
+                        将“{rollingBack.name ||
+                            rollingBack
+                                .id}”恢复至保留的上一版本，保留当前启停状态。
+                    </p>
+                    <code>{rollingBack.id}</code>
+                    <div class="plugin-preview-section" aria-label="版本变更">
+                        <p>
+                            当前版本：{rollingBack.version
+                                ? `v${rollingBack.version}`
+                                : "未提供"}
+                        </p>
+                        <p>目标版本：v{rollingBack.rollbackVersion}</p>
+                    </div>
+                    {rollbackStale && (
+                        <p class="form-error" role="alert">
+                            插件版本已发生变化，请关闭对话框并重新选择回滚。
+                        </p>
+                    )}
+                    {actionError && (
+                        <p class="form-error" role="alert">{actionError}</p>
+                    )}
+                    <footer class="plugin-dialog-actions">
+                        <button
+                            type="button"
+                            class="text-button"
+                            disabled={Boolean(pendingId)}
+                            onClick={dismiss}
+                        >
+                            取消
+                        </button>
+                        <button
+                            type="button"
+                            class="primary-button"
+                            disabled={Boolean(pendingId) ||
+                                Boolean(rollbackStale) ||
+                                !canRollbackPlugin(rollingBack)}
+                            onClick={() => void change("rollback", rollingBack)}
+                        >
+                            {pendingId ? "正在回滚…" : "确认回滚"}
                         </button>
                     </footer>
                 </PluginDialog>
