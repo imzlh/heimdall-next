@@ -85,7 +85,14 @@
     min-width: 30px;
     height: 32px;
 }
+.proxy-pool-panel {
+    container-type: inline-size;
+}
 .proxy-pool-fields {
+    display: grid;
+    grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr);
+    align-items: start;
+    gap: 16px 24px;
     min-width: 0;
     padding: 0;
     border: 0;
@@ -94,13 +101,54 @@
 .proxy-default-field {
     display: grid;
     gap: 6px;
-    max-width: 420px;
-    margin-bottom: 18px;
+    min-width: 0;
 }
 .proxy-entry-list {
     display: grid;
     gap: 10px;
-    margin-bottom: 16px;
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    min-width: 0;
+}
+.proxy-entry-list:empty {
+    display: none;
+}
+.proxy-pool-fields > .empty-state {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+    align-self: stretch;
+    display: grid;
+    align-content: center;
+    padding: 18px;
+    border: 1px dashed var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface-muted);
+    font-size: 12px;
+}
+.proxy-pool-fields > .secondary-button {
+    grid-column: 1;
+    justify-self: start;
+}
+@container (max-width: 760px) {
+    .proxy-pool-fields {
+        grid-template-columns: minmax(0, 1fr);
+    }
+    .proxy-entry-list,
+    .proxy-pool-fields > .empty-state {
+        grid-column: 1;
+        grid-row: auto;
+    }
+}
+@container (max-width: 1000px) {
+    .proxy-entry-heading {
+        flex-wrap: wrap;
+    }
+    .proxy-entry-actions {
+        margin-left: auto;
+    }
+    .proxy-entry-editor .field-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
 }
 .proxy-entry {
     min-width: 0;

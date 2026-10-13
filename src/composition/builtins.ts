@@ -41,8 +41,11 @@ import {
     PluginLifecycleError,
     validatePluginManifest,
 } from "@heimdall/plugin-host";
-import { createManagedPlugins } from "./managed-plugins.ts";
-import { createChatToolset } from "../chat/tools/toolset.ts";
+import {
+    createManagedPlugins,
+    type ManagedPlugins,
+} from "./managed-plugins.ts";
+import { ToolConfigurations } from "./tool-configuration.ts";
 import { probeSource } from "./probe-loop.ts";
 import { probeSourceDraft } from "./source-draft-probe.ts";
 import { createProxyPool } from "./proxy-pool.ts";
@@ -147,33 +150,41 @@ export async function loadBuiltinComposition(
     const manifests = new Map<string, PluginManifest>();
     const pluginErrors = new Map<string, string>();
     const pluginStates = new Map<string, boolean>();
-    const managedPlugins = options.pluginHost === undefined
-        ? createManagedPlugins(
-            store,
-            () => [...toolPlugins.values()],
-            () => [...manifests.keys()],
-            () =>
-                [...manifests.values()].map((manifest) => ({
-                    manifest,
-                    enabled: !pluginErrors.has(manifest.id) &&
-                        pluginStates.get(manifest.id) !== false && (
-                            protocols.some((plugin) =>
-                                plugin.manifest.id === manifest.id
-                            ) ||
-                            apis.some((plugin) =>
-                                plugin.manifest.id === manifest.id
-                            ) ||
-                            sourceFactories.has(manifest.id) ||
-                            toolPlugins.has(manifest.id) ||
-                            middlewarePlugins.registry.get(manifest.id) !==
-                                undefined ||
-                            presets.some((plugin) =>
-                                plugin.manifest.id === manifest.id
-                            )
-                        ),
-                })),
-        )
-        : undefined;
+    const toolConfigurations = new ToolConfigurations(
+        store,
+        env,
+        toolPlugins,
+        pluginErrors,
+        (plugin) => managedPlugins?.assertToolsAvailable(plugin),
+    );
+    const managedPlugins: ManagedPlugins | undefined =
+        options.pluginHost === undefined
+            ? createManagedPlugins(
+                store,
+                () => toolConfigurations.registeredTools(),
+                () => [...manifests.keys()],
+                () =>
+                    [...manifests.values()].map((manifest) => ({
+                        manifest,
+                        enabled: !pluginErrors.has(manifest.id) &&
+                            pluginStates.get(manifest.id) !== false && (
+                                protocols.some((plugin) =>
+                                    plugin.manifest.id === manifest.id
+                                ) ||
+                                apis.some((plugin) =>
+                                    plugin.manifest.id === manifest.id
+                                ) ||
+                                sourceFactories.has(manifest.id) ||
+                                toolPlugins.has(manifest.id) ||
+                                middlewarePlugins.registry.get(manifest.id) !==
+                                    undefined ||
+                                presets.some((plugin) =>
+                                    plugin.manifest.id === manifest.id
+                                )
+                            ),
+                    })),
+            )
+            : undefined;
     const pluginHost = options.pluginHost ?? managedPlugins!.host;
 
     if (await directoryExists(root)) {
@@ -270,10 +281,11 @@ export async function loadBuiltinComposition(
                         );
                     }
                     assertManifestMatches(factory.manifest, manifest);
-                    const plugin = factory.create({ env });
+                    const plugin = await toolConfigurations.load(
+                        factory,
+                        manifest,
+                    );
                     assertManifestMatches(plugin.manifest, manifest);
-                    // Registration validates names without executing plugin capabilities.
-                    createChatToolset([...toolPlugins.values(), plugin]);
                     toolPlugins.set(manifest.id, plugin);
                 }
             } catch (error) {
@@ -315,6 +327,7 @@ export async function loadBuiltinComposition(
         pluginHost,
         store,
         toolPlugins,
+        toolConfigurations,
         middlewarePlugins,
         proxyBindings,
         sourceErrors,
@@ -353,15 +366,18 @@ export async function loadBuiltinComposition(
         catalog,
         management: {
             ...management,
+            getToolConfig: (_context, id) => toolConfigurations.get(id),
+            saveToolConfig: (_context, id, config, revision) =>
+                toolConfigurations.save(id, config, revision),
             ...(managedPlugins === undefined ? {} : {
                 installPlugin: (
                     _context: AdminRouteContext,
                     input: unknown,
-                ) => managedPlugins.install(input),
+                ) => managedPlugins!.install(input),
                 upgradePlugin: (_context, id, input, revision) =>
-                    managedPlugins.upgrade(id, input, revision),
+                    managedPlugins!.upgrade(id, input, revision),
                 rollbackPlugin: (_context, id, revision) =>
-                    managedPlugins.host.rollback!(id, revision),
+                    managedPlugins!.host.rollback!(id, revision),
             }),
         },
         pluginHost,
@@ -407,6 +423,7 @@ function createCatalog(
     pluginHost: PluginHost,
     store: ConfigStore,
     toolPlugins: ReadonlyMap<string, ToolPlugin>,
+    toolConfigurations: ToolConfigurations,
     middlewarePlugins: BuiltinMiddlewarePlugins,
     proxyBindings: SourceProxyBindings,
     sourceErrors: Map<string, SourceConfigurationIssue>,
@@ -427,6 +444,9 @@ function createCatalog(
                 description: manifest.description,
                 dependencies: manifest.dependencies,
                 capabilities: manifest.capabilities,
+                ...(toolConfigurations.canConfigure(manifest.id)
+                    ? { canConfigure: true }
+                    : {}),
                 canToggle: sourceFactories.has(manifest.id) ||
                     toolPlugins.has(manifest.id) ||
                     middlewarePlugins.has(manifest.id),

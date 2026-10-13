@@ -32,7 +32,7 @@ export interface PluginManifest {
     readonly permissions?: PluginPermissions;
     /** Declarative operator UI metadata. Only the host chooses render trust. */
     readonly ui?: readonly JsonObject[];
-    /** Source configuration schema; interpreted by the host's form renderer. */
+    /** Source or configurable tool schema; interpreted by the host's form renderer. */
     readonly configSchema?: JsonObject;
     /** Preset-owned browser page. Execution still requires an explicit host grant. */
     readonly presetPage?: { readonly modulePath: string };

@@ -30,6 +30,7 @@
         "hono": "jsr:@hono/hono@4.12.16",
         "marked": "npm:marked@15.0.12",
         "entities": "npm:entities@6.0.1",
+        "diff": "npm:diff@8.0.2",
         "undici": "npm:undici@7.29.1",
         "lucide": "npm:lucide@1.47.0/dist/esm/lucide.mjs",
         "@heimdall/ui/icons": "./src/web/shared/icons.tsx",

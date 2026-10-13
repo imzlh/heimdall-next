@@ -17,7 +17,7 @@ import {
 import { downloadConversation } from "./chat/export.ts";
 import { MessageEditor } from "./chat/message-editor.tsx";
 import { ConversationBranches } from "./chat/conversation-branches.tsx";
-import { ChatClientSlots, useChatExtensions } from "./chat/extensions.tsx";
+import { useChatExtensions } from "./chat/extensions.tsx";
 
 function savedTheme(): "light" | "dark" {
     try {
@@ -130,16 +130,20 @@ function ConversationSettings(
                     <span>插件</span>
                     <div class="chat-plugin-list">
                         {state.tools.map((tool) => {
-                            const on = !state.conversation?.disabledTools
-                                ?.includes(tool.id);
+                            const disabledTools =
+                                state.conversation?.disabledTools ??
+                                    state.pendingDisabledTools ?? [];
+                            const on = !disabledTools.includes(tool.id);
                             return (
                                 <button
                                     key={tool.id}
                                     type="button"
                                     role="switch"
+                                    aria-label={tool.name}
                                     aria-checked={on ? "true" : "false"}
                                     class="chat-plugin-row"
-                                    disabled={busy(state) || !conversationId}
+                                    disabled={busy(state) || !state.available ||
+                                        !state.authenticated}
                                     onClick={() => toggleTool(tool.id, !on)}
                                     title={on ? "点击停用" : "点击启用"}
                                 >
@@ -569,13 +573,6 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                         </li>
                     )}
                 </ul>
-                <ChatClientSlots
-                    slot="chat.sidebar"
-                    extensions={plugins.extensions}
-                    state={state}
-                    controller={controller}
-                    theme={theme}
-                />
                 {plugins.error && (
                     <p class="chat-plugin-notice" role="status">
                         {plugins.error}
@@ -861,15 +858,6 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                 <ChatComposer
                     state={state}
                     controller={controller}
-                    capabilities={
-                        <ChatClientSlots
-                            slot="chat.composer"
-                            extensions={plugins.extensions}
-                            state={state}
-                            controller={controller}
-                            theme={theme}
-                        />
-                    }
                 />
             </section>
             {management && (

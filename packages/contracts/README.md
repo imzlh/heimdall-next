@@ -7,6 +7,10 @@ This package is the dependency direction boundary for heimdall-next.
   contracts.
 - `storage.ts` contains storage value shapes. Runtime storage ports belong to
   `packages/storage`.
+- `tools.ts` contains server tool calls, outcomes, budgets and trusted factories.
+  Configurable factories declare `manifest.configSchema`, validate settings with
+  `validateConfig`, and receive persisted JSON through `create({ config })`.
+  The host owns management access, revision checks and instance replacement.
 - `mod.ts` is the only public barrel entry point.
 
 The package has no imports from `src/`, `plugins/`, Hono, Vue, SQLite, or Deno

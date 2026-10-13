@@ -1,18 +1,20 @@
-type ComposerKey = Pick<
-    KeyboardEvent,
-    "key" | "isComposing" | "keyCode" | "shiftKey" | "ctrlKey" | "metaKey"
->;
+type ComposerKey =
+    & Pick<
+        KeyboardEvent,
+        "key" | "isComposing" | "keyCode" | "shiftKey" | "ctrlKey" | "metaKey"
+    >
+    & { readonly repeat?: boolean };
 
 /** IME confirmation never sends; Shift, Ctrl and Cmd + Enter insert a newline. */
 export function composerKeyAction(
     event: ComposerKey,
-): "none" | "newline" | "send" {
+): "none" | "newline" | "send" | "ignore" {
     if (event.key !== "Enter" || event.isComposing || event.keyCode === 229) {
         return "none";
     }
-    return event.shiftKey || event.ctrlKey || event.metaKey
-        ? "newline"
-        : "send";
+    if (event.shiftKey || event.ctrlKey || event.metaKey) return "newline";
+    // A held Enter must not send a second draft when a fast reply finishes.
+    return event.repeat ? "ignore" : "send";
 }
 
 /** Replace the selection, keeping the caret after the inserted newline. */

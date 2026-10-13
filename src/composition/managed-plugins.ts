@@ -54,6 +54,8 @@ export function parseManagedPluginPackage(value: unknown): PluginArtifact {
 export interface ManagedPlugins {
     readonly host: PluginHost;
     readonly tools: () => readonly ToolPlugin[];
+    /** Includes capabilities staged or reserved during upgrades. */
+    readonly assertToolsAvailable: (plugin: ToolPlugin) => void;
     install(input: unknown): Promise<PluginRecord>;
     upgrade(
         id: string,
@@ -193,6 +195,29 @@ export function createManagedPlugins(
     return {
         host,
         tools: () => [...active.values()],
+        assertToolsAvailable(plugin) {
+            const names = new Set(
+                plugin.tools.map((tool) => tool.definition.name),
+            );
+            for (const candidate of [...active.values(), ...pending.values()]) {
+                if (
+                    candidate.tools.some((tool) =>
+                        names.has(tool.definition.name)
+                    )
+                ) {
+                    throw new TypeError(
+                        "Tool name conflicts with an installed plugin",
+                    );
+                }
+            }
+            for (const reserved of reservedNames.values()) {
+                if ([...reserved].some((name) => names.has(name))) {
+                    throw new TypeError(
+                        "Tool name conflicts with a plugin being upgraded",
+                    );
+                }
+            }
+        },
         async install(input) {
             const artifact = parseManagedPluginPackage(input);
             if (reservedIds().includes(artifact.manifest.id)) {

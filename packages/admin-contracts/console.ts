@@ -59,6 +59,8 @@ export interface ListedPlugin {
     lastError?: string;
     /** Host-supplied operation support; never inferred from plugin kind or trust. */
     canToggle?: boolean;
+    /** Host-owned configuration is available through the management API. */
+    canConfigure?: boolean;
     /** Installed through the plugin host rather than shipped in the service. */
     managed?: boolean;
     revision?: string;

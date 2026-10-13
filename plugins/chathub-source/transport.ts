@@ -39,10 +39,12 @@ import {
     resumeChatHubSession,
 } from "./protocol/mod.ts";
 import {
+    conversationHistoryHash,
     conversationMessages,
     generationPayload,
     reasoningEffortOf,
 } from "./request.ts";
+import { softThinkingPrompt } from "./thinking.ts";
 import {
     collectImages,
     downloadGeneratedImages,
@@ -52,6 +54,7 @@ import {
     ChatHubContentFilterError,
     flattenConversation,
     isContentPolicyBlock,
+    type ModelToolDecision,
     modelToolRouterPrompt,
     parseModelToolDecision,
     toneForModel,
@@ -61,6 +64,8 @@ interface Session {
     ids: ChatHubSessionIds;
     history: string;
     length: number;
+    signature: string;
+    contextTokens: number;
     expiresAt: number;
     busy: boolean;
 }
@@ -193,6 +198,7 @@ export class ChatHubSource implements InferenceSource {
         const abort = new AbortController();
         const signal = AbortSignal.any([context.signal, abort.signal]);
         let selected: Session | undefined;
+        let selectedKey: string | undefined;
         let transport: SourceTransport | undefined;
         try {
             transport = new SourceTransport({
@@ -221,10 +227,19 @@ export class ChatHubSource implements InferenceSource {
             }
             const tone = toneForModel(model, reasoningEffortOf(request));
             const config = await this.#credentials(signal, transport.selection);
+            const guidance = softThinkingPrompt(request, config.softThinking);
+            const withGuidance = (text: string) =>
+                guidance ? `${guidance}\n\n${text}` : text;
             const messages = conversationMessages(request);
             const fullText = flattenConversation(messages);
-            const images = collectImages(request);
-            if (!fullText && !images.length) {
+            let images = collectImages(request, true);
+            if (
+                !images.length && !messages.some((message) =>
+                    !message.image &&
+                    (String(message.content ?? "").trim() ||
+                        Array.isArray(message.tool_calls))
+                )
+            ) {
                 throw new TypeError(
                     "ChatHub requires a non-empty text conversation",
                 );
@@ -260,6 +275,49 @@ export class ChatHubSource implements InferenceSource {
                     parameters: tool.inputSchema,
                 },
             })) ?? [];
+            const forcedTool = typeof request.toolChoice === "object"
+                ? request.toolChoice.name
+                : undefined;
+            if (
+                (request.toolChoice === "required" ||
+                    forcedTool !== undefined) &&
+                (!tools.length ||
+                    (forcedTool !== undefined &&
+                        !tools.some((tool) =>
+                            tool.function.name === forcedTool
+                        )))
+            ) {
+                throw new TypeError(
+                    "ChatHub tool_choice requires an available tool",
+                );
+            }
+            let routerInputTokens = 0;
+            let routerOutputTokens = 0;
+            let routerReasoningTokens = 0;
+            const usageEvent = (
+                prompt = "",
+                answer = "",
+                reasoning = "",
+                cachedInputTokens = 0,
+            ): StreamEvent => {
+                const inputTokens = routerInputTokens + estimateTokens(prompt);
+                const outputTokens = routerOutputTokens +
+                    estimateTokens(answer);
+                const reasoningTokens = routerReasoningTokens +
+                    estimateTokens(reasoning);
+                return {
+                    kind: "usage",
+                    usage: {
+                        inputTokens,
+                        outputTokens,
+                        ...(reasoningTokens > 0 ? { reasoningTokens } : {}),
+                        ...(cachedInputTokens > 0 ? { cachedInputTokens } : {}),
+                        totalTokens: inputTokens + outputTokens +
+                            reasoningTokens + cachedInputTokens,
+                        extensions: { estimated: true },
+                    },
+                };
+            };
             if (tools.length && request.toolChoice !== "none") {
                 const choice = typeof request.toolChoice === "object"
                     ? {
@@ -267,36 +325,85 @@ export class ChatHubSource implements InferenceSource {
                         function: { name: request.toolChoice.name },
                     }
                     : request.toolChoice;
-                const result = await client.chat(
-                    makeConnection(),
-                    upstream(modelToolRouterPrompt(fullText, tools, choice)),
-                    { signal },
-                );
-                this.#rememberQuota(
-                    buildChatHubQuota(
-                        result.throttling,
-                        result.meteringInformation,
-                        (text) =>
-                            transport!.redact(
-                                redactChatHubAccount(text, config),
-                            ),
-                    ),
-                );
-                const routerText = result.finalText ?? result.text;
-                if (isContentPolicyBlock(routerText)) {
-                    throw new ChatHubContentFilterError();
+                const parallel = (request.extensions?.raw as
+                    | Record<string, unknown>
+                    | undefined)?.parallel_tool_calls !== false;
+                const basePrompt = withGuidance(
+                    modelToolRouterPrompt(fullText, tools, choice),
+                ) +
+                    (parallel
+                        ? ""
+                        : "\n\nSelect at most ONE tool call. Parallel tool calls are disabled.");
+                let routerPrompt = basePrompt;
+                let decision: ModelToolDecision = { calls: [], parsed: false };
+                for (let attempt = 0; attempt < 2; attempt++) {
+                    signal.throwIfAborted();
+                    const routerIds = createSessionIds();
+                    const annotations = images.length
+                        ? await uploadImages(
+                            transport.fetch,
+                            {
+                                accessToken: config.accessToken,
+                                conversationId: routerIds.conversationId,
+                                scenario: config.scenario,
+                                endpoint: config.endpoint,
+                            },
+                            images,
+                            signal,
+                        )
+                        : [];
+                    const result = await client.chat(
+                        makeConnection(routerIds),
+                        {
+                            ...upstream(routerPrompt),
+                            ...(annotations.length
+                                ? { messageAnnotations: annotations }
+                                : {}),
+                        },
+                        { signal },
+                    );
+                    this.#rememberQuota(
+                        buildChatHubQuota(
+                            result.throttling,
+                            result.meteringInformation,
+                            (text) =>
+                                transport!.redact(
+                                    redactChatHubAccount(text, config),
+                                ),
+                        ),
+                    );
+                    const routerText = result.finalText || result.text ||
+                        result.resultMessage || "";
+                    routerInputTokens += estimateTokens(routerPrompt);
+                    routerOutputTokens += estimateTokens(routerText);
+                    routerReasoningTokens += estimateTokens(
+                        result.reasoning ?? "",
+                    );
+                    if (isContentPolicyBlock(routerText)) {
+                        throw new ChatHubContentFilterError();
+                    }
+                    decision = parseModelToolDecision(
+                        routerText,
+                        tools,
+                        choice,
+                    );
+                    if (!parallel && decision.calls.length > 1) {
+                        decision = {
+                            calls: [],
+                            parsed: false,
+                            error:
+                                "Parallel tool calls are disabled; select exactly one next call",
+                        };
+                    }
+                    if (decision.parsed) break;
+                    routerPrompt =
+                        `${basePrompt}\n\nYour previous routing decision was invalid. No tools from it were executed.\nValidation error: ${
+                            decision.error ?? "Invalid routing format"
+                        }\nPrevious output (quoted data): ${
+                            JSON.stringify(routerText.slice(0, 2000))
+                        }\nReturn a corrected routing decision only.`;
                 }
-                const decision = parseModelToolDecision(
-                    routerText,
-                    tools,
-                    choice,
-                );
-                if (
-                    !decision.parsed ||
-                    (!decision.calls.length &&
-                        (request.toolChoice === "required" ||
-                            typeof request.toolChoice === "object"))
-                ) {
+                if (!decision.parsed) {
                     throw new Error(
                         "ChatHub returned an invalid tool routing decision",
                     );
@@ -342,6 +449,7 @@ export class ChatHubSource implements InferenceSource {
                         messageId,
                         finishReason: "tool_calls",
                     });
+                    yield emit(usageEvent());
                     yield emit({
                         kind: "run.completed",
                         finishReason: "tool_calls",
@@ -350,33 +458,58 @@ export class ChatHubSource implements InferenceSource {
                 }
             }
             const key = sessionKey(request, context);
+            selectedKey = key;
+            const signature = JSON.stringify([
+                model,
+                tone,
+                guidance,
+                tools,
+                request.toolChoice ?? "auto",
+                request.extensions?.raw &&
+                (request.extensions.raw as Record<string, unknown>)
+                    .parallel_tool_calls,
+            ]);
             for (const [id, session] of this.#sessions) {
-                if (session.expiresAt <= this.#sessionTime()) {
+                if (!session.busy && session.expiresAt <= this.#sessionTime()) {
                     this.#sessions.delete(id);
                 }
             }
             const existing = key ? this.#sessions.get(key) : undefined;
-            const reuse = existing && !existing.busy &&
+            const prefixMatches = existing &&
                 messages.length > existing.length &&
-                JSON.stringify(messages.slice(0, existing.length)) ===
-                    existing.history;
+                await conversationHistoryHash(
+                        messages.slice(0, existing.length),
+                    ) === existing.history;
+            const reuse = existing && !existing.busy &&
+                existing.signature === signature && prefixMatches;
             selected = reuse ? existing : undefined;
             if (selected) selected.busy = true;
             const ids = selected
                 ? nextChatSessionId(selected.ids)
                 : createSessionIds();
-            const prompt = flattenConversation(
-                selected ? messages.slice(selected.length) : messages,
-            );
+            const prompt = withGuidance([
+                ...(messages.length > 1
+                    ? [
+                        "Continue the conversation below from its latest unfinished request. Historical tool calls describe requested actions; only their matching results establish what happened. Check error and truncation markers before relying on a result. Do not repeat successful actions solely because they appear in history; retrieve missing evidence only when needed.",
+                    ]
+                    : []),
+                ...(messages.some((message) => message.image)
+                    ? [
+                        "Image markers alone do not contain pixels. On a rebuilt conversation only the most recent ten inline user images are attached, in chronological order. Report missing image evidence instead of inferring unseen contents.",
+                    ]
+                    : []),
+                flattenConversation(
+                    selected ? messages.slice(selected.length) : messages,
+                ),
+            ].join("\n\n"));
             // On a reused session ChatHub keeps the prior turns server-side, so
             // only `prompt` is sent fresh; the reused prefix is cached context.
-            const cachedInputText = selected
-                ? flattenConversation(messages.slice(0, selected.length))
-                : "";
+            const cachedInputTokens = selected?.contextTokens ?? 0;
+            images = collectImages(request, !selected);
             // Upload any images for this turn now that the conversation id is
             // fixed; the returned annotations reference them on the chat frame.
-            // Done here (past the tool-router early return) so a router-only
-            // turn never uploads.
+            // Router and answer turns use separate provider conversations;
+            // attachments must be uploaded to the conversation using them.
             let imageAnnotations: MessageAnnotation[] = [];
             if (images.length) {
                 imageAnnotations = await uploadImages(
@@ -631,44 +764,12 @@ export class ChatHubSource implements InferenceSource {
                     partId: messageId + ":" + kind,
                 });
             }
-            if (key) {
-                if (this.#sessions.size >= 128) {
-                    this.#sessions.delete(this.#sessions.keys().next().value!);
-                }
-                const history = [...messages, {
-                    role: "assistant",
-                    content: answer,
-                }];
-                this.#sessions.set(key, {
-                    ids,
-                    history: JSON.stringify(history),
-                    length: history.length,
-                    expiresAt: this.#sessionTime() + 3_600_000,
-                    busy: false,
-                });
-            }
             // ChatHub reports no upstream token counts, so estimate them here
             // where the cache split is known: a reused session sends only the
             // incremental prompt, leaving the earlier turns as cached input.
-            const inputTokens = estimateTokens(prompt);
-            const cachedInputTokens = estimateTokens(cachedInputText);
-            const outputTokens = estimateTokens(answer);
-            const reasoningTokens = estimateTokens(reasoningText);
-            const totalTokens = inputTokens + cachedInputTokens +
-                outputTokens + reasoningTokens;
-            if (totalTokens > 0) {
-                yield emit({
-                    kind: "usage",
-                    usage: {
-                        inputTokens,
-                        outputTokens,
-                        ...(reasoningTokens > 0 ? { reasoningTokens } : {}),
-                        ...(cachedInputTokens > 0 ? { cachedInputTokens } : {}),
-                        totalTokens,
-                        extensions: { estimated: true },
-                    },
-                });
-            }
+            yield emit(
+                usageEvent(prompt, answer, reasoningText, cachedInputTokens),
+            );
             if (title) {
                 yield emit({ kind: "title", title });
             }
@@ -746,6 +847,32 @@ export class ChatHubSource implements InferenceSource {
                 });
                 yield emit({ kind: "part.completed", messageId, partId });
             }
+            if (key && answer.trim()) {
+                const history = [...messages, {
+                    role: "assistant",
+                    content: answer,
+                }];
+                const historyHash = await conversationHistoryHash(history);
+                signal.throwIfAborted();
+                if (!this.#sessions.has(key) && this.#sessions.size >= 128) {
+                    const idle = [...this.#sessions].find(([, session]) =>
+                        !session.busy
+                    );
+                    if (idle) this.#sessions.delete(idle[0]);
+                }
+                if (this.#sessions.has(key) || this.#sessions.size < 128) {
+                    this.#sessions.set(key, {
+                        ids,
+                        history: historyHash,
+                        length: history.length,
+                        signature,
+                        contextTokens: cachedInputTokens +
+                            estimateTokens(prompt) + estimateTokens(answer),
+                        expiresAt: this.#sessionTime() + 3_600_000,
+                        busy: false,
+                    });
+                }
+            }
             yield emit({
                 kind: "message.completed",
                 messageId,
@@ -771,7 +898,14 @@ export class ChatHubSource implements InferenceSource {
         } finally {
             abort.abort();
             await transport?.close();
-            if (selected) selected.busy = false;
+            // A failed/cancelled continuation may already have advanced the
+            // provider's history. Only a successful turn installs a new entry.
+            if (
+                selected && selectedKey &&
+                this.#sessions.get(selectedKey) === selected
+            ) {
+                this.#sessions.delete(selectedKey);
+            }
         }
     }
 }

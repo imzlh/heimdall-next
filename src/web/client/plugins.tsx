@@ -20,6 +20,7 @@ import {
 } from "../shared/catalog-presentation.ts";
 import { PluginInstallDialog } from "./plugin-install.tsx";
 import { PluginDialog } from "./plugin-dialog.tsx";
+import { PluginConfigDialog } from "./plugin-config.tsx";
 import {
     type PluginPackagePreview,
     pluginPackageUpgradeError,
@@ -32,7 +33,7 @@ interface PluginsProps {
 }
 
 type PluginActionDialog = {
-    kind: "remove" | "rollback";
+    kind: "remove" | "rollback" | "configure";
     plugin: ListedPlugin;
 };
 
@@ -57,6 +58,9 @@ export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
         ? actionDialog.plugin
         : null;
     const rollingBack = actionDialog?.kind === "rollback"
+        ? actionDialog.plugin
+        : null;
+    const configuring = actionDialog?.kind === "configure"
         ? actionDialog.plugin
         : null;
     const rollbackStale = rollingBack &&
@@ -216,6 +220,19 @@ export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
         }
     }
 
+    async function configured(plugin: ListedPlugin) {
+        busy.current = true;
+        setPendingId(plugin.id);
+        setDialog(null);
+        setMessage(`已保存 ${plugin.name || plugin.id} 的配置。`);
+        try {
+            await refresh("插件配置已保存");
+        } finally {
+            busy.current = false;
+            if (mounted.current) setPendingId("");
+        }
+    }
+
     return (
         <section
             id="plugins"
@@ -270,6 +287,19 @@ export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
                                 plugins={plugins}
                                 busy={Boolean(pendingId)}
                                 pending={pendingId === plugin.id}
+                                onConfigure={(plugin) => {
+                                    if (
+                                        !busy.current &&
+                                        plugin.canConfigure === true
+                                    ) {
+                                        setActionError("");
+                                        setMessage("");
+                                        setDialog({
+                                            kind: "configure",
+                                            plugin,
+                                        });
+                                    }
+                                }}
                                 onToggle={(plugin) =>
                                     void change("toggle", plugin)}
                                 onUninstall={(plugin) => {
@@ -303,6 +333,14 @@ export function PluginsPanel({ plugins, loadError, onRefresh }: PluginsProps) {
                     busy={Boolean(pendingId)}
                     onInstall={install}
                     onClose={dismiss}
+                />
+            )}
+            {configuring && (
+                <PluginConfigDialog
+                    key={configuring.id}
+                    plugin={configuring}
+                    onClose={dismiss}
+                    onSaved={() => configured(configuring)}
                 />
             )}
             {deleting && (

@@ -7,6 +7,19 @@ const MAX_FILE_BYTES = 5 * 1024 * 1024;
 
 export const CHAT_ATTACHMENT_ACCEPT = MEDIA_TYPES.join(",");
 
+/** Files only: pasted HTML and remote image URLs never trigger an upload. */
+export function transferredChatFiles(
+    transfer: DataTransfer | null,
+): File[] {
+    if (!transfer) return [];
+    const files = Array.from(transfer.files);
+    if (files.length) return files;
+    return Array.from(transfer.items).flatMap((item) => {
+        const file = item.kind === "file" ? item.getAsFile() : null;
+        return file ? [file] : [];
+    });
+}
+
 /** Validate the complete draft, including images retained from earlier picks. */
 export function validateChatAttachments(
     attachments: readonly ChatAttachment[],

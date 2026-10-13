@@ -91,9 +91,18 @@ export interface PluginDto {
     readonly digest?: string;
     readonly lastError?: string;
     readonly canToggle?: boolean;
+    readonly canConfigure?: boolean;
     readonly managed?: boolean;
     readonly revision?: string;
     readonly rollbackVersion?: string;
+}
+
+/** A configurable tool's management-only snapshot and optimistic write token. */
+export interface ToolConfigDto {
+    readonly pluginId: string;
+    readonly config: UiJsonObject;
+    readonly configSchema: UiJsonObject;
+    readonly revision: string | null;
 }
 
 /** Operator input for a new configured source instance. */

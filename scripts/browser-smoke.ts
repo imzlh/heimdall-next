@@ -5,6 +5,8 @@ import { loadBuiltinComposition } from "../src/composition/builtins.ts";
 import { createServer } from "../src/composition/server.ts";
 import { createRuntimeSettings } from "../src/composition/runtime-settings.ts";
 import { openSqliteChatStore } from "../src/storage/sqlite-chat.ts";
+import { openSqliteChatAssetStore } from "../src/storage/sqlite-assets.ts";
+import { ChatAssetService } from "../src/chat/assets.ts";
 import { openSqliteRequestStore } from "../src/storage/sqlite-requests.ts";
 import { createRequestLifecycle } from "../src/composition/request-lifecycle.ts";
 import { DenoKvConfigStore } from "../src/storage/deno-kv.ts";
@@ -15,6 +17,7 @@ import {
     withBuiltinPresetPages,
 } from "../src/composition/preset-pages.ts";
 import { packagePlugin } from "./package-plugin.ts";
+import { checkChatComposer } from "./browser-chat-composer.ts";
 import type { GenerationRequest, StreamFrame } from "@heimdall/hip";
 
 const output = await Deno.makeTempDir({ prefix: "heimdall-browser-" });
@@ -30,6 +33,7 @@ const builtins = await loadBuiltinComposition({
     }),
 });
 const chat = openSqliteChatStore(":memory:");
+const assets = openSqliteChatAssetStore(":memory:");
 const requests = openSqliteRequestStore(":memory:");
 let receivedModel = "";
 const upstream = Deno.serve(
@@ -57,6 +61,8 @@ const upstream = Deno.serve(
 );
 const upstreamUrl = `http://127.0.0.1:${upstream.addr.port}/v1`;
 let toolUsed = false;
+let finishComposerReply: (() => void) | undefined;
+let composerReply: Promise<void> | undefined;
 builtins.sources.register({
     id: "browser-fixture",
     capabilities: [{
@@ -101,6 +107,7 @@ builtins.sources.register({
                 partId: "p",
                 delta: "浏览器测试回复",
             });
+            if (composerReply) await composerReply;
         }
         yield event(3, { kind: "run.completed" });
     },
@@ -121,7 +128,11 @@ const app = createServer({
     adminUiSchemas: loadSourceSchemas,
     adminUiPolicy: policy,
     adminPresetPages: () => loadPresetPages(policy),
-    chat: { store: chat, tools: builtins.toolPlugins },
+    chat: {
+        store: chat,
+        tools: builtins.toolPlugins,
+        assets: new ChatAssetService(assets),
+    },
 });
 const server = Deno.serve(
     { hostname: "127.0.0.1", port: 0, onListen() {} },
@@ -147,9 +158,6 @@ function track(page: Page) {
 }
 const shot = (page: Page, name: string) =>
     page.screenshot({ path: `${output}/${name}.png`, fullPage: true });
-async function visible(page: Page, selector: string) {
-    await page.locator(selector).waitFor({ state: "visible" });
-}
 async function beginSource(page: Page, name: string) {
     await page.getByRole("button", { name: "添加渠道", exact: true }).first()
         .click();
@@ -239,21 +247,27 @@ try {
     await shot(page, "channels-light");
     await page.getByRole("button", { name: "添加渠道", exact: true }).first()
         .click();
+    await page.waitForFunction(() => document.querySelector("dialog:modal"));
     await page.keyboard.press("Escape");
     await page.locator("dialog[open]").waitFor({ state: "hidden" });
     checks.push("自定义 schema 表单、基础映射/中间件保存、Escape 关闭");
 
     await page.goto(`${origin}/admin/chat`);
-    await visible(page, '[data-ui-slot="chat.composer"]');
-    await visible(page, '[data-ui-slot="chat.sidebar"]');
+    assertEquals(await page.locator('[data-ui-slot^="chat."]').count(), 0);
     await page.locator("#chat-model").click();
     await page.getByRole("option", { name: "test-model", exact: true }).click();
-    const clock = page.locator('[data-ui-slot="chat.composer"]').getByRole(
+    await checkChatComposer(page);
+    checks.push(
+        "图片粘贴/拖放/预览/校验、文字与选区保留、长按 Enter 防重复发送",
+    );
+    await page.getByRole("button", { name: "对话设置", exact: true }).click();
+    const clock = page.getByRole(
         "switch",
         { name: "当前时间", exact: true },
     );
     await clock.click();
     assertEquals(await clock.getAttribute("aria-checked"), "false");
+    await page.keyboard.press("Escape");
     await shot(page, "chat-light");
     await page.getByLabel("消息内容", { exact: true }).fill(
         "你好，真实浏览器验证",
@@ -261,13 +275,15 @@ try {
     await page.getByRole("button", { name: "发送消息", exact: true }).click();
     await page.getByText("浏览器测试回复", { exact: true }).last().waitFor();
     await page.reload();
+    await page.getByRole("button", { name: "对话设置", exact: true }).click();
     await clock.waitFor();
     assertEquals(
         await clock.getAttribute("aria-checked"),
         "false",
         "Tool preference must survive reload",
     );
-    checks.push("Chat 双槽位注水、工具开关随会话持久化、发送回复");
+    await page.keyboard.press("Escape");
+    checks.push("Chat 工具统一在对话设置中管理、开关随会话持久化、发送回复");
     assertEquals(await page.locator("#chat-model").innerText(), "test-model");
 
     const admin = await context.newPage();
@@ -312,12 +328,17 @@ try {
         exact: true,
     }).click();
     await page.bringToFront();
-    const plugin = page.locator('[data-ui-slot="chat.composer"]').getByRole(
+    await page.getByRole("button", { name: "对话设置", exact: true }).click();
+    const plugin = page.getByRole(
         "switch",
         { name: "浏览器验收工具", exact: true },
     );
     await plugin.waitFor();
-    await page.getByText("离线插件已就绪", { exact: true }).waitFor();
+    assertEquals(
+        await page.getByText("离线插件已就绪", { exact: true }).count(),
+        0,
+    );
+    await page.keyboard.press("Escape");
     await shot(admin, "plugins");
     await page.getByLabel("消息内容", { exact: true }).fill("调用插件");
     await page.getByRole("button", { name: "发送消息", exact: true }).click();
@@ -330,10 +351,12 @@ try {
         exact: true,
     }).click();
     await page.bringToFront();
+    await page.getByRole("button", { name: "对话设置", exact: true }).click();
     await plugin.waitFor({ state: "hidden" });
     await page.getByText("离线插件已就绪", { exact: true }).waitFor({
         state: "hidden",
     });
+    await page.keyboard.press("Escape");
     await admin.getByRole("button", {
         name: "卸载 浏览器验收工具",
         exact: true,
@@ -342,8 +365,40 @@ try {
     await admin.getByRole("heading", { name: "浏览器验收工具", exact: true })
         .waitFor({ state: "hidden" });
     checks.push(
-        "离线插件安装/启用/真实 Worker 调用/停用/卸载，跨 Tab 槽位同步",
+        "离线插件安装/启用/真实 Worker 调用/停用/卸载，跨 Tab 对话设置同步",
     );
+
+    // Hold the reply open to type the next message during generation, then
+    // verify the final history reload preserves both text and keyboard focus.
+    composerReply = new Promise<void>((resolve) => {
+        finishComposerReply = resolve;
+    });
+    const draftInput = page.locator("#chat-draft");
+    await draftInput.fill("验证生成期间的下一条草稿");
+    await draftInput.press("Enter");
+    await page.waitForFunction(() =>
+        document.querySelector(".is-streaming .chat-markdown")?.textContent
+            ?.includes("浏览器测试回复")
+    );
+    await draftInput.fill("生成时继续编辑的草稿");
+    await draftInput.press("Shift+Enter");
+    await draftInput.pressSequentially("保留换行");
+    finishComposerReply?.();
+    composerReply = undefined;
+    await page.waitForFunction(() =>
+        document.querySelector(".chat-composer")?.getAttribute(
+            "data-sending",
+        ) ===
+            "false"
+    );
+    assertEquals(
+        await draftInput.inputValue(),
+        "生成时继续编辑的草稿\n保留换行",
+    );
+    assert(
+        await draftInput.evaluate((input) => document.activeElement === input),
+    );
+    checks.push("生成期间继续编辑，回复收尾保留草稿、换行和焦点");
 
     await page.getByRole("button", { name: "切换为深色主题", exact: true })
         .click();
@@ -366,11 +421,13 @@ try {
     });
     const staticPage = await ssr.newPage();
     await staticPage.goto(`${origin}/admin/chat`);
-    await visible(staticPage, '[data-ui-slot="chat.composer"]');
-    await visible(staticPage, '[data-ui-slot="chat.sidebar"]');
+    assertEquals(
+        await staticPage.locator('[data-ui-slot^="chat."]').count(),
+        0,
+    );
     await shot(staticPage, "chat-no-js");
     await ssr.close();
-    checks.push("深浅色、390px 窄屏、减少动态效果、无 JS 的槽位内容");
+    checks.push("深浅色、390px 窄屏、减少动态效果、无 JS 页面不显示重复工具区");
     assertEquals(failures, [], "Browser console errors");
     success = true;
 } catch (error) {
@@ -386,6 +443,7 @@ try {
     }
     throw error;
 } finally {
+    finishComposerReply?.();
     await Deno.writeTextFile(
         `${output}/result.json`,
         JSON.stringify({ success, browserVersion, checks, failures }, null, 2),
@@ -395,6 +453,7 @@ try {
     await upstream.shutdown();
     await builtins.close();
     chat.close();
+    assets.close();
     requests.close();
 }
 console.log(

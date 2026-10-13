@@ -30,6 +30,7 @@ const fields = new Set([
     "scenario",
     "locale",
     "timezone",
+    "softThinking",
 ]);
 
 /** Validate only this preset's closed input shape; provider rules remain source-owned. */

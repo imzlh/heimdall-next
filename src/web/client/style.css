@@ -542,6 +542,148 @@ form > .config-actions,
 .settings-form {
     max-width: 760px;
 }
+.runtime-settings-panel,
+.settings-snapshot {
+    min-width: 0;
+    container-type: inline-size;
+}
+.runtime-settings-form,
+.proxy-pool-panel > .settings-form {
+    max-width: none;
+}
+.settings-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    align-items: stretch;
+}
+.settings-card {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+    min-width: 0;
+    padding: 22px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    background: var(--surface);
+    box-shadow: var(--shadow);
+}
+.settings-card-heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+}
+.settings-card-icon {
+    display: grid;
+    place-items: center;
+    flex: 0 0 36px;
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+.settings-card-heading h3,
+.settings-maintenance-card .maintenance-heading h3 {
+    font-size: 15px;
+    font-weight: 650;
+}
+.settings-card-heading p {
+    margin-top: 3px;
+    color: var(--subtle);
+    font-size: 12px;
+    line-height: 1.6;
+}
+.settings-card .field-grid {
+    gap: 16px;
+}
+.settings-card .field-grid label {
+    min-width: 0;
+}
+.settings-card .field-help {
+    font-weight: 400;
+    line-height: 1.7;
+}
+.settings-card > .gateway-key-field {
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    gap: 14px;
+}
+.settings-card > .retention-settings {
+    margin: 0;
+}
+.settings-card > .retention-settings > .field-help:first-of-type {
+    margin-top: 0;
+}
+.settings-card > .retention-settings > .field-help:last-child {
+    margin-bottom: 0;
+}
+.settings-maintenance-card > .maintenance-status {
+    margin: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+.settings-maintenance-card .maintenance-heading {
+    margin-bottom: 16px;
+}
+.settings-maintenance-card .maintenance-heading h3 > .icon {
+    box-sizing: content-box;
+    padding: 9px;
+    border-radius: 12px;
+    background: var(--accent-soft);
+    color: var(--accent);
+}
+.settings-card .settings-summary {
+    grid-template-columns: auto minmax(0, 1fr);
+    column-gap: 20px;
+    overflow-wrap: anywhere;
+}
+.settings-card .settings-summary dt,
+.settings-card .settings-summary dd {
+    padding: 12px 0;
+}
+.runtime-settings-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px 20px;
+    margin-top: 16px;
+    padding: 14px 18px;
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    background: var(--surface);
+}
+.runtime-settings-feedback {
+    flex: 1 1 220px;
+    min-width: 0;
+    font-size: 12px;
+}
+.runtime-settings-feedback p {
+    margin: 0;
+}
+.runtime-settings-footer .config-actions {
+    flex-shrink: 0;
+    margin-left: auto;
+}
+@container (max-width: 760px) {
+    .settings-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+@container (max-width: 420px) {
+    .settings-card {
+        padding: 18px;
+    }
+    .settings-card .field-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
 .retention-settings {
     min-width: 0;
     margin: 28px 0 0;
@@ -579,6 +721,9 @@ form > .config-actions,
     gap: 10px;
 }
 .maintenance-heading h3 {
+    display: flex;
+    align-items: center;
+    gap: 12px;
     margin: 0;
     font-size: 13px;
     font-weight: 600;

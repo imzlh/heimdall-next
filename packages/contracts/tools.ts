@@ -1,4 +1,4 @@
-import type { ToolDefinition } from "../hip/mod.ts";
+import type { JsonValue, ToolDefinition } from "../hip/mod.ts";
 import type { PluginManifest, RequestContext } from "./plugin.ts";
 
 /** A model-issued call; the named plugin owns argument validation. */
@@ -42,7 +42,18 @@ export interface ToolPlugin {
 /** Local trusted modules may expose this factory without naming tools in core. */
 export interface ToolPluginFactory {
     readonly manifest: PluginManifest;
+    /** Opt into durable operator configuration together with configSchema. */
+    validateConfig?(input: unknown): JsonValue | Promise<JsonValue>;
+    /** Project configuration for management responses; never exposes host storage. */
+    redactConfig?(config: JsonValue): JsonValue;
+    /** Merge omitted write-only fields with the server-held previous configuration. */
+    mergeConfig?(
+        input: unknown,
+        previous: JsonValue | undefined,
+    ): unknown | Promise<unknown>;
     create(context: {
         readonly env: (name: string) => string | undefined;
+        /** Validated host-owned configuration, replaced by creating a new plugin. */
+        readonly config?: JsonValue;
     }): ToolPlugin;
 }

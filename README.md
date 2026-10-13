@@ -313,6 +313,15 @@ Tool plugins declare model-visible tools and execute their calls through
 bounded, cancelable host contracts. Chat consumes the host-provided tool
 registry without depending on particular tool names or providers.
 
+The built-in [workspace tool plugin](plugins/tool-workspace/README.md) adds
+directory listing, glob lookup, literal search, single/batch UTF-8 reads,
+file metadata, directory creation, revision-checked writes, moves, deletion,
+exact text edits and unified diff patches to Chat. Open the plugin's Configure
+dialog in the operator console to select a server directory and read-only mode.
+Settings are persisted and apply to subsequent Chat requests without a restart;
+an empty directory setting exposes no file tools. The plugin uses the existing
+global and per-conversation tool switches and does not read environment variables.
+
 Third-party package bytes are verified and stored as immutable snapshots.
 Verification is separate from execution: a stored package is never imported
 implicitly. Only a host-registered trusted runtime or an isolated broker can

@@ -29,6 +29,7 @@ const ROUTES: Readonly<Record<string, readonly string[]>> = {
     "/api/admin/sources": ["GET", "POST", "PATCH", "DELETE"],
     "/api/admin/presets": ["GET"],
     "/api/admin/source-config": ["GET", "PUT"],
+    "/api/admin/tool-config": ["GET", "PUT"],
     "/api/admin/source-config/validate": ["POST"],
     "/api/admin/preset-preview": ["POST"],
     "/api/admin/preset-apply": ["POST"],

@@ -21,6 +21,7 @@ export function PluginCard(
         onToggle,
         onUninstall,
         onRollback,
+        onConfigure,
     }: {
         plugin: ListedPlugin;
         plugins: ListedPlugin[];
@@ -29,6 +30,7 @@ export function PluginCard(
         onToggle?: (plugin: ListedPlugin) => void;
         onUninstall?: (plugin: ListedPlugin) => void;
         onRollback?: (plugin: ListedPlugin) => void;
+        onConfigure?: (plugin: ListedPlugin) => void;
     },
 ) {
     const state = pluginState(plugin);
@@ -124,6 +126,18 @@ export function PluginCard(
             <footer class="plugin-card-actions">
                 <span>{pluginManagementText(plugin)}</span>
                 <div class="plugin-operation-buttons">
+                    {plugin.canConfigure === true && (
+                        <button
+                            class="secondary-button"
+                            type="button"
+                            disabled={busy || !onConfigure}
+                            title={!onConfigure ? "交互加载后可用" : undefined}
+                            onClick={() => onConfigure?.(plugin)}
+                            aria-label={`配置 ${label}`}
+                        >
+                            配置
+                        </button>
+                    )}
                     {eligible && (
                         <button
                             class="secondary-button"

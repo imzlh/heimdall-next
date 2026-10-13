@@ -220,7 +220,7 @@ Deno.test("proxy read failure preserves settings and source summaries without re
         ),
     });
     const html = await (await app.request("/admin?view=settings")).text();
-    assertStringIncludes(html, "网关与探测");
+    assertStringIncludes(html, "运行与对话");
     assertStringIncludes(html, "出站代理池");
     assertStringIncludes(html, "HTTP 503");
     assertEquals(bootFrom(html).initialPanels.proxies, null);

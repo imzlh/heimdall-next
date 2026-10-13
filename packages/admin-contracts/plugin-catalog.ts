@@ -32,6 +32,7 @@ export function projectListedPlugins(
             enabled: bool(item.enabled),
             lastError: text(item.lastError),
             canToggle: bool(item.canToggle),
+            canConfigure: bool(item.canConfigure),
             managed: bool(item.managed),
             revision: text(item.revision),
             rollbackVersion: text(item.rollbackVersion),

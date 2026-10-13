@@ -24,6 +24,7 @@ export interface ChatHubSourceConfig {
     readonly scenario?: string;
     readonly locale?: string;
     readonly timezone?: string;
+    readonly softThinking?: "auto" | "off";
 }
 
 export interface ChatHubSourceOptions
@@ -101,6 +102,15 @@ export function validateChatHubSourceConfig(
     ) {
         throw new TypeError("ChatHub expiresAt must be an ISO date");
     }
+    const softThinking = input.softThinking === undefined
+        ? undefined
+        : text("softThinking").toLowerCase();
+    if (
+        softThinking !== undefined && softThinking !== "auto" &&
+        softThinking !== "off"
+    ) {
+        throw new TypeError("ChatHub softThinking must be auto or off");
+    }
     return {
         id: text("id", "chathub"),
         oid: text("oid"),
@@ -109,6 +119,7 @@ export function validateChatHubSourceConfig(
         endpoint: endpoint.href,
         models: [...new Set(models.map((model: string) => model.trim()))],
         ...optional,
+        ...(softThinking === undefined ? {} : { softThinking }),
     };
 }
 

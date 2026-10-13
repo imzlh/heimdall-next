@@ -5,6 +5,7 @@ import { GatewayKeyField } from "./gateway-key.tsx";
 import { gatewayKeyPatch } from "./gateway-key-draft.ts";
 import { Icon } from "../shared/icons.tsx";
 import { MaintenanceStatus } from "../shared/maintenance-status.tsx";
+import { SettingsCard } from "../shared/settings-card.tsx";
 import {
     ASSET_RETENTION_NOTE,
     readRetentionDays,
@@ -202,16 +203,11 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
 
     return (
         <section
-            class="panel config-panel"
+            class="runtime-settings-panel"
             aria-labelledby="runtime-settings-title"
         >
-            <div class="panel-heading">
-                <div>
-                    <h2 id="runtime-settings-title">运行设置</h2>
-                    <p>
-                        限额、探测间隔和网关访问密钥立即生效。密钥只写入，不会回显。
-                    </p>
-                </div>
+            <div class={onClose ? "panel-heading" : "sr-only"}>
+                <h2 id="runtime-settings-title">运行设置</h2>
                 {onClose && (
                     <button
                         class="icon-button"
@@ -227,144 +223,201 @@ export function RuntimeSettingsPanel({ onClose, initial, initialError = "" }: {
             </div>
             {loading && <p role="status">正在加载运行设置…</p>}
             <form
-                class="settings-form"
+                class="settings-form runtime-settings-form"
                 onSubmit={(event) => {
                     event.preventDefault();
                     void save();
                 }}
             >
-                <div class="field-grid">
-                    <label>
-                        每分钟限额
-                        <input
-                            type="number"
-                            min="0"
-                            max="100000"
-                            step="1"
-                            inputMode="numeric"
-                            required
-                            value={limit}
+                <div class="settings-grid">
+                    <SettingsCard
+                        id="runtime-behavior-title"
+                        title="运行与对话"
+                        description="管理请求频率、健康探测和标题生成。"
+                        icon="gauge"
+                    >
+                        <div class="field-grid">
+                            <label>
+                                每分钟限额
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max="100000"
+                                    step="1"
+                                    inputMode="numeric"
+                                    required
+                                    value={limit}
+                                    disabled={busy || !loaded || conflict}
+                                    onInput={(event) =>
+                                        setLimit(controlValue(event))}
+                                />
+                                <small class="field-help">
+                                    设为 0 则不限制请求频率。
+                                </small>
+                            </label>
+                            <label>
+                                探测间隔（毫秒）
+                                <input
+                                    type="number"
+                                    min="0"
+                                    max="86400000"
+                                    step="1"
+                                    inputMode="numeric"
+                                    required
+                                    value={interval}
+                                    disabled={busy || !loaded || conflict}
+                                    onInput={(event) =>
+                                        setInterval(controlValue(event))}
+                                />
+                                <small class="field-help">
+                                    设为 0 则关闭定时探测。
+                                </small>
+                            </label>
+                            <label class="wide-field">
+                                对话标题模型
+                                <input
+                                    type="text"
+                                    value={titleModel}
+                                    placeholder="默认使用对话所选模型"
+                                    disabled={busy || !loaded || conflict}
+                                    onInput={(event) =>
+                                        setTitleModel(controlValue(event))}
+                                />
+                                <small class="field-help">
+                                    留空时，使用当前对话的模型自动生成标题。
+                                </small>
+                            </label>
+                        </div>
+                    </SettingsCard>
+                    <SettingsCard
+                        id="runtime-security-title"
+                        title="访问安全"
+                        description="通过访问密钥保护网关的模型接口。"
+                        icon="key"
+                    >
+                        <GatewayKeyField
+                            value={proxyKey}
+                            configured={keyConfigured}
+                            clearRequested={clearProxyKey}
                             disabled={busy || !loaded || conflict}
-                            onInput={(event) => setLimit(controlValue(event))}
+                            onChange={(value, clear) => {
+                                setProxyKey(value);
+                                setClearProxyKey(clear);
+                            }}
                         />
-                    </label>
-                    <label>
-                        探测间隔（毫秒）
-                        <input
-                            type="number"
-                            min="0"
-                            max="86400000"
-                            step="1"
-                            inputMode="numeric"
-                            required
-                            value={interval}
+                    </SettingsCard>
+                    <SettingsCard
+                        id="runtime-retention-title"
+                        title="数据保留"
+                        description="设置请求记录与对话历史的保留时长。"
+                        icon="logs"
+                    >
+                        <fieldset
+                            class="retention-settings"
                             disabled={busy || !loaded || conflict}
-                            onInput={(event) =>
-                                setInterval(controlValue(event))}
-                        />
-                    </label>
-                    <GatewayKeyField
-                        value={proxyKey}
-                        configured={keyConfigured}
-                        clearRequested={clearProxyKey}
-                        disabled={busy || !loaded || conflict}
-                        onChange={(value, clear) => {
-                            setProxyKey(value);
-                            setClearProxyKey(clear);
-                        }}
-                    />
-                    <label class="wide-field">
-                        对话标题模型
-                        <input
-                            type="text"
-                            value={titleModel}
-                            placeholder="留空则用对话所选模型生成标题"
-                            disabled={busy || !loaded || conflict}
-                            onInput={(event) =>
-                                setTitleModel(controlValue(event))}
-                        />
-                    </label>
-                </div>
-                <fieldset
-                    class="retention-settings"
-                    disabled={busy || !loaded || conflict}
-                >
-                    <legend>数据保留</legend>
-                    <p class="field-help" id="retention-policy-help">
-                        按天保留历史，0
-                        表示永久保留。缩短天数后，过期数据将在下次自动清理时删除。
-                    </p>
-                    <div class="field-grid">
-                        <label>
-                            请求记录保留（天）
-                            <input
-                                name="requestRetentionDays"
-                                type="number"
-                                min="0"
-                                max={RETENTION_MAX_DAYS}
-                                step="1"
-                                inputMode="numeric"
-                                required
-                                value={requestRetention}
-                                aria-describedby="retention-policy-help request-retention-help"
-                                onInput={(event) =>
-                                    setRequestRetention(controlValue(event))}
-                            />
-                            <small
-                                id="request-retention-help"
-                                class="field-help"
-                            >
-                                清理过期请求记录；正在处理的请求会保留。
-                            </small>
-                        </label>
-                        <label>
-                            对话保留（天）
-                            <input
-                                name="chatRetentionDays"
-                                type="number"
-                                min="0"
-                                max={RETENTION_MAX_DAYS}
-                                step="1"
-                                inputMode="numeric"
-                                required
-                                value={chatRetention}
-                                aria-describedby="retention-policy-help chat-retention-help"
-                                onInput={(event) =>
-                                    setChatRetention(controlValue(event))}
-                            />
-                            <small id="chat-retention-help" class="field-help">
-                                按最后活动时间计算；正在生成的对话会保留。
-                            </small>
-                        </label>
+                        >
+                            <legend class="sr-only">数据保留</legend>
+                            <p class="field-help" id="retention-policy-help">
+                                按天保留历史，0
+                                表示永久保留。缩短天数后，过期数据将在下次自动清理时删除。
+                            </p>
+                            <div class="field-grid">
+                                <label>
+                                    请求记录保留（天）
+                                    <input
+                                        name="requestRetentionDays"
+                                        type="number"
+                                        min="0"
+                                        max={RETENTION_MAX_DAYS}
+                                        step="1"
+                                        inputMode="numeric"
+                                        required
+                                        value={requestRetention}
+                                        aria-describedby="retention-policy-help request-retention-help"
+                                        onInput={(event) =>
+                                            setRequestRetention(
+                                                controlValue(event),
+                                            )}
+                                    />
+                                    <small
+                                        id="request-retention-help"
+                                        class="field-help"
+                                    >
+                                        清理过期请求记录；正在处理的请求会保留。
+                                    </small>
+                                </label>
+                                <label>
+                                    对话保留（天）
+                                    <input
+                                        name="chatRetentionDays"
+                                        type="number"
+                                        min="0"
+                                        max={RETENTION_MAX_DAYS}
+                                        step="1"
+                                        inputMode="numeric"
+                                        required
+                                        value={chatRetention}
+                                        aria-describedby="retention-policy-help chat-retention-help"
+                                        onInput={(event) =>
+                                            setChatRetention(
+                                                controlValue(event),
+                                            )}
+                                    />
+                                    <small
+                                        id="chat-retention-help"
+                                        class="field-help"
+                                    >
+                                        按最后活动时间计算；正在生成的对话会保留。
+                                    </small>
+                                </label>
+                            </div>
+                            <p class="field-help">{ASSET_RETENTION_NOTE}</p>
+                        </fieldset>
+                    </SettingsCard>
+                    <div class="settings-card settings-maintenance-card">
+                        <MaintenanceStatus status={maintenance} />
                     </div>
-                    <p class="field-help">{ASSET_RETENTION_NOTE}</p>
-                </fieldset>
-                <MaintenanceStatus status={maintenance} />
-                <div class="config-actions">
-                    <button
-                        class="primary-button"
-                        type="submit"
-                        disabled={busy || !loaded || conflict}
-                    >
-                        {saving ? "保存中…" : "保存设置"}
-                    </button>
-                    <button
-                        class={dirty ? "text-button" : "icon-button"}
-                        type="button"
-                        aria-label={dirty ? "重新加载（丢弃更改）" : "重新加载"}
-                        title={dirty ? "重新加载（丢弃更改）" : "重新加载设置"}
-                        disabled={busy}
-                        onClick={() => setReload((value) => value + 1)}
-                    >
-                        <Icon name="refresh" />
-                        {dirty && "重新加载（丢弃更改）"}
-                    </button>
-                    {loaded && dirty && <span>有未保存的更改</span>}
                 </div>
-                {error && <p class="form-error" role="alert">{error}</p>}
-                {message && !dirty && (
-                    <p class="form-success" role="status">{message}</p>
-                )}
+                <div class="runtime-settings-footer">
+                    <div class="runtime-settings-feedback" aria-live="polite">
+                        {error && <p class="form-error" role="alert">{error}
+                        </p>}
+                        {message && !dirty && (
+                            <p class="form-success" role="status">{message}</p>
+                        )}
+                        {!error && !(message && !dirty) && (
+                            <p>
+                                {loaded && dirty
+                                    ? "有未保存的更改"
+                                    : "设置保存后立即生效"}
+                            </p>
+                        )}
+                    </div>
+                    <div class="config-actions">
+                        <button
+                            class="primary-button"
+                            type="submit"
+                            disabled={busy || !loaded || conflict}
+                        >
+                            {saving ? "保存中…" : "保存设置"}
+                        </button>
+                        <button
+                            class={dirty ? "text-button" : "icon-button"}
+                            type="button"
+                            aria-label={dirty
+                                ? "重新加载（丢弃更改）"
+                                : "重新加载"}
+                            title={dirty
+                                ? "重新加载（丢弃更改）"
+                                : "重新加载设置"}
+                            disabled={busy}
+                            onClick={() => setReload((value) => value + 1)}
+                        >
+                            <Icon name="refresh" />
+                            {dirty && "重新加载（丢弃更改）"}
+                        </button>
+                    </div>
+                </div>
             </form>
         </section>
     );

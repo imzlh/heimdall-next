@@ -279,6 +279,41 @@ The worker receives JSON values and an abort signal. Network, filesystem,
 environment and subprocess access are denied; no runtime package downloads are
 performed. A checksum verifies artifact integrity, not publisher identity.
 
+### Local workspace tools
+
+The reviewed [workspace tool plugin](../plugins/tool-workspace/README.md) uses
+the existing trusted tool factory and directory lifecycle to offer local file
+operations in Chat. Reviewed tool factories may supply a `configSchema` and
+`validateConfig` hook. The host exposes a generic configuration dialog, validates
+and persists settings with revision checks, and replaces the tool instance for
+subsequent requests after a successful save. Workspace settings come exclusively
+from this configuration; there is no environment fallback. Without a configured
+root it returns an empty tool list; read-only mode omits mutation tools. It does
+not add filesystem permissions to isolated packages. File
+operations remain plugin-owned, including path checks, bounded text reads,
+revision conflicts, and unified diff application with pinned `diff@8.0.2`.
+
+Tool configuration uses the same declarative form schema as source configuration,
+with its owning plugin ID. A `canConfigure` flag in the plugin catalog controls
+the management action. Configuration is read separately from
+`GET /api/admin/tool-config?pluginId=...`, which returns `pluginId`, `config`,
+`configSchema` and `revision`. Save through `PUT /api/admin/tool-config` with
+`{ pluginId, config, revision }`; an initial save uses `revision: null`.
+Conflicting revisions return 409 and preserve both durable settings and the
+active instance. The same authenticated UI bridge serves the configuration
+dialog. Settings are not included in the general plugin catalog or Chat UI
+context.
+
+Validation and registration complete before the durable write. Successful saves
+replace the tool instance for subsequent Chat requests; a running request keeps
+its existing tool snapshot. Restart restores saved configuration. Invalid saved
+configuration leaves that plugin unavailable and can be repaired through its
+configuration dialog. Factories with sensitive configuration should implement
+`redactConfig` so saved secrets are not returned to the operator form, and
+`mergeConfig(input, previous)` to preserve omitted secret fields using the
+server-held configuration. The dialog sends only validated schema fields;
+redacted placeholders are never submitted as credentials.
+
 ## UI plugins
 
 Operator UI extensions default to host-rendered schemas. Reviewed modules may

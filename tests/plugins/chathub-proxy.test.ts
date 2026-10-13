@@ -737,10 +737,11 @@ Deno.test("ChatHub disables memory per turn on the connection URL", async () => 
     assertEquals(events.at(-1)?.kind, "run.completed");
     // Session-level memory block rides the connection URL.
     assertEquals(chatUrl?.searchParams.get("disableMemory"), "1");
-    // The turn text is the user's message only: no injected system directive
-    // (Copilot's content filter blocks the turn when one is prepended).
+    // Memory isolation belongs on the URL. Soft work guidance must not add
+    // the old memory-override directive to the user's transcript.
     assert(chatText !== undefined, "chat frame carried no user text");
-    assertEquals(chatText, "[user]\n你好");
+    assert(chatText.endsWith("[user]\n你好"));
+    assertEquals(/disableMemory|personalization memory/i.test(chatText), false);
 });
 
 Deno.test("ChatHub surfaces a content-policy refusal as a content_filter error", async () => {

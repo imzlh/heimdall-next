@@ -1,4 +1,5 @@
 import type { MaintenanceStatusView } from "@heimdall/admin-contracts/console.ts";
+import { Icon } from "./icons.tsx";
 
 /** Stateless markup can be rendered before the settings island is available. */
 export function MaintenanceStatus({ status }: {
@@ -21,7 +22,9 @@ export function MaintenanceStatus({ status }: {
     return (
         <div class="maintenance-status" aria-label="自动清理状态">
             <div class="maintenance-heading">
-                <h3>自动清理</h3>
+                <h3>
+                    <Icon name="refresh" />自动清理
+                </h3>
                 <span class={`status-chip chip-${tone}`} role="status">
                     {label}
                 </span>

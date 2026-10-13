@@ -127,6 +127,17 @@
                 "help": "多个模型用逗号分隔。"
             },
             {
+                "type": "enum",
+                "name": "softThinking",
+                "label": "软思考",
+                "default": "auto",
+                "options": [
+                    { "value": "auto", "label": "按思考等级增强" },
+                    { "value": "off", "label": "关闭" }
+                ],
+                "help": "根据请求的思考等级补充目标拆解、证据核验和完成度检查提示；不改变上游思考预算。"
+            },
+            {
                 "type": "string",
                 "name": "endpoint",
                 "label": "WebSocket 地址",

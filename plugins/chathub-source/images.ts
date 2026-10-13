@@ -15,20 +15,28 @@ const BROWSER_UA =
     "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 /**
- * Collects inline images from the newest user message. ChatHub attaches images
- * to the turn being sent, so only the latest user turn's images are uploaded;
- * earlier turns already live server-side on a reused conversation. Remote-URL
+ * Collects inline images from the newest user message, or the most recent ten
+ * across user history when rebuilding a conversation. Earlier turns already
+ * live server-side on a reused conversation. Remote-URL
  * images with no inline bytes are skipped — the gateway does not fetch
  * arbitrary user-supplied URLs (SSRF), and the chat UI always sends base64.
  */
-export function collectImages(request: GenerationRequest): ChatHubImage[] {
+export function collectImages(
+    request: GenerationRequest,
+    includeHistory = false,
+): ChatHubImage[] {
     let lastUser: GenerationRequest["messages"][number] | undefined;
     for (const message of request.messages) {
         if (message.role === "user") lastUser = message;
     }
     if (!lastUser) return [];
     const images: ChatHubImage[] = [];
-    for (const part of lastUser.parts) {
+    const parts = includeHistory
+        ? request.messages.filter((message) => message.role === "user").flatMap(
+            (message) => message.parts,
+        )
+        : lastUser.parts;
+    for (const part of parts) {
         if (part.type !== "image") continue;
         let data = part.source.data;
         let mediaType = part.source.mediaType;
@@ -46,7 +54,9 @@ export function collectImages(request: GenerationRequest): ChatHubImage[] {
         }
         if (!data) continue; // remote URL: not fetched
         images.push({ mediaType: mediaType || "image/png", data });
-        if (images.length >= MAX_IMAGES) break;
+        // A rebuilt session has no server-side attachments. Replay its most
+        // recent images, keeping the provider's per-turn cap.
+        if (images.length > MAX_IMAGES) images.shift();
     }
     return images;
 }

@@ -7,6 +7,7 @@ import type {
     ProxyPoolInput,
     SourceDto,
     SourceProxySelection,
+    ToolConfigDto,
     UpdateSourceInput,
 } from "@heimdall/admin-contracts";
 import { StorageConflictError } from "@heimdall/storage";
@@ -176,6 +177,16 @@ export interface AdminWriteResult {
 
 /** State-changing capabilities supplied by the composition root. */
 export interface AdminManagementOptions {
+    readonly getToolConfig?: (
+        context: AdminRouteContext,
+        pluginId: string,
+    ) => MaybePromise<ToolConfigDto>;
+    readonly saveToolConfig?: (
+        context: AdminRouteContext,
+        pluginId: string,
+        config: unknown,
+        revision: string | null,
+    ) => MaybePromise<ToolConfigDto>;
     readonly probeSourceDraft?: (
         context: AdminRouteContext,
         input: CreateSourceInput,
@@ -339,6 +350,54 @@ export function createAdminRoutes(
             "plugins",
             pluginListProvider(options),
         );
+    });
+
+    app.get("/tool-config", async (context) => {
+        const adminContext = toAdminContext(context);
+        const pluginId = requiredQuery(context, "pluginId");
+        const handler = options.management?.getToolConfig;
+        if (handler === undefined) return unavailable(adminContext.requestId);
+        const result = await invokeManagement(() =>
+            handler(adminContext, pluginId)
+        );
+        return json(context, result, adminContext.requestId);
+    });
+
+    app.put("/tool-config", async (context) => {
+        const adminContext = toAdminContext(context);
+        const body = await readJsonBody(context);
+        const pluginId = requiredString(body.pluginId, "pluginId");
+        if (
+            !Object.hasOwn(body, "revision") ||
+            (body.revision !== null &&
+                (typeof body.revision !== "string" || !body.revision.trim())) ||
+            !Object.hasOwn(body, "config") ||
+            Object.keys(body).some((key) =>
+                !["pluginId", "config", "revision"].includes(key)
+            )
+        ) {
+            throw new AdminRouteError(
+                400,
+                "invalid_request",
+                "config and an explicit revision (string or null) are required",
+            );
+        }
+        const handler = options.management?.saveToolConfig;
+        if (handler === undefined) return unavailable(adminContext.requestId);
+        const result = await invokeManagement(() =>
+            handler(
+                adminContext,
+                pluginId,
+                body.config,
+                body.revision as string | null,
+            )
+        );
+        recordAction(
+            options.systemLog,
+            "插件",
+            `更新工具配置 ${shortLabel(pluginId)}`,
+        );
+        return json(context, result, adminContext.requestId);
     });
 
     // The installed alias keeps the operator API explicit about lifecycle

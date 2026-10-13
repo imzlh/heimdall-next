@@ -18,6 +18,7 @@ import {
 } from "../shared/activity-presentation.ts";
 import { DurationSummary, TokenSummary } from "../shared/request-cells.tsx";
 import { MaintenanceStatus } from "../shared/maintenance-status.tsx";
+import { SettingsCard } from "../shared/settings-card.tsx";
 import {
     ASSET_RETENTION_NOTE,
     retentionDaysLabel,
@@ -116,79 +117,108 @@ export function ConsolePageView(props: ConsolePageProps) {
                     )}
                     {page === "settings" && (
                         <>
-                            <section class="panel">
-                                <h2>网关与探测</h2>
-                                {snapshot.settings
-                                    ? (
-                                        <dl class="settings-summary">
-                                            <dt>每分钟请求上限</dt>
-                                            <dd>
-                                                {snapshot.settings.settings
-                                                    .limitPerMinute}
-                                            </dd>
-                                            <dt>探测间隔</dt>
-                                            <dd>
-                                                {snapshot.settings.settings
-                                                    .probeIntervalMs} ms
-                                            </dd>
-                                            <dt>网关访问密钥</dt>
-                                            <dd>
-                                                {snapshot.settings.settings
-                                                        .proxyKeyConfigured
-                                                    ? "已配置"
-                                                    : "未配置"}
-                                            </dd>
-                                        </dl>
-                                    )
-                                    : (
-                                        <p class="empty-state">
-                                            {snapshot.errors.settings ||
-                                                "当前实例未配置运行设置服务。"}
-                                        </p>
+                            <div class="settings-snapshot">
+                                <div class="settings-grid">
+                                    <SettingsCard
+                                        id="runtime-settings-title"
+                                        title="运行与对话"
+                                        description="调整请求限额、探测频率与对话标题模型。"
+                                        icon="gauge"
+                                    >
+                                        {snapshot.settings
+                                            ? (
+                                                <dl class="settings-summary">
+                                                    <dt>每分钟请求上限</dt>
+                                                    <dd>
+                                                        {snapshot.settings
+                                                            .settings
+                                                            .limitPerMinute}
+                                                    </dd>
+                                                    <dt>探测间隔</dt>
+                                                    <dd>
+                                                        {snapshot.settings
+                                                            .settings
+                                                            .probeIntervalMs} ms
+                                                    </dd>
+                                                    <dt>对话标题模型</dt>
+                                                    <dd>
+                                                        {snapshot.settings
+                                                            .settings
+                                                            .titleModel ||
+                                                            "跟随对话所选模型"}
+                                                    </dd>
+                                                </dl>
+                                            )
+                                            : (
+                                                <p class="empty-state">
+                                                    {snapshot.errors.settings ||
+                                                        "当前实例未配置运行设置服务。"}
+                                                </p>
+                                            )}
+                                    </SettingsCard>
+                                    {snapshot.settings && (
+                                        <>
+                                            <SettingsCard
+                                                id="gateway-settings-title"
+                                                title="访问安全"
+                                                description="管理访问网关时使用的密钥。"
+                                                icon="key"
+                                            >
+                                                <dl class="settings-summary">
+                                                    <dt>网关访问密钥</dt>
+                                                    <dd>
+                                                        {snapshot.settings
+                                                                .settings
+                                                                .proxyKeyConfigured
+                                                            ? "已配置"
+                                                            : "未配置"}
+                                                    </dd>
+                                                </dl>
+                                                <p class="field-help">
+                                                    密钥只写入，不会回显。
+                                                </p>
+                                            </SettingsCard>
+                                            <SettingsCard
+                                                id="retention-title"
+                                                title="数据保留"
+                                                description="按天保留历史，0 表示永久保留。"
+                                                icon="logs"
+                                            >
+                                                <dl class="settings-summary">
+                                                    <dt>请求记录保留</dt>
+                                                    <dd>
+                                                        {retentionDaysLabel(
+                                                            snapshot.settings
+                                                                .settings
+                                                                .requestRetentionDays,
+                                                        )}
+                                                    </dd>
+                                                    <dt>对话保留</dt>
+                                                    <dd>
+                                                        {retentionDaysLabel(
+                                                            snapshot.settings
+                                                                .settings
+                                                                .chatRetentionDays,
+                                                        )}
+                                                    </dd>
+                                                </dl>
+                                                <p class="field-help">
+                                                    对话按最后活动时间计算，正在生成的对话会保留。
+                                                </p>
+                                                <p class="field-help">
+                                                    {ASSET_RETENTION_NOTE}
+                                                </p>
+                                            </SettingsCard>
+                                            <div class="settings-card settings-maintenance-card">
+                                                <MaintenanceStatus
+                                                    status={snapshot.settings
+                                                        .maintenance}
+                                                />
+                                            </div>
+                                        </>
                                     )}
-                            </section>
-                            {snapshot.settings && (
-                                <section
-                                    class="panel retention-panel"
-                                    aria-labelledby="retention-title"
-                                >
-                                    <div class="panel-heading">
-                                        <div>
-                                            <h2 id="retention-title">
-                                                数据保留
-                                            </h2>
-                                            <p>
-                                                按天保留历史，0 表示永久保留。
-                                            </p>
-                                        </div>
-                                    </div>
-                                    <dl class="settings-summary">
-                                        <dt>请求记录保留</dt>
-                                        <dd>
-                                            {retentionDaysLabel(
-                                                snapshot.settings.settings
-                                                    .requestRetentionDays,
-                                            )}
-                                        </dd>
-                                        <dt>对话保留</dt>
-                                        <dd>
-                                            {retentionDaysLabel(
-                                                snapshot.settings.settings
-                                                    .chatRetentionDays,
-                                            )}
-                                        </dd>
-                                    </dl>
-                                    <p class="field-help">
-                                        对话按最后活动时间计算，正在生成的对话会保留。
-                                    </p>
-                                    <p class="field-help">
-                                        {ASSET_RETENTION_NOTE}
-                                    </p>
-                                    <MaintenanceStatus
-                                        status={snapshot.settings.maintenance}
-                                    />
-                                </section>
-                            )}
+                                </div>
+                            </div>
                             <ProxyPoolSnapshot snapshot={snapshot} />
                             <PluginSlots
                                 slot="settings.section"

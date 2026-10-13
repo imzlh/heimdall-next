@@ -158,14 +158,12 @@ Deno.test("Chat slot context exposes only current conversation identity and its 
     );
 });
 
-Deno.test("Chat SSR renders both slots and current toggle state without executable plugin code", () => {
+Deno.test("Chat SSR omits duplicate composer tools and sidebar capability cards", () => {
     const extensions = buildChatExtensions([sidebar], [tool]);
     const html = ChatPageView({ initial: initial({ extensions }) }).toString();
-    assertStringIncludes(html, 'data-ui-slot="chat.composer"');
-    assertStringIncludes(html, 'data-ui-slot="chat.sidebar"');
-    assertStringIncludes(html, "本会话已停用");
-    assertStringIncludes(html, 'aria-checked="false"');
-    assertStringIncludes(html, "disabled");
+    assertFalse(html.includes("data-ui-slot"));
+    assertFalse(html.includes(sidebar.title!));
+    assertFalse(html.includes('role="switch"'));
     assertStringIncludes(html, "chat-composer-input");
     assertFalse(
         ChatPageView({ initial: initial({ extensions, authenticated: false }) })
@@ -173,17 +171,33 @@ Deno.test("Chat SSR renders both slots and current toggle state without executab
     );
 });
 
-Deno.test("ChatApp keeps both SSR slots after enhancement and updates their shared tool state", async () => {
+Deno.test("ChatApp keeps tools only in settings and persists choices made before conversation creation", async () => {
     const dom = installTestDom();
+    Object.assign(globalThis.location, { origin: "http://localhost" });
     const previousFetch = globalThis.fetch;
     const snapshot = initial({
         conversation: null,
         conversations: [],
         extensions: buildChatExtensions([sidebar], [tool]),
     });
-    globalThis.fetch = (input) => {
-        assertEquals(input, "/admin/chat/ui");
-        return Promise.resolve(Response.json(snapshot.extensions));
+    const saved: Record<string, unknown>[] = [];
+    globalThis.fetch = (input, options) => {
+        if (input === "/admin/chat/ui") {
+            return Promise.resolve(Response.json(snapshot.extensions));
+        }
+        if (input === "/admin/chat/api/conversations") {
+            assertEquals(options?.method, "POST");
+            return Promise.resolve(Response.json({
+                conversation: { ...conversation, disabledTools: [] },
+            }));
+        }
+        assertEquals(input, "/admin/chat/api/conversation?id=one");
+        assertEquals(options?.method, "PATCH");
+        const patch = JSON.parse(String(options?.body));
+        saved.push(patch);
+        return Promise.resolve(Response.json({
+            conversation: { ...conversation, ...patch },
+        }));
     };
     let unmount = () => {};
     function Root() {
@@ -195,22 +209,42 @@ Deno.test("ChatApp keeps both SSR slots after enhancement and updates their shar
         await dom.act(() =>
             render(<Root />, dom.root as unknown as HTMLElement)
         );
-        const sidebarSlot = dom.root.querySelector(
-            '[data-ui-slot="chat.sidebar"]',
+        assertEquals(dom.root.querySelector("[data-ui-slot]"), null);
+        assertFalse(dom.root.textContent.includes(sidebar.title!));
+        assertEquals(dom.root.querySelector('[role="switch"]'), null);
+        const settings = dom.root.querySelector(
+            'button[aria-label="对话设置"]',
         );
-        const composerSlot = dom.root.querySelector(
-            '[data-ui-slot="chat.composer"]',
+        assert(settings);
+        await dom.act(() => settings.click());
+        const toggle = dom.root.querySelector(
+            `[role="switch"][aria-label="${tool.name}"]`,
         );
-        assert(sidebarSlot, "The app must mount the sidebar slot after SSR");
-        assert(composerSlot, "The composer must receive its plugin slot");
-        assertStringIncludes(sidebarSlot.textContent, "本会话已启用");
-        const toggle = composerSlot.querySelector('[role="switch"]');
         assert(toggle);
+        assertEquals(dom.root.querySelectorAll('[role="switch"]').length, 1);
         assertFalse(toggle.disabled);
         assertEquals(toggle.getAttribute("aria-checked"), "true");
         await dom.act(() => toggle.click());
         assertEquals(toggle.getAttribute("aria-checked"), "false");
-        assertStringIncludes(sidebarSlot.textContent, "本会话已停用");
+        assertEquals(saved, [], "Unsaved chats hold the preference locally");
+
+        const create = dom.root.querySelector(
+            '[class="chat-new primary-button"]',
+        );
+        assert(create);
+        await dom.act(() => create.click());
+        await dom.act();
+        assertEquals(saved, [{
+            reasoningEffort: "medium",
+            disabledTools: [tool.id],
+        }]);
+        assertEquals(toggle.getAttribute("aria-checked"), "false");
+        assertFalse(toggle.disabled);
+        await dom.act(() => toggle.click());
+        await dom.act();
+        assertEquals(saved[1], { disabledTools: [] });
+        assertEquals(toggle.getAttribute("aria-checked"), "true");
+        assertEquals(dom.root.querySelector("[data-ui-slot]"), null);
     } finally {
         await dom.act(unmount);
         globalThis.fetch = previousFetch;
@@ -355,7 +389,8 @@ Deno.test("Chat extension endpoint and SSR project only enabled declarations and
         },
     });
     const html = await (await app.request("/admin/chat?id=one")).text();
-    assertStringIncludes(html, "本会话已停用");
+    assertFalse(html.includes('data-ui-slot="chat.composer"'));
+    assertFalse(html.includes('data-ui-slot="chat.sidebar"'));
     const response = await app.request("/admin/chat/ui");
     assertEquals(response.headers.get("cache-control"), "no-store");
     assertEquals((await response.json()).contributions.length, 2);

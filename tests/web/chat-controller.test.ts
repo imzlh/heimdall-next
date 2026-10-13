@@ -480,6 +480,62 @@ Deno.test("chat sending a new conversation creates once and stop before create r
     controller.dispose();
 });
 
+Deno.test("chat preserves next-message input during conversation creation and final history reload", async () => {
+    const fake = fakeApi();
+    const created = deferred<ChatConversation>();
+    const history = deferred<{
+        conversation: ChatConversation;
+        messages: ChatMessage[];
+    }>();
+    fake.api.create = () => created.promise;
+    fake.api.load = () => history.promise;
+    const controller = createChatController({
+        initial: initial({ conversation: null, messages: [] }),
+        api: fake.api,
+    });
+    await controller.addAttachments([
+        new File([new Uint8Array([1])], "first.png", { type: "image/png" }),
+    ]);
+    controller.setDraft("first question");
+    const sent = controller.send();
+    assertEquals(controller.getState().creating, true);
+    controller.setDraft("next question");
+    created.resolve(conversation("created"));
+    await waitForState(controller, (state) => state.selectedId === "created");
+    assertEquals(fake.commands[0], {
+        type: "send",
+        conversationId: "created",
+        model: "model-a",
+        text: "first question",
+        attachments: [asset()],
+    });
+    assertEquals(controller.getState().draft, "next question");
+    assertEquals(readStoredDraft(""), { text: "", attachments: [] });
+    const user = message("user-ack", "user", "first question", "created");
+    const stream = fake.streams[0]!;
+    stream.emit({ type: "user", message: user });
+    assertEquals(readStoredDraft("created"), {
+        text: "next question",
+        attachments: [],
+    });
+    stream.completion.resolve("done");
+    await waitForState(controller, (state) => state.loading);
+    controller.setDraft("next question, refined during reload");
+    history.resolve({
+        conversation: conversation("created"),
+        messages: [user],
+    });
+    await sent;
+    assertEquals(
+        controller.getState().draft,
+        "next question, refined during reload",
+    );
+    assertEquals(controller.getState().attachments, []);
+    assertEquals(controller.getState().sending, false);
+    assertEquals(readStoredDraft("created").text, controller.getState().draft);
+    controller.dispose();
+});
+
 Deno.test("chat effort chosen before the first message rides onto the created conversation", async () => {
     const fake = fakeApi();
     const savedSettings: Array<[string, string]> = [];
@@ -729,6 +785,92 @@ Deno.test("chat keeps newly selected images when acknowledgement clears the sent
     await attached;
     assertEquals(controller.getState().attachments, [asset("second.png")]);
     assertEquals(controller.getState().draft, "describe this one next");
+    stream.completion.resolve("done");
+    await sent;
+    controller.dispose();
+});
+
+Deno.test("chat acknowledgement removes sent images while preserving text typed before acknowledgement", async () => {
+    const fake = fakeApi();
+    const controller = createChatController({
+        initial: initial(),
+        api: fake.api,
+    });
+    await controller.addAttachments([
+        new File([new Uint8Array([1])], "first.png", { type: "image/png" }),
+    ]);
+    controller.setDraft("describe the first picture");
+    const sent = controller.send();
+    controller.setDraft("my next question");
+    const stream = fake.streams[0]!;
+    stream.emit({
+        type: "user",
+        message: message("user-ack", "user", "describe the first picture"),
+    });
+    assertEquals(controller.getState().draft, "my next question");
+    assertEquals(controller.getState().attachments, []);
+    assertEquals(readStoredDraft("one"), {
+        text: "my next question",
+        attachments: [],
+    });
+    assertEquals(fake.released, []);
+    stream.completion.resolve("done");
+    await sent;
+    controller.dispose();
+});
+
+Deno.test("chat acknowledgement retains newly uploaded images and clears sent text only once", async () => {
+    const fake = fakeApi();
+    const controller = createChatController({
+        initial: initial(),
+        api: fake.api,
+    });
+    const file = (name: string) =>
+        new File([new Uint8Array([1])], name, { type: "image/png" });
+    await controller.addAttachments([file("first.png")]);
+    controller.setDraft("describe this picture");
+    const sent = controller.send();
+    await controller.addAttachments([file("second.png")]);
+    const stream = fake.streams[0]!;
+    const acknowledgement: ChatEvent = {
+        type: "user",
+        message: message("user-ack", "user", "describe this picture"),
+    };
+    stream.emit(acknowledgement);
+    assertEquals(controller.getState().draft, "");
+    assertEquals(controller.getState().attachments, [asset("second.png")]);
+
+    controller.setDraft("describe this picture");
+    stream.emit(acknowledgement);
+    assertEquals(controller.getState().draft, "describe this picture");
+    assertEquals(controller.getState().attachments, [asset("second.png")]);
+    assertEquals(fake.released, []);
+    stream.completion.resolve("done");
+    await sent;
+    controller.removeAttachment(0);
+    assertEquals(fake.released, [[
+        asset("second.png").assetId,
+        asset("second.png").leaseId,
+    ]]);
+    controller.dispose();
+});
+
+Deno.test("chat acknowledgement preserves an identical question retyped before acknowledgement", async () => {
+    const fake = fakeApi();
+    const controller = createChatController({
+        initial: initial(),
+        api: fake.api,
+    });
+    controller.setDraft("same question");
+    const sent = controller.send();
+    controller.setDraft("");
+    controller.setDraft("same question");
+    const stream = fake.streams[0]!;
+    stream.emit({
+        type: "user",
+        message: message("user-ack", "user", "same question"),
+    });
+    assertEquals(controller.getState().draft, "same question");
     stream.completion.resolve("done");
     await sent;
     controller.dispose();

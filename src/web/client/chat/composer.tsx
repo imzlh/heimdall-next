@@ -1,7 +1,7 @@
 /** @jsxRuntime automatic @jsxImportSource hono/jsx/dom */
 import { useEffect, useLayoutEffect, useRef, useState } from "hono/jsx/dom";
 import { chatAttachmentUrl } from "../../shared/chat-view.ts";
-import { CHAT_ATTACHMENT_ACCEPT } from "./attachments.ts";
+import { CHAT_ATTACHMENT_ACCEPT, transferredChatFiles } from "./attachments.ts";
 import {
     composerKeyAction,
     insertComposerNewline,
@@ -51,18 +51,23 @@ export function ChatComposer(
     const assetsPanel = useRef<HTMLDivElement | null>(null);
     const effortButton = useRef<HTMLButtonElement | null>(null);
     const effortMenu = useRef<HTMLDivElement | null>(null);
+    const dragDepth = useRef(0);
     const previousAttachments = useRef({
         count: state.attachments.length,
         conversation: state.selectedId,
     });
     const [assetsOpen, setAssetsOpen] = useState(false);
     const [effortOpen, setEffortOpen] = useState(false);
+    const [dragging, setDragging] = useState(false);
+    const [inputNotice, setInputNotice] = useState("");
     const busy = state.loading || state.creating || state.sending ||
         state.managing || state.toolsBusy;
     const disabled = !state.available || !state.authenticated || busy ||
         state.attachmentsBusy;
     const hasModel = !!state.model && state.models.includes(state.model);
     const canSend = !disabled && hasModel && !!state.draft.trim();
+    const inputDisabled = !state.available || !state.authenticated ||
+        ((state.loading || state.creating) && !state.sending);
     // Reasoning effort rides with the conversation; a fresh unsaved chat keeps
     // the picked value in the controller and applies it once the chat exists.
     const effort = state.conversation
@@ -72,6 +77,27 @@ export function ChatComposer(
         EFFORT_OPTIONS.find((option) => option.value === effort) ??
             EFFORT_OPTIONS.find((option) => option.value === "medium")!;
     const effortLocked = disabled;
+
+    useEffect(() => {
+        dragDepth.current = 0;
+        setDragging(false);
+        setInputNotice("");
+    }, [disabled, state.selectedId, state.sending, state.attachmentsBusy]);
+
+    useEffect(() => {
+        const reset = () => {
+            dragDepth.current = 0;
+            setDragging(false);
+        };
+        globalThis.addEventListener("dragend", reset);
+        globalThis.addEventListener("drop", reset);
+        globalThis.addEventListener("blur", reset);
+        return () => {
+            globalThis.removeEventListener("dragend", reset);
+            globalThis.removeEventListener("drop", reset);
+            globalThis.removeEventListener("blur", reset);
+        };
+    }, []);
 
     // Drafts also change after server acknowledgement, failed sends and history
     // selection. Resize those updates too, not just physical keystrokes.
@@ -174,7 +200,79 @@ export function ChatComposer(
         const input = event.currentTarget as HTMLInputElement;
         const files = Array.from(input.files ?? []);
         input.value = "";
-        if (files.length) void controller.addAttachments(files);
+        attachFiles(files);
+    }
+
+    function attachFiles(files: readonly File[]) {
+        if (!files.length) return;
+        if (disabled) {
+            setInputNotice(
+                state.sending
+                    ? "请等待当前回复完成后再添加图片"
+                    : state.attachmentsBusy
+                    ? "图片正在上传，请稍后再添加"
+                    : "当前暂时无法添加图片，请稍后重试",
+            );
+            return;
+        }
+        setInputNotice("");
+        draftInput.current?.focus();
+        void controller.addAttachments(files);
+    }
+
+    function paste(event: ClipboardEvent) {
+        const files = transferredChatFiles(event.clipboardData);
+        if (!files.length) return;
+        event.preventDefault();
+        // Preserve accompanying text even while image uploads are unavailable.
+        const input = event.currentTarget as HTMLTextAreaElement;
+        const text = event.clipboardData?.getData("text/plain");
+        if (text && !input.disabled) {
+            input.setRangeText(
+                text,
+                input.selectionStart,
+                input.selectionEnd,
+                "end",
+            );
+            controller.setDraft(input.value);
+            resizeComposerInput(input);
+        }
+        attachFiles(files);
+    }
+
+    function hasDraggedFiles(event: DragEvent) {
+        return Array.from(event.dataTransfer?.types ?? []).includes("Files");
+    }
+
+    function dragEnter(event: DragEvent) {
+        if (!hasDraggedFiles(event)) return;
+        event.preventDefault();
+        dragDepth.current = (dragDepth.current ?? 0) + 1;
+        if (!disabled) setDragging(true);
+    }
+
+    function dragOver(event: DragEvent) {
+        if (!hasDraggedFiles(event)) return;
+        event.preventDefault();
+        if (event.dataTransfer) {
+            event.dataTransfer.dropEffect = disabled ? "none" : "copy";
+        }
+    }
+
+    function dragLeave(event: DragEvent) {
+        if (!hasDraggedFiles(event)) return;
+        dragDepth.current = Math.max(0, (dragDepth.current ?? 0) - 1);
+        if (!dragDepth.current) setDragging(false);
+    }
+
+    function drop(event: DragEvent) {
+        dragDepth.current = 0;
+        setDragging(false);
+        const files = transferredChatFiles(event.dataTransfer);
+        if (!files.length && !hasDraggedFiles(event)) return;
+        // File drops must never navigate away from the current conversation.
+        event.preventDefault();
+        attachFiles(files);
     }
 
     function chooseEffort(next: "low" | "medium" | "high") {
@@ -196,6 +294,7 @@ export function ChatComposer(
         const action = composerKeyAction(event);
         if (action === "none") return;
         event.preventDefault();
+        if (action === "ignore") return;
         if (action === "send") {
             submit();
             return;
@@ -212,13 +311,15 @@ export function ChatComposer(
         resizeComposerInput(input);
     }
 
-    // Status line under the capsule; collapsed entirely when there is nothing
-    // to say so the capsule rests near the bottom edge.
-    const metaStatus = state.attachmentsBusy
+    const metaStatus = state.stopping
+        ? "正在停止生成，草稿会保留"
+        : state.sending
+        ? "正在生成，可继续编辑下一条消息 · Shift + Enter 换行"
+        : state.attachmentsBusy
         ? "正在上传图片…"
         : state.attachments.length && !state.draft.trim()
         ? "添加一段文字后发送图片"
-        : "";
+        : "Enter 发送 · Shift + Enter 换行 · 支持粘贴或拖入图片";
 
     return (
         <div class="chat-composer-region">
@@ -231,6 +332,7 @@ export function ChatComposer(
                             type="button"
                             class="chat-suggestion"
                             title={text}
+                            disabled={disabled}
                             onClick={() => {
                                 controller.setDraft(text);
                                 draftInput.current?.focus();
@@ -249,7 +351,12 @@ export function ChatComposer(
             <form
                 class="chat-composer"
                 data-sending={state.sending ? "true" : "false"}
+                data-dragging={dragging ? "true" : "false"}
                 aria-label="发送消息"
+                onDragEnter={dragEnter}
+                onDragOver={dragOver}
+                onDragLeave={dragLeave}
+                onDrop={drop}
                 onSubmit={(event) => {
                     event.preventDefault();
                     submit();
@@ -275,7 +382,7 @@ export function ChatComposer(
                         aria-busy={state.attachmentsBusy ? "true" : "false"}
                         title={state.attachmentsBusy
                             ? "正在上传图片…"
-                            : "添加图片，最多 4 张，每张 5 MiB"}
+                            : "选择、粘贴或拖入图片，最多 4 张，每张 5 MiB"}
                     >
                         <span class="chat-attach-glyph" aria-hidden="true">
                             <span class="chat-attach-ready">
@@ -327,17 +434,17 @@ export function ChatComposer(
                             ? "描述你想了解的图片内容…"
                             : "发送消息给 Heimdall…"}
                         value={state.draft}
-                        disabled={!state.available || !state.authenticated ||
-                            state.loading || state.creating}
+                        disabled={inputDisabled}
                         onInput={(event) =>
                             controller.setDraft(
                                 (event.currentTarget as HTMLTextAreaElement)
                                     .value,
                             )}
                         onKeyDown={keydown}
-                        aria-describedby={metaStatus
-                            ? "chat-composer-hint"
-                            : undefined}
+                        onPaste={paste}
+                        aria-describedby={inputNotice
+                            ? "chat-composer-hint chat-composer-notice"
+                            : "chat-composer-hint"}
                         aria-keyshortcuts="Enter Shift+Enter Control+Enter Meta+Enter"
                     />
                     <div class="chat-composer-action-slot">
@@ -462,14 +569,27 @@ export function ChatComposer(
                         ))}
                     </ul>
                 </div>
+                {dragging && (
+                    <div class="chat-composer-drop" role="status">
+                        <Icon name="image" />
+                        <span>松开以添加图片</span>
+                    </div>
+                )}
             </form>
-            {metaStatus && (
-                <div class="chat-composer-meta">
-                    <p id="chat-composer-hint" class="chat-composer-hint">
-                        {metaStatus}
+            <div class="chat-composer-meta">
+                {inputNotice && (
+                    <p
+                        id="chat-composer-notice"
+                        class="chat-composer-hint"
+                        role="status"
+                    >
+                        {inputNotice}
                     </p>
-                </div>
-            )}
+                )}
+                <p id="chat-composer-hint" class="chat-composer-hint">
+                    {metaStatus}
+                </p>
+            </div>
         </div>
     );
 }

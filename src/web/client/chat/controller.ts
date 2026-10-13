@@ -106,6 +106,7 @@ export function createChatController(
     let restoringDraft: { id: string; ticket: number } | undefined;
     let disposed = false;
     let navigation = 0;
+    let draftTextRevision = 0;
     let attachmentRevision = 0;
     let readAbort: AbortController | undefined;
     let mutationAbort: AbortController | undefined;
@@ -740,6 +741,7 @@ export function createChatController(
             return false;
         }
         const draft = draftFor();
+        const sentTextRevision = draftTextRevision;
         if (type === "send") {
             if (!draft.text.trim()) {
                 patch({ error: "请输入消息内容" });
@@ -776,6 +778,7 @@ export function createChatController(
         );
         let interrupted = false;
         let accepted = false;
+        let draftAcknowledged = false;
         const accept = () => {
             if (accepted) return;
             accepted = true;
@@ -871,8 +874,22 @@ export function createChatController(
                     ) {
                         patch({ messages: [...state.messages, event.message] });
                     }
-                    if (type === "send" && drafts.get(run.id) === draft) {
-                        editDraft(emptyDraft());
+                    if (type === "send" && !draftAcknowledged) {
+                        draftAcknowledged = true;
+                        const current = draftFor(run.id);
+                        const sentAttachments = new Set(draft.attachments);
+                        // Typing or uploading the next message changes the
+                        // draft object before acknowledgement. Retain those
+                        // changes while removing the content already sent.
+                        editDraft({
+                            text: draftTextRevision === sentTextRevision
+                                ? ""
+                                : current.text,
+                            attachments: current.attachments.filter(
+                                (attachment) =>
+                                    !sentAttachments.has(attachment),
+                            ),
+                        });
                     }
                 } else if (event.type === "delta") {
                     patch({ streamText: state.streamText + event.text });
@@ -969,7 +986,9 @@ export function createChatController(
                     .then(resolve);
             }),
         setDraft(text) {
-            if (!disposed) editDraft({ ...draftFor(), text });
+            if (disposed) return;
+            draftTextRevision++;
+            editDraft({ ...draftFor(), text });
         },
         setModel(model) {
             if (disposed) return;

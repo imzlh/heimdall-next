@@ -1,0 +1,67 @@
+{
+    "id": "heimdall.tool.workspace",
+    "version": "0.1.0",
+    "apiVersion": "1",
+    "name": "本地工作区",
+    "description": "为 Chat 提供指定工作区中的文件浏览、搜索、读取、写入与 patch。在插件配置中设置工作区路径；未配置时不提供文件工具。",
+    "kind": "tool",
+    "trust": "trusted",
+    "capabilities": [
+        "workspace_list",
+        "workspace_read",
+        "workspace_search",
+        "workspace_find",
+        "workspace_read_many",
+        "workspace_stat",
+        "workspace_mkdir",
+        "workspace_move",
+        "workspace_remove",
+        "workspace_write",
+        "workspace_edit",
+        "workspace_patch"
+    ],
+    "configSchema": {
+        "version": 1,
+        "id": "heimdall.tool.workspace",
+        "title": "本地工作区配置",
+        "fields": [
+            {
+                "type": "string",
+                "name": "root",
+                "label": "工作区路径",
+                "default": "",
+                "maxLength": 1024,
+                "placeholder": "D:/projects/my-project 或 /srv/projects/my-project",
+                "help": "填写服务器上已存在目录的绝对路径。留空会移除后续对话中的文件工具。"
+            },
+            {
+                "type": "bool",
+                "name": "readOnly",
+                "label": "只读模式",
+                "default": false,
+                "help": "启用后只提供目录浏览、搜索和读取。保存后对后续对话请求生效。"
+            }
+        ]
+    },
+    "permissions": {
+        "network": false,
+        "filesystem": "read-write",
+        "subprocess": false
+    },
+    "ui": [
+        {
+            "pluginId": "heimdall.tool.workspace",
+            "id": "workspace",
+            "slot": "chat.sidebar",
+            "title": "本地工作区",
+            "schema": {
+                "blocks": [
+                    {
+                        "kind": "text",
+                        "text": "助手可读取和编辑管理员指定的服务器工作区。写入前会校验文件版本；只读模式仅提供浏览、搜索与读取。"
+                    }
+                ]
+            }
+        }
+    ]
+}
