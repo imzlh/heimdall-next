@@ -181,17 +181,18 @@ async function sourcesUnder(directory: string) {
     }));
 }
 
-/** The server application is the flattened root: everything under src plus the main entry. */
+/** Both application entry points share the same runtime dependency boundaries. */
 async function serverSources() {
     const modules = await sourcesUnder("src");
-    if (await exists("main.ts")) {
-        const source = await Deno.readTextFile(new URL("main.ts", projectRoot));
+    for (const entry of ["main.ts", "desktop.ts"]) {
+        if (!(await exists(entry))) continue;
+        const source = await Deno.readTextFile(new URL(entry, projectRoot));
         modules.push({
-            file: "main.ts",
+            file: entry,
             source,
             imports: importsFrom(source).map((reference) => ({
                 ...reference,
-                resolved: resolveModule("main.ts", reference.specifier),
+                resolved: resolveModule(entry, reference.specifier),
             })),
         });
     }
@@ -301,7 +302,7 @@ Deno.test("architecture: browser and shared UI modules cannot depend on server r
         const directory of [clientRoot, sharedRoot, "packages/admin-contracts"]
     ) {
         for (const { file, source, imports } of await sourcesUnder(directory)) {
-            for (const { specifier, resolved } of imports) {
+            for (const { specifier, resolved, typeOnly } of imports) {
                 const isClient = isUnder(file, clientRoot);
                 const allowed = (isClient && isUnder(resolved, clientRoot)) ||
                     isUnder(resolved, sharedRoot) ||
@@ -312,6 +313,12 @@ Deno.test("architecture: browser and shared UI modules cannot depend on server r
                     (file === `${sharedRoot}/icons.tsx` &&
                         resolved === "npm:lucide@1.47.0/dist/esm/lucide.mjs") ||
                     (isClient && isHonoJsx(resolved)) ||
+                    // Shared JSX prop types emit no server runtime import.
+                    (typeOnly && isUnder(file, sharedRoot) &&
+                        isHonoJsx(resolved)) ||
+                    // The public health DTO shares this pure policy validator.
+                    (file === "packages/admin-contracts/source-health.ts" &&
+                        resolved === "packages/contracts/source-health.ts") ||
                     // This loop audits every contract module too: constants and
                     // pure validators are safe without a per-file allowlist.
                     isUnder(resolved, "packages/admin-contracts");
@@ -351,6 +358,29 @@ Deno.test("architecture: server modules never import browser modules", async () 
         }
     }
     assertEquals(violations, [], "SSR references the browser bundle by URL");
+});
+
+Deno.test("architecture: shared runtime does not depend on the native desktop host", async () => {
+    const violations: string[] = [];
+    for (const { file, source, imports } of await sourcesUnder("src/runtime")) {
+        for (const { specifier, resolved } of imports) {
+            if (
+                isUnder(resolved, "src/desktop") || resolved === "desktop.ts"
+            ) violations.push(`${file} -> ${specifier}`);
+        }
+        if (
+            /\bDeno\s*\.\s*(?:BrowserWindow|Tray)\b/.test(
+                withoutComments(source),
+            )
+        ) {
+            violations.push(`${file} -> native desktop API`);
+        }
+    }
+    assertEquals(
+        violations,
+        [],
+        "the desktop host embeds the runtime; standalone servers stay independent",
+    );
 });
 
 Deno.test("architecture: plugins cannot import host implementation details", async () => {

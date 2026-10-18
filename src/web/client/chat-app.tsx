@@ -231,6 +231,7 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
     const [theme, setTheme] = useState(savedTheme);
     const [historyOpen, setHistoryOpen] = useState(false);
     const [collapsed, setCollapsed] = useState(savedCollapsed);
+    const [historyQuery, setHistoryQuery] = useState("");
     const [modelOpen, setModelOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [management, setManagement] = useState<ConversationAction | null>(
@@ -244,12 +245,25 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
     );
     const [atBottom, setAtBottom] = useState(true);
     const historyPanel = useRef<HTMLElement | null>(null);
+    const historySearch = useRef<HTMLInputElement | null>(null);
     const modelField = useRef<HTMLDivElement | null>(null);
     const modelTrigger = useRef<HTMLButtonElement | null>(null);
     const modelMenu = useRef<HTMLDivElement | null>(null);
     const viewport = useRef<HTMLDivElement | null>(null);
     const followEnd = useRef(true);
     const busyState = busy(state);
+    const normalizedQuery = historyQuery.trim().toLocaleLowerCase();
+    const visibleConversations = state.conversations.filter((conversation) =>
+        !normalizedQuery ||
+        (conversation.title || "新对话").toLocaleLowerCase().includes(
+            normalizedQuery,
+        )
+    );
+    useEffect(() => {
+        document.title = state.conversation?.title
+            ? `${state.conversation.title} · Heimdall Chat`
+            : "Heimdall Chat";
+    }, [state.conversation?.title]);
     useEffect(() => {
         document.documentElement.dataset.theme = theme;
         try {
@@ -306,23 +320,58 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
         observer.observe(content);
         return () => observer.disconnect();
     }, [state.selectedId]);
-    // Ctrl+N opens a new conversation, matching the original chat.
+    // Keep the original shortcut and provide a browser-friendly alternative.
     useEffect(() => {
         const onKey = (event: KeyboardEvent) => {
             if (
-                (event.ctrlKey || event.metaKey) &&
-                !event.altKey && !event.shiftKey &&
-                event.key.toLowerCase() === "n"
+                event.defaultPrevented || event.isComposing || event.repeat ||
+                !(event.ctrlKey || event.metaKey) || event.altKey ||
+                document.querySelector("dialog[open]")
+            ) return;
+            const key = event.key.toLowerCase();
+            if (
+                (!event.shiftKey && key === "n") ||
+                (event.shiftKey && key === "o")
             ) {
                 event.preventDefault();
-                if (document.querySelector("dialog[open]")) return;
+                if (busyState || !state.available || !state.authenticated) {
+                    return;
+                }
                 setHistoryOpen(false);
+                setHistoryQuery("");
                 void controller.create();
+            } else if (!event.shiftKey && key === "k") {
+                event.preventDefault();
+                setModelOpen(false);
+                setSettingsOpen(false);
+                setCollapsed(false);
+                if (
+                    matchMedia("(max-width: 800px)").matches && !historyOpen
+                ) {
+                    setHistoryOpen(true);
+                    return;
+                }
+                requestAnimationFrame(() => {
+                    historySearch.current?.focus();
+                    historySearch.current?.select();
+                });
+            } else if (event.shiftKey && key === "l") {
+                event.preventDefault();
+                setHistoryOpen(false);
+                requestAnimationFrame(() =>
+                    document.getElementById("chat-draft")?.focus()
+                );
             }
         };
         document.addEventListener("keydown", onKey);
         return () => document.removeEventListener("keydown", onKey);
-    }, [controller]);
+    }, [
+        controller,
+        busyState,
+        state.available,
+        state.authenticated,
+        historyOpen,
+    ]);
     useEffect(() => {
         if (!historyOpen) return;
         const trigger = document.activeElement as HTMLElement | null;
@@ -330,10 +379,15 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
         const focusable = () =>
             Array.from(
                 panel?.querySelectorAll<HTMLElement>(
-                    'a[href], button:not(:disabled), [tabindex="0"]',
+                    'a[href], button:not(:disabled), input:not(:disabled), [tabindex="0"]',
                 ) ?? [],
             ).filter((element) => element.getClientRects().length);
-        focusable()[0]?.focus();
+        // The drawer's visibility transition starts at the first paint. Focus
+        // after that frame, when browsers accept focus inside the open drawer.
+        const focusFrame = requestAnimationFrame(() => {
+            (historySearch.current ?? focusable()[0])?.focus();
+            historySearch.current?.select();
+        });
         const closeOnEscape = (event: KeyboardEvent) => {
             if (document.querySelector("dialog[open]")) return;
             if (event.key === "Escape") {
@@ -360,6 +414,7 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
         };
         mobile.addEventListener("change", onResize);
         return () => {
+            cancelAnimationFrame(focusFrame);
             document.removeEventListener("keydown", closeOnEscape);
             mobile.removeEventListener("change", onResize);
             if (trigger?.isConnected) trigger.focus();
@@ -481,17 +536,48 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                 <button
                     type="button"
                     class="chat-new primary-button"
+                    title="新对话（Ctrl / ⌘ + Shift + O）"
+                    aria-keyshortcuts="Control+Shift+O Meta+Shift+O Control+N Meta+N"
                     disabled={busyState || !state.available ||
                         !state.authenticated}
                     onClick={() => {
                         setHistoryOpen(false);
+                        setHistoryQuery("");
                         void controller.create();
                     }}
                 >
                     <Icon name="plus" />新对话
                 </button>
-                <ul class="chat-history" aria-label="历史会话">
-                    {state.conversations.map((conversation) => (
+                <div class="chat-history-search">
+                    <Icon name="search" size={16} />
+                    <input
+                        ref={historySearch}
+                        type="search"
+                        value={historyQuery}
+                        placeholder="搜索会话"
+                        aria-label="搜索会话"
+                        aria-controls="chat-history-list"
+                        aria-keyshortcuts="Control+K Meta+K"
+                        title="搜索会话（Ctrl / ⌘ + K）"
+                        onInput={(event) =>
+                            setHistoryQuery(
+                                (event.currentTarget as HTMLInputElement).value,
+                            )}
+                        onKeyDown={(event) => {
+                            if (event.key === "Escape" && historyQuery) {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                setHistoryQuery("");
+                            }
+                        }}
+                    />
+                </div>
+                <ul
+                    class="chat-history"
+                    id="chat-history-list"
+                    aria-label="历史会话"
+                >
+                    {visibleConversations.map((conversation) => (
                         <li
                             key={conversation.id}
                             class="chat-conversation-row"
@@ -572,6 +658,12 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                             你的对话会保存在这里。
                         </li>
                     )}
+                    {!!state.conversations.length &&
+                        !visibleConversations.length && (
+                        <li class="chat-history-empty" role="status">
+                            没有找到匹配的会话。
+                        </li>
+                    )}
                 </ul>
                 {plugins.error && (
                     <p class="chat-plugin-notice" role="status">
@@ -634,6 +726,7 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                 id="chat-main"
                 role="main"
                 aria-label="聊天"
+                tabIndex={-1}
             >
                 {collapsed && (
                     <button
@@ -672,6 +765,14 @@ export function ChatApp({ initial }: { initial: ChatInitial }) {
                         </div>
                     </div>
                     <div class="chat-header-actions">
+                        <a
+                            class="chat-icon-button chat-admin-link"
+                            href="/admin"
+                            title="返回管理面板"
+                            aria-label="返回管理面板"
+                        >
+                            <Icon name="overview" />
+                        </a>
                         <div
                             class="chat-model-field"
                             ref={modelField}

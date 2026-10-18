@@ -4,14 +4,18 @@ Heimdall Next uses Deno, Hono, and Hono JSX as its application stack. The
 gateway, management API, server-rendered console and Chat pages, and browser
 assets are delivered by one Deno process. Server and browser code have explicit
 import boundaries within the repository's `src` tree; Deno tasks build and
-verify both environments. The root `main.ts` is the executable entry point.
+verify both environments. `main.ts` runs the standalone server; `desktop.ts`
+hosts the same application through Deno's built-in `deno desktop` runtime.
 
 ## Runtime tree
 
 ```text
 heimdall-next/
-  main.ts                    Deno entry point
+  main.ts                    standalone server entry point
+  desktop.ts                 native Deno desktop entry point
   src/
+    desktop/                 native windows, tray, and desktop configuration
+    runtime/                 owned application startup and shutdown
     http/                    Hono app, middleware, routes, SSE, errors
     composition/             host wiring and executable startup
     storage/                 KV and SQLite implementations
@@ -45,7 +49,8 @@ heimdall-next/
 ## Dependency direction
 
 ```text
-entry point        -> composition -> HTTP, storage, kernel, plugin host
+entry point        -> runtime -> composition -> HTTP, storage, kernel, plugin host
+desktop host       -> native Deno desktop APIs + runtime
 HTTP               -> kernel ports, plugin contracts, server JSX pages
 server JSX pages   -> server JSX components
 browser entries    -> interactive pages -> HTTP/WebSocket clients
@@ -76,6 +81,87 @@ Browser modules cannot import server HTTP, composition, storage, kernel, backend
 plugin implementations, Deno, or Node APIs. Server modules cannot import the
 browser tree, including through type imports: pages reference generated assets
 by URL.
+
+## Desktop host and application lifetime
+
+`src/runtime/server.ts` owns persistence, plugin composition, background tasks,
+and the HTTP listener. `startRuntime()` resolves after the listener is ready and
+exposes its actual address, `finished`, and an idempotent `close()`. Startup
+failures release partially opened resources. Shutdown drains active responses
+for a bounded grace period, aborts remaining connections, and releases stores
+and plugins. Importing the runtime does not start a server or register signals.
+The standalone `serve()` wrapper owns OS signal handling.
+
+The desktop entry uses Deno's native `BrowserWindow` and optional `Tray` APIs.
+The tray is disabled by default: closing the workspace shuts down the gateway,
+background work, storage, and native resources. `--tray` enables hiding and
+reopening the workspace while the gateway continues running; `--no-tray`
+explicitly selects the default behavior. Desktop data lives in the operating
+system's user data directory, independently of the executable location and
+working directory.
+
+Deno 2.9.7 closes native windows after emitting the close notification and ends
+the event loop when the last window is destroyed. Cleanup tolerates an already
+closed window. The first `BrowserWindow` consumes Deno's precreated window,
+whose creation-time styles cannot be changed and which the runtime shows again
+after 10 seconds. The host retires that startup placeholder after creating a
+separate `noActivate` keeper and the frameless workspace. The keeper allows
+graceful shutdown to finish; default mode does not stay resident after the
+workspace closes. Native desktop assigns the HTTP listener's actual port through
+`DENO_SERVE_ADDRESS`; the host reads the bound address for navigation and the
+gateway address shown in native menus.
+
+Desktop page chrome retains its HTML titlebar, with dragging, expansion to the
+display work area, normal-bounds restore, and close. Windows WebView2 disables
+the native sizing frame to avoid its white top strip; HTML edges and corners
+resize the window through host commands. Deno 2.9.7 exposes no native minimize,
+maximize, or drag operation: the host uses `getPosition`/`setPosition`,
+`getSize`/`setSize`, and `hide`. The browser passes bounded pointer and display
+data; the compiled backend argument distinguishes CEF's logical bounds from
+WebView2's physical-pixel bounds on Windows. `Ctrl`/`Cmd` + `1`, `2`, and `W`
+select Chat, select the console, and close the window. Close quits by default
+and hides only when the tray is enabled. Native context and optional tray menus
+also expose the host-owned data directory, gateway clipboard action,
+always-on-top, bounds reset, reload, and quit. `window-state.ts` stores normal
+bounds and always-on-top in versioned `desktop-window.json`, validates loaded
+preferences, and serializes atomic saves. Expanded bounds do not replace normal
+restore bounds.
+
+Every platform defaults to its system WebView, including WebView2 on Windows.
+Official CEF remains available with explicit `--backend cef`. Deno 2.9.6 and
+2.9.7 ship the same laufey 0.7.0 backends: WebView2 creates its tray message
+window on the runtime thread without a Win32 message pump, so its tray can
+appear without responding to real clicks. This defect is why the tray remains
+opt-in. Neither Windows backend exposes a native titlebar-controls overlay.
+Runtime code uses Deno's desktop APIs without FFI.
+
+Deno's Windows `--icon` packaging only writes `AppIcon.ico`. A build-only
+PowerShell resource update embeds and verifies the original icon bytes in the
+completed launcher; no runtime resource patching is involved. Executable
+resources are checked separately from actual HWND/taskbar icon adoption, which
+remains unverified. Default Windows releases use `windows-x86_64`; local smoke
+builds add `-smoke` to their output directory and run from temporary copies.
+Programmatic smoke checks do not establish OS tray-click delivery or native
+window appearance.
+
+Desktop HTTP binds only to loopback and pins requests to the actual origin. The
+native host creates separate random management and bootstrap credentials. The
+bootstrap credential is exchanged once for an HttpOnly, SameSite=Strict session
+cookie; it never becomes a management bearer token in browser storage or page
+props. Desktop sessions last for the running application and are invalidated by
+its process-local signing key on restart. Ordinary web sessions retain their
+eight-hour lifetime. The UI uses the same HTTP and WebSocket contracts in both
+hosts and does not import native desktop APIs.
+
+Window chrome uses a separate, limited `BrowserWindow.bind()` command channel.
+Deno does not provide sender origin metadata to binding callbacks. After
+checking an authenticated document on the application's exact origin, the host
+injects a per-document capability; loaded documents, replacement windows, and
+shutdown invalidate older capabilities. The injected function is present only in
+the native workspace, so ordinary server pages keep their browser behavior. The
+channel accepts window commands and bounded coordinates, never arbitrary
+JavaScript, filesystem paths, or shell commands. Business operations continue
+through the existing authenticated HTTP and WebSocket contracts.
 
 ## Web and HTTP boundary
 
@@ -158,9 +244,9 @@ APIs.
 Conversation creation, list/read, message generation, and regeneration use the
 existing backend operations. `PATCH /conversation?id=...` renames a conversation
 and `DELETE /conversation?id=...` removes it, through either authenticated Chat
-entry point. These mutations share the generation lock and return 409 during
-an active turn; SQLite deletes the conversation, messages, and attachments in
-one transaction. The sidebar confirms deletion before issuing the request and
+entry point. These mutations share the generation lock and return 409 during an
+active turn; SQLite deletes the conversation, messages, and attachments in one
+transaction. The sidebar confirms deletion before issuing the request and
 switches to an adjacent conversation after success. Failed mutations preserve
 the selection, history, and in-memory draft; a failed history switch also leaves
 the current conversation readable. Individual message deletion is not exposed.
@@ -182,18 +268,19 @@ preset's JSX or the host's schema form. No navigation or separate source setup
 entry is involved. Going back preserves the base information and selection;
 closing discards the in-memory draft and unmounts plugin content. Drafts and
 provider secrets never enter URLs or browser storage. Successful creation closes
-the dialog and refreshes the channel list. The source-create API persists display name,
-priority, and owning plugin separately from provider configuration. Lower
-priority values win source selection.
+the dialog and refreshes the channel list. The source-create API persists
+display name, priority, and owning plugin separately from provider
+configuration. Lower priority values win source selection.
 
 A preset may declare `presetPage.modulePath` and provide `plugins/<dir>/ui.tsx`.
-The host mounts that JSX inside the dialog only when `UiPolicy.trustedModules["<presetId>:setup"]`
-exactly matches the declared asset path. Composition adds the reviewed built-in
-NewAPI setup module through `withBuiltinPresetPages`; other preset pages require
-an explicit host policy entry. The plugin receives a validated JSON context and
-emits bounded `preview` or `save` actions through the preset UI contract. The
-host owns HTTP calls and feedback, and passes no admin credential to the module.
-Custom setup uses the host's schema form after choosing a source plugin.
+The host mounts that JSX inside the dialog only when
+`UiPolicy.trustedModules["<presetId>:setup"]` exactly matches the declared asset
+path. Composition adds the reviewed built-in NewAPI setup module through
+`withBuiltinPresetPages`; other preset pages require an explicit host policy
+entry. The plugin receives a validated JSON context and emits bounded `preview`
+or `save` actions through the preset UI contract. The host owns HTTP calls and
+feedback, and passes no admin credential to the module. Custom setup uses the
+host's schema form after choosing a source plugin.
 
 The host owns navigation, section layout, form controls, validation display,
 loading/error states, and slot allocation. Plugin UI contributes through four
@@ -212,7 +299,8 @@ source/preset `configSchema` declarations from manifests.
 to read bounded, validated manifest JSON without importing plugin modules. The
 catalog endpoint uses the existing session authorization check, accepting a web
 session cookie or the configured admin bearer token, and checks same-origin
-request context. It returns `{ contributions, schemas, sourcePluginIds, presetPages }` with
+request context. It returns
+`{ contributions, schemas, sourcePluginIds, presetPages }` with
 `Cache-Control: no-store` and limits the JSON snapshot to 4 MiB. Contributions
 are filtered against the current runtime catalog's enabled plugins. Preset
 module paths also require enabled preset/source plugins and an exact own entry
@@ -292,12 +380,12 @@ usage, and chat data. Server-owned adapters implement ports from
 `deno task prepare` caches dependencies from `main.ts` and every
 `plugins/*/mod.ts` entry, then runs `deno task build:web`.
 `scripts/build-web.ts` invokes Deno's bundler using `deno.browser.json` and the
-entries from `scripts/web-build.ts`: the console, standalone Chat,
-and preset-owned `ui.tsx` entries declared by manifest `presetPage.modulePath`.
-The console emits `public/assets/console.js` and `console.css`; Chat emits
-`chat.js` and `chat.css` from `src/web/client/chat-main.tsx` and its CSS
-imports. Generated assets are deployment output. The server renders JSX pages
-directly; there is no separate SSR build or Node package installation.
+entries from `scripts/web-build.ts`: the console, standalone Chat, and
+preset-owned `ui.tsx` entries declared by manifest `presetPage.modulePath`. The
+console emits `public/assets/console.js` and `console.css`; Chat emits `chat.js`
+and `chat.css` from `src/web/client/chat-main.tsx` and its CSS imports.
+Generated assets are deployment output. The server renders JSX pages directly;
+there is no separate SSR build or Node package installation.
 
 `deno task dev` completes preparation before supervising browser and server
 watchers. `deno task start` completes preparation and starts the server;

@@ -1,9 +1,10 @@
 # heimdall-next
 
-heimdall-next is a single-tenant TypeScript service built with **Deno, Hono, and
-Hono JSX**. One Deno process serves the gateway, management APIs, operator
-console, and standalone Chat page. One Deno task graph checks and builds the
-application.
+heimdall-next is a desktop application and single-tenant TypeScript service
+built with **Deno, Hono, and Hono JSX**. The native `deno desktop` host provides
+the window and optional system tray, while one shared runtime serves the
+gateway, management APIs, operator console, and Chat. One Deno task graph checks
+and builds the application.
 
 - `main.ts` and `src` form the composition root and HTTP host. Hono owns routes,
   middleware, request parsing, SSE, errors, and server-rendered JSX pages.
@@ -24,6 +25,9 @@ client. Provider names and wire objects stay outside the kernel.
 ```text
 heimdall-next/
   main.ts                 Deno entry point
+  desktop.ts              Native Deno desktop entry point
+  src/desktop/            native window, tray, desktop configuration and lifecycle
+  src/runtime/            shared HTTP runtime and durable resource ownership
   src/http/               Hono routes, middleware, SSE, and errors
   src/composition/        concrete registries, adapters, and startup wiring
   src/storage/            Deno KV and SQLite adapters
@@ -58,7 +62,39 @@ reach live state through HTTP and cannot import server modules, storage handles,
 or Deno APIs. Pages reference browser assets by URL without importing the
 browser entry point.
 
-## Run the application
+## Run the desktop application
+
+Desktop development currently uses Deno 2.9.7 and its experimental
+`deno desktop`:
+
+```text
+deno task desktop
+```
+
+`deno task desktop:dev` runs the native desktop host with HMR and browser asset
+watchers. `deno task desktop:build` creates a native bundle under
+`dist/desktop/`; Windows defaults to system WebView2 under `windows-x86_64/`.
+Launch `Heimdall/Heimdall.exe` and distribute its complete directory. The target
+machine needs WebView2 Runtime but does not need Deno. `--backend cef`
+explicitly selects a bundle containing Chromium.
+
+The tray is disabled by default: closing the window or pressing `Ctrl`/`Cmd` +
+`W` exits the application and stops the gateway. `--tray` enables tray mode;
+`--no-tray` explicitly disables it. The current Windows WebView2 tray has a
+known message-thread defect. The HTML titlebar remains in use, with custom edge
+resizing replacing WebView2's native sizing frame. Actual Windows appearance and
+interaction still require acceptance.
+
+Windows run/build tasks embed the supplied icon into the executable using a
+build-only resource update. Native window/taskbar adoption still needs an OS
+check. Local smoke builds use a separate `-smoke` output directory and temporary
+data. Runtime code does not require FFI.
+
+Desktop business data lives in the operating system's user data directory. See
+[docs/desktop.md](docs/desktop.md) for build layout, data locations, native
+runtime requirements, and smoke checks.
+
+## Run the service
 
 Run these commands from `heimdall-next` with Deno 2.9 or newer:
 
@@ -123,36 +159,36 @@ and reading the server snapshot.
 Chat images upload once as raw PNG, JPEG, GIF, or WebP bytes (up to 5 MiB each,
 four per message). History and drafts retain asset IDs and authenticated
 `/admin/chat/api/assets/:id` URLs, so reusing a reference image does not upload
-its bytes again. The asset SQLite database deduplicates identical content;
-each upload or reference pick receives an independent 24-hour draft lease.
-Drafts retain that lease alongside the asset ID. Saving the user message consumes
-only its submitted leases; deleting another conversation cannot invalidate a
-live draft of the same image. Removing a draft releases its lease. Expired or
+its bytes again. The asset SQLite database deduplicates identical content; each
+upload or reference pick receives an independent 24-hour draft lease. Drafts
+retain that lease alongside the asset ID. Saving the user message consumes only
+its submitted leases; deleting another conversation cannot invalidate a live
+draft of the same image. Removing a draft releases its lease. Expired or
 released uploads without saved references are reclaimed in small batches on
 startup and image writes, including uploads that were never sent. Saved history
 contains no lease IDs.
 
 The asset API accepts `POST /api/chat/assets` for a raw image upload,
-`POST /api/chat/assets/:id/lease` for a new draft reference without uploading bytes,
-and `DELETE /api/chat/assets/:id/lease?leaseId=...` for releasing that reference.
-Browsers use the corresponding `/admin/chat/api/*` routes with their web session;
-direct API clients use the management Bearer token. Lease operations never
-authorize the separately signed public image route.
+`POST /api/chat/assets/:id/lease` for a new draft reference without uploading
+bytes, and `DELETE /api/chat/assets/:id/lease?leaseId=...` for releasing that
+reference. Browsers use the corresponding `/admin/chat/api/*` routes with their
+web session; direct API clients use the management Bearer token. Lease
+operations never authorize the separately signed public image route.
 
 Startup migrates legacy inline images from every conversation branch in bounded
 batches, clearing their old base64 columns after the new asset has been saved.
-Unreadable legacy attachments move to `legacy_attachment_quarantine` in the
-Chat database with their original bytes and failure reason, so a damaged image
-does not prevent startup. Deleting messages or conversations reclaims their
-images only after checking all remaining branches, forked conversations, and
-live draft leases. Back up the Chat and asset databases together.
+Unreadable legacy attachments move to `legacy_attachment_quarantine` in the Chat
+database with their original bytes and failure reason, so a damaged image does
+not prevent startup. Deleting messages or conversations reclaims their images
+only after checking all remaining branches, forked conversations, and live draft
+leases. Back up the Chat and asset databases together.
 
 Set `HEIMDALL_PUBLIC_BASE_URL` to the gateway's upstream-reachable HTTP(S)
 origin (for example, `https://gateway.example`) to send images to providers by
 ten-minute signed links. The configured URL must have no path, query, fragment,
-or credentials. These links authorize only one asset and expire on restart;
-the next request creates fresh links. Without a public origin, the server reads
-the asset locally and adds its bytes only to the upstream request, preserving
+or credentials. These links authorize only one asset and expire on restart; the
+next request creates fresh links. Without a public origin, the server reads the
+asset locally and adds its bytes only to the upstream request, preserving
 offline/private deployments. Neither mode accepts arbitrary remote image URLs.
 
 The Chat core owns conversation history, generation, and cancellation.
@@ -178,7 +214,7 @@ persistent stores belong to the executable composition.
 | `HEIMDALL_KV_PATH`                                     | Control-plane configuration database                                            |
 | `HEIMDALL_REQUESTS_PATH`                               | Request, frame, and usage SQLite database; defaults to `./data/requests.sqlite` |
 | `HEIMDALL_CHAT_PATH`                                   | Chat SQLite database; defaults to `./data/chat.sqlite`                          |
-| `HEIMDALL_CHAT_ASSETS_PATH`                            | Image asset SQLite database; defaults to `./data/chat-assets.sqlite`             |
+| `HEIMDALL_CHAT_ASSETS_PATH`                            | Image asset SQLite database; defaults to `./data/chat-assets.sqlite`            |
 | `HEIMDALL_PUBLIC_BASE_URL`                             | Explicit HTTP(S) origin for signed upstream image links; unset keeps local mode |
 | `HEIMDALL_ADMIN_TOKEN`                                 | Bearer token protecting management and chat data                                |
 | `HEIMDALL_OPENAI_BASE_URL` / `HEIMDALL_OPENAI_API_KEY` | Initial OpenAI-compatible source configuration                                  |
@@ -314,13 +350,14 @@ bounded, cancelable host contracts. Chat consumes the host-provided tool
 registry without depending on particular tool names or providers.
 
 The built-in [workspace tool plugin](plugins/tool-workspace/README.md) adds
-directory listing, glob lookup, literal search, single/batch UTF-8 reads,
-file metadata, directory creation, revision-checked writes, moves, deletion,
-exact text edits and unified diff patches to Chat. Open the plugin's Configure
-dialog in the operator console to select a server directory and read-only mode.
+directory listing, glob lookup, literal search, single/batch UTF-8 reads, file
+metadata, directory creation, revision-checked writes, moves, deletion, exact
+text edits and unified diff patches to Chat. Open the plugin's Configure dialog
+in the operator console to select a server directory and read-only mode.
 Settings are persisted and apply to subsequent Chat requests without a restart;
 an empty directory setting exposes no file tools. The plugin uses the existing
-global and per-conversation tool switches and does not read environment variables.
+global and per-conversation tool switches and does not read environment
+variables.
 
 Third-party package bytes are verified and stored as immutable snapshots.
 Verification is separate from execution: a stored package is never imported

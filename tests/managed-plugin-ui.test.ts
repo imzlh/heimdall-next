@@ -6,7 +6,7 @@ import { loadBuiltinComposition } from "@heimdall/core/composition/builtins.ts";
 import { loadRuntimeUiContributions } from "@heimdall/core/composition/ui-contributions.ts";
 import { createManagedPlugins } from "@heimdall/core/composition/managed-plugins.ts";
 import { DenoKvConfigStore } from "@heimdall/core/storage/deno-kv.ts";
-import { ChatPageView } from "@heimdall/core/web/pages/chat.tsx";
+import { ChatSlots } from "@heimdall/core/web/components/chat-slots.tsx";
 
 Deno.test("offline installed plugin declares real Chat slots that restore, disable and uninstall with its lifecycle", async () => {
     const kv = await Deno.openKv(":memory:");
@@ -72,7 +72,10 @@ Deno.test("offline installed plugin declares real Chat slots that restore, disab
             id,
             name: "动态会话插件",
         }]);
-        const html = ChatPageView({
+        // Exercise the installed contribution's schema renderer directly;
+        // the Chat page no longer duplicates capability cards in its sidebar.
+        const html = ChatSlots({
+            slot: "chat.sidebar",
             initial: {
                 conversations: [],
                 conversation: null,
@@ -82,7 +85,7 @@ Deno.test("offline installed plugin declares real Chat slots that restore, disab
                 available: true,
                 extensions,
             },
-        }).toString();
+        })!.toString();
         assertStringIncludes(html, "来自离线安装包的能力说明");
         assertStringIncludes(html, 'data-ui-mode="schema"');
         assertFalse(html.includes("<script"));

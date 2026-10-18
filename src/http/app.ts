@@ -22,6 +22,13 @@ import type { UiPolicy } from "@heimdall/admin-contracts/ui.ts";
 import { createAdminWebRoutes } from "./admin-web.tsx";
 import type { UiActionRegistry } from "../web/server/ui-actions.ts";
 import type { UiCatalogOptions } from "../web/server/ui-catalog.ts";
+import {
+    assertDesktopRequest,
+    desktopOrigin,
+    type DesktopSessionOptions,
+    validateDesktopSession,
+} from "../web/server/desktop-session.ts";
+import { requestError } from "../web/server/request.ts";
 
 /** Values attached to a request while it crosses the HTTP boundary. */
 export type ServerEnv = {
@@ -69,6 +76,8 @@ export interface ServerAppOptions {
     readonly adminManagement?: AdminManagementOptions;
     /** Require this bearer token for management API requests when set. */
     readonly adminAuthToken?: string;
+    /** Explicit native host session; the embedding listener must bind to loopback. */
+    readonly desktopSession?: DesktopSessionOptions;
     /** Override the server-rendered operator UI when embedding the service. */
     readonly adminUiRoutes?: MountableApp;
     /** Self-hosted browser assets produced by `deno task build:web`. */
@@ -108,6 +117,20 @@ export interface ServerAppOptions {
  */
 export function createServerApp(options: ServerAppOptions = {}): ServerApp {
     const app = new Hono<ServerEnv>();
+
+    if (options.desktopSession !== undefined) {
+        const desktop = options.desktopSession;
+        validateDesktopSession(desktop, options.adminAuthToken);
+        app.use("*", async (context, next) => {
+            try {
+                assertDesktopRequest(context.req.raw, desktop);
+            } catch (error) {
+                return requestError(error);
+            }
+            // Preserve native WebSocket upgrade responses without wrapping them.
+            return await next();
+        });
+    }
 
     // Outermost so it also records 404s and errors; it never reads the body.
     if (options.accessLog) app.use("*", createAccessLog());
@@ -233,6 +256,7 @@ export function createServerApp(options: ServerAppOptions = {}): ServerApp {
     const webRoutes = options.adminUiRoutes ?? createAdminWebRoutes({
         assetsRoot: options.adminAssetsRoot,
         adminAuthToken: options.adminAuthToken,
+        desktopSession: options.desktopSession,
         contributions: options.adminUiContributions,
         policy: options.adminUiPolicy,
         actions: options.adminUiActions,
@@ -240,12 +264,38 @@ export function createServerApp(options: ServerAppOptions = {}): ServerApp {
         sourcePlugins: options.adminUiSourcePlugins,
         presetPages: options.adminPresetPages,
         chatRoutes: options.chatRoutes,
-        dispatch: (request) => Promise.resolve(app.fetch(request)),
+        dispatch: (request) => {
+            // Catalog readers use a synthetic localhost URL. Pin these trusted
+            // in-process dispatches to the same origin as the native listener.
+            if (options.desktopSession !== undefined) {
+                const url = new URL(request.url);
+                const target = new URL(
+                    `${url.pathname}${url.search}`,
+                    desktopOrigin(options.desktopSession),
+                );
+                const headers = new Headers(request.headers);
+                headers.set("host", target.host);
+                request = new Request(target, {
+                    ...requestInit(request),
+                    headers,
+                });
+            }
+            return Promise.resolve(app.fetch(request));
+        },
     });
     assertNoRouteConflicts(webRoutes, "admin-ui");
     mountRouteGroup(app, "/", webRoutes, requestIdMiddleware);
 
     return app;
+}
+
+function requestInit(request: Request): RequestInit {
+    return {
+        method: request.method,
+        body: request.body,
+        redirect: request.redirect,
+        signal: request.signal,
+    };
 }
 
 const requestIdMiddleware: MiddlewareHandler<ServerEnv> = async (

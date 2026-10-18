@@ -9,6 +9,7 @@ import { mountRouteGroup } from "./route-validation.ts";
 import { AdminShell } from "../web/components/shell.tsx";
 import { type ConsolePage, ConsolePageView } from "../web/pages/console.tsx";
 import { createWebSession } from "../web/server/session.ts";
+import type { DesktopSessionOptions } from "../web/server/desktop-session.ts";
 import { createChatWebSession } from "../web/server/chat-session.ts";
 import { loadChatSnapshot } from "../web/server/chat-snapshot.ts";
 import {
@@ -36,6 +37,7 @@ import {
 
 export interface AdminWebOptions extends UiCatalogOptions {
     readonly assetsRoot?: string;
+    readonly desktopSession?: DesktopSessionOptions;
     readonly policy?: UiPolicy;
     readonly actions?: UiActionRegistry;
     /** Reuse the chat handlers with the browser session, including native WS upgrades. */
@@ -46,6 +48,10 @@ export interface AdminWebOptions extends UiCatalogOptions {
 export function createAdminWebRoutes(options: AdminWebOptions): ServerApp {
     const app = new Hono<ServerEnv>();
     const session = createWebSession(options);
+    if (session.desktopBootstrap && session.desktopBootstrapDocument) {
+        app.get("/admin/desktop/bootstrap", session.desktopBootstrapDocument);
+        app.post("/admin/desktop/bootstrap", session.desktopBootstrap);
+    }
     const catalog = createUiCatalogLoader(options);
     const chatExtensions = createChatExtensionLoader({
         ...options,
@@ -111,6 +117,7 @@ export function createAdminWebRoutes(options: AdminWebOptions): ServerApp {
         documentHeaders(context);
         return context.html(
             "<!doctype html>" + (<ChatShell
+                desktop={options.desktopSession !== undefined}
                 scripts={
                     <>
                         <script id="heimdall-chat-boot" type="application/json">
@@ -233,11 +240,13 @@ export function createAdminWebRoutes(options: AdminWebOptions): ServerApp {
                 schemas,
                 presetPages,
                 authenticated: authorized,
+                desktop: options.desktopSession !== undefined,
             };
             documentHeaders(context);
             return context.html(
                 "<!doctype html>" +
                     (<AdminShell
+                        desktop={options.desktopSession !== undefined}
                         title="Heimdall · 运维控制台"
                         nav={nav}
                         active={page === "plugin"
@@ -263,6 +272,7 @@ export function createAdminWebRoutes(options: AdminWebOptions): ServerApp {
                     >
                         <div id="heimdall-console">
                             <ConsolePageView
+                                desktop={options.desktopSession !== undefined}
                                 snapshot={snapshot}
                                 page={page}
                                 tab={tab}

@@ -1,16 +1,26 @@
-/* Page frame follows the floating sidebar of the original Heimdall. */
+/* The same window-sized workspace runs in a webview and a browser tab. */
+.admin-shell {
+    --radius: 14px;
+    --radius-sm: 10px;
+    --radius-control: 8px;
+    display: grid;
+    grid-template-columns: 216px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+}
 .admin-sidebar {
-    position: fixed;
-    inset: 12px auto 12px 12px;
+    position: relative;
     z-index: 10;
     display: flex;
     flex-direction: column;
-    gap: 28px;
-    width: 224px;
-    padding: 24px 14px 14px;
-    border-radius: 24px;
+    gap: 24px;
+    min-height: 0;
+    min-width: 0;
+    padding: 22px 12px 12px;
+    border-right: 1px solid var(--border);
     background: var(--sidebar-bg);
-    box-shadow: 4px 0 24px rgb(0 0 0 / 4%);
 }
 .admin-header {
     padding: 0 6px;
@@ -18,7 +28,7 @@
 .admin-brand {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 10px;
     color: var(--text);
     font-size: 16px;
     font-weight: 700;
@@ -41,7 +51,7 @@
     height: 36px;
     flex: 0 0 36px;
     border: 1px solid var(--border-strong);
-    border-radius: 14px;
+    border-radius: 11px;
     background: var(--text);
     color: var(--bg);
     font-size: 15px;
@@ -54,6 +64,10 @@
     gap: 5px;
     min-height: 0;
     overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    padding: 3px;
+    margin: -3px;
 }
 .host-badge {
     padding: 0 12px 8px;
@@ -67,8 +81,8 @@
     align-items: center;
     gap: 11px;
     flex-shrink: 0;
-    min-height: 42px;
-    padding: 10px 13px;
+    min-height: 38px;
+    padding: 8px 11px;
     border: 1px solid transparent;
     border-radius: var(--radius-control);
     color: var(--muted);
@@ -149,35 +163,49 @@
     letter-spacing: .08em;
 }
 .admin-main {
-    margin-left: 248px;
-    padding: 20px clamp(24px, 2.5vw, 40px) 48px;
+    padding: 0 clamp(20px, 2.5vw, 40px) 32px;
+    min-height: 0;
     min-width: 0;
+    overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scroll-padding-top: 76px;
 }
 .console-content {
     display: flex;
     flex-direction: column;
-    gap: 20px;
-    max-width: 1320px;
+    gap: 22px;
+    max-width: 1480px;
     margin: 0 auto;
     min-width: 0;
 }
 .console-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 9;
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 16px;
-    min-height: 42px;
-    padding-bottom: 12px;
+    min-height: 62px;
+    padding-block: 12px;
     border-bottom: 1px solid var(--border);
+    background: var(--bg);
+    box-shadow: 0 -1px var(--bg);
+    flex-shrink: 0;
 }
 .breadcrumb {
+    min-width: 0;
     color: var(--subtle);
     font-size: 12px;
+    overflow-wrap: anywhere;
 }
 .topbar-actions {
     display: flex;
     align-items: center;
     gap: 7px;
+    flex-shrink: 0;
 }
 .topbar-actions .text-button {
     min-height: 32px;
@@ -189,7 +217,7 @@
 .console-panels {
     display: flex;
     flex-direction: column;
-    gap: 20px;
+    gap: 18px;
     min-width: 0;
 }
 .page-heading {
@@ -197,11 +225,18 @@
     align-items: center;
     justify-content: space-between;
     gap: 20px;
-    min-height: 64px;
+    min-height: 58px;
+}
+.page-heading > div:first-child {
+    min-width: 0;
 }
 .page-heading h1 {
     margin: 0 0 6px;
-    font-size: 26px;
+    font-size: 24px;
+    overflow-wrap: anywhere;
+}
+.page-heading h1:focus {
+    outline: none;
 }
 .page-heading p:not(.eyebrow) {
     color: var(--subtle);
@@ -209,6 +244,8 @@
 }
 .page-heading > .config-actions {
     flex-shrink: 0;
+    justify-content: flex-end;
+    max-width: 100%;
 }
 .page-heading .eyebrow {
     display: none;
@@ -254,24 +291,28 @@
     }
 }
 @media (max-width: 1100px) {
-    .admin-sidebar {
-        width: 204px;
-        padding-inline: 13px;
+    .admin-shell {
+        grid-template-columns: 192px minmax(0, 1fr);
     }
     .admin-main {
-        margin-left: 226px;
-        padding-inline: 24px;
+        padding-inline: 20px;
+    }
+    .page-heading {
+        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 14px;
     }
 }
 @media (max-width: 800px) {
+    .admin-shell {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: auto minmax(0, 1fr);
+    }
     .admin-sidebar {
-        position: relative;
-        inset: auto;
-        width: auto;
-        margin: 10px;
-        padding: 16px 14px 10px;
-        gap: 14px;
-        border-radius: 20px;
+        padding: 12px 16px 10px;
+        gap: 10px;
+        border-right: 0;
+        border-bottom: 1px solid var(--border);
     }
     .admin-header {
         padding: 0 4px;
@@ -281,7 +322,26 @@
         flex: none;
         overflow-x: auto;
         gap: 5px;
-        padding-bottom: 2px;
+        padding-bottom: 3px;
+    }
+    .admin-brand {
+        font-size: 14px;
+    }
+    .admin-brand > span:last-child {
+        display: flex;
+        align-items: baseline;
+        flex-wrap: wrap;
+        gap: 10px;
+    }
+    .admin-brand small {
+        margin-top: 0;
+    }
+    .brand-mark {
+        width: 28px;
+        height: 28px;
+        flex-basis: 28px;
+        border-radius: 8px;
+        font-size: 12px;
     }
     .admin-nav-link {
         min-height: 38px;
@@ -305,15 +365,19 @@
         display: none;
     }
     .admin-main {
-        margin-left: 0;
-        padding: 14px 22px 40px;
+        padding: 0 20px 24px;
+        scroll-padding-top: 68px;
+    }
+    .console-toolbar {
+        min-height: 54px;
+        padding-block: 8px;
     }
     .console-content,
     .console-panels {
         gap: 18px;
     }
     .page-heading h1 {
-        font-size: 25px;
+        font-size: 23px;
     }
 }
 @media (max-width: 520px) {
@@ -321,7 +385,6 @@
         padding-inline: 16px;
     }
     .console-toolbar {
-        flex-wrap: wrap;
         gap: 12px;
     }
     .breadcrumb {
@@ -334,14 +397,44 @@
     }
     .page-heading > .config-actions {
         width: 100%;
+        justify-content: flex-start;
     }
     .page-heading h1 {
-        font-size: 24px;
+        font-size: 22px;
     }
     .topbar-actions {
         margin-left: auto;
     }
     .topbar-actions .text-button {
         padding-inline: 10px;
+    }
+}
+@media (max-height: 580px) and (min-width: 801px) {
+    .admin-sidebar {
+        gap: 16px;
+        padding-top: 16px;
+    }
+    .sidebar-footer {
+        padding-top: 10px;
+    }
+    .console-toolbar {
+        min-height: 52px;
+        padding-block: 7px;
+    }
+}
+@media print {
+    .admin-shell {
+        display: block;
+        height: auto;
+        overflow: visible;
+    }
+    .admin-sidebar,
+    .console-toolbar,
+    .skip-link {
+        display: none;
+    }
+    .admin-main {
+        overflow: visible;
+        padding: 0;
     }
 }

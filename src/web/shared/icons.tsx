@@ -63,6 +63,7 @@ const icons = {
     account: UserRoundCog,
     send: ArrowUp,
     stop: Square,
+    window: Square,
     attach: Paperclip,
     copy: Copy,
     check: Check,

@@ -26,6 +26,7 @@ import {
 
 export type { ConsolePage } from "../shared/page-info.ts";
 export interface ConsolePageProps {
+    readonly desktop?: boolean;
     readonly snapshot: ConsoleSnapshot;
     readonly page: ConsolePage;
     readonly tab?: string;
@@ -50,7 +51,7 @@ export function ConsolePageView(props: ConsolePageProps) {
             <div class="console-toolbar">
                 <span class="breadcrumb">管理端 / {pageInfo.label}</span>
                 <div class="topbar-actions">
-                    {!dashboard.authRequired && (
+                    {!dashboard.authRequired && !props.desktop && (
                         <form method="post" action="/admin/logout">
                             <button
                                 class="icon-button"

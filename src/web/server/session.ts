@@ -1,5 +1,12 @@
 import type { Context } from "hono";
 import {
+    assertDesktopRequest,
+    createDesktopBootstrap,
+    type DesktopSessionOptions,
+    equalToken,
+    validateDesktopSession,
+} from "./desktop-session.ts";
+import {
     assertSameOrigin,
     readBoundedBody,
     WebRequestError,
@@ -11,6 +18,7 @@ const MAX_LOGIN_BYTES = 16_384;
 
 export interface WebSessionOptions {
     readonly adminAuthToken?: string;
+    readonly desktopSession?: DesktopSessionOptions;
     /** Defaults to a process-local random secret; restarting expires sessions. */
     readonly signingSecret?: string;
     readonly now?: () => number;
@@ -20,10 +28,15 @@ export interface WebSession {
     authorized(context: Context): Promise<boolean>;
     login(context: Context): Promise<Response>;
     logout(context: Context): Response;
+    readonly desktopBootstrap?: (context: Context) => Promise<Response>;
+    readonly desktopBootstrapDocument?: (context: Context) => Response;
 }
 
 /** The web session never changes bearer authentication on management routes. */
 export function createWebSession(options: WebSessionOptions = {}): WebSession {
+    if (options.desktopSession !== undefined) {
+        validateDesktopSession(options.desktopSession, options.adminAuthToken);
+    }
     const expected = options.adminAuthToken?.trim();
     const secret = options.signingSecret ??
         `${crypto.randomUUID()}${crypto.randomUUID()}`;
@@ -35,7 +48,35 @@ export function createWebSession(options: WebSessionOptions = {}): WebSession {
         ["sign", "verify"],
     );
     const now = options.now ?? Date.now;
+    const issueSession = async (context: Context): Promise<void> => {
+        // Native windows survive in the tray. Their cookie is a browser session
+        // cookie, signed by this process; restarting the host invalidates it.
+        const expires = options.desktopSession === undefined
+            ? now() + SESSION_SECONDS * 1000
+            : 0;
+        const value = `v1.${expires}.${crypto.randomUUID()}`;
+        const signature = await crypto.subtle.sign(
+            "HMAC",
+            await signingKey,
+            new TextEncoder().encode(value),
+        );
+        const encoded = btoa(
+            String.fromCharCode(...new Uint8Array(signature)),
+        ).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
+        setSessionCookie(
+            context,
+            `${value}.${encoded}`,
+            options.desktopSession === undefined ? SESSION_SECONDS : undefined,
+        );
+    };
     const authorized = async (context: Context): Promise<boolean> => {
+        if (options.desktopSession !== undefined) {
+            try {
+                assertDesktopRequest(context.req.raw, options.desktopSession);
+            } catch {
+                return false;
+            }
+        }
         if (expected === undefined) return true;
         if (expected.length === 0) return false;
         const authorization = context.req.header("authorization") ?? "";
@@ -56,17 +97,35 @@ export function createWebSession(options: WebSessionOptions = {}): WebSession {
                 decodeSignature(match[3]!),
                 new TextEncoder().encode(match[1]!),
             );
-            return valid && Number.isSafeInteger(expires) && expires > now() &&
+            if (!valid || !Number.isSafeInteger(expires)) return false;
+            if (options.desktopSession !== undefined) return expires === 0;
+            return expires > now() &&
                 expires <= now() + SESSION_SECONDS * 1000;
         } catch {
             return false;
         }
     };
 
+    const bootstrap = options.desktopSession === undefined
+        ? undefined
+        : createDesktopBootstrap(
+            options.desktopSession,
+            issueSession,
+            now,
+            expected!,
+        );
     return {
         authorized,
+        desktopBootstrap: bootstrap?.exchange,
+        desktopBootstrapDocument: bootstrap?.document,
         async login(context) {
             try {
+                if (options.desktopSession !== undefined) {
+                    assertDesktopRequest(
+                        context.req.raw,
+                        options.desktopSession,
+                    );
+                }
                 assertSameOrigin(context.req.raw);
                 const contentType = context.req.header("content-type")
                     ?.split(";")[0]?.trim().toLowerCase();
@@ -103,26 +162,7 @@ export function createWebSession(options: WebSessionOptions = {}): WebSession {
                         "管理令牌无效，请重新输入。",
                     );
                 }
-                const value = `v1.${
-                    now() + SESSION_SECONDS * 1000
-                }.${crypto.randomUUID()}`;
-                const signature = await crypto.subtle.sign(
-                    "HMAC",
-                    await signingKey,
-                    new TextEncoder().encode(value),
-                );
-                const encoded = btoa(
-                    String.fromCharCode(...new Uint8Array(signature)),
-                )
-                    .replaceAll("+", "-").replaceAll("/", "_").replace(
-                        /=+$/,
-                        "",
-                    );
-                setSessionCookie(
-                    context,
-                    `${value}.${encoded}`,
-                    SESSION_SECONDS,
-                );
+                await issueSession(context);
                 context.header("cache-control", "no-store");
                 return context.redirect(
                     params.get("returnTo") === "/admin/chat"
@@ -136,6 +176,12 @@ export function createWebSession(options: WebSessionOptions = {}): WebSession {
         },
         logout(context) {
             try {
+                if (options.desktopSession !== undefined) {
+                    assertDesktopRequest(
+                        context.req.raw,
+                        options.desktopSession,
+                    );
+                }
                 assertSameOrigin(context.req.raw);
                 setSessionCookie(context, "", 0);
                 context.header("cache-control", "no-store");
@@ -164,34 +210,16 @@ function decodeSignature(value: string): Uint8Array<ArrayBuffer> {
 function setSessionCookie(
     context: Context,
     value: string,
-    maxAge: number,
+    maxAge: number | undefined,
 ): void {
     const secure = new URL(context.req.url).protocol === "https:"
         ? "; Secure"
         : "";
+    const age = maxAge === undefined ? "" : `; Max-Age=${maxAge}`;
     context.header(
         "set-cookie",
-        `${COOKIE_NAME}=${value}; Path=/admin; Max-Age=${maxAge}; HttpOnly; SameSite=Strict${secure}`,
+        `${COOKIE_NAME}=${value}; Path=/admin${age}; HttpOnly; SameSite=Strict${secure}`,
     );
-}
-
-/** Fixed-size digests keep token comparison independent of a matching prefix. */
-async function equalToken(
-    supplied: string,
-    expected: string,
-): Promise<boolean> {
-    const encoder = new TextEncoder();
-    const [left, right] = await Promise.all([
-        crypto.subtle.digest("SHA-256", encoder.encode(supplied)),
-        crypto.subtle.digest("SHA-256", encoder.encode(expected)),
-    ]);
-    const a = new Uint8Array(left);
-    const b = new Uint8Array(right);
-    let difference = 0;
-    for (let index = 0; index < a.length; index++) {
-        difference |= a[index]! ^ b[index]!;
-    }
-    return difference === 0;
 }
 
 function loginError(error: unknown): Response {

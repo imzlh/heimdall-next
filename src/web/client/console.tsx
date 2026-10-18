@@ -57,6 +57,7 @@ export function Console(
         policy,
         onAction,
         authenticated = false,
+        desktop = false,
         onConnect,
         onLogout,
         loadUiCatalog,
@@ -108,6 +109,8 @@ export function Console(
     // The system-log page teleports its level filter into the header row,
     // left of the shared refresh button.
     const logFilterSlot = useRef<HTMLDivElement | null>(null);
+    const pageHeading = useRef<HTMLHeadingElement | null>(null);
+    const navigationPending = useRef(false);
 
     useEffect(() => {
         const onClick = (event: MouseEvent) => {
@@ -119,25 +122,50 @@ export function Console(
             const link = target?.closest?.("a") ?? null;
             if (
                 !link ||
-                !(link.getAttribute("class") ?? "").includes("admin-nav-link")
+                !(link.getAttribute("class") ?? "").split(/\s+/).includes(
+                    "admin-nav-link",
+                ) || link.hasAttribute("download") ||
+                (link.getAttribute("target") &&
+                    link.getAttribute("target") !== "_self")
             ) return;
             const href = link.getAttribute("href") ?? "";
-            const url = new URL(href, globalThis.location.href);
+            let url: URL;
+            try {
+                url = new URL(href, globalThis.location.href);
+            } catch {
+                return;
+            }
             if (url.origin !== new URL(globalThis.location.href).origin) return;
             if (url.pathname !== "/admin") return;
             const view = parseConsoleView(url);
             if (!view) return;
             event.preventDefault();
-            globalThis.history.replaceState(
-                null,
-                "",
-                url.pathname + url.search,
-            );
+            if (url.href !== globalThis.location.href) {
+                globalThis.history.pushState(
+                    null,
+                    "",
+                    url.pathname + url.search + url.hash,
+                );
+                navigationPending.current = true;
+            }
+            setActivePage(view);
+            setActiveTab(url.searchParams.get("tab") ?? undefined);
+        };
+        const onPopState = () => {
+            const url = new URL(globalThis.location.href);
+            if (url.pathname !== "/admin") return;
+            const view = parseConsoleView(url);
+            if (!view) return;
+            navigationPending.current = true;
             setActivePage(view);
             setActiveTab(url.searchParams.get("tab") ?? undefined);
         };
         document.addEventListener("click", onClick);
-        return () => document.removeEventListener("click", onClick);
+        globalThis.addEventListener("popstate", onPopState);
+        return () => {
+            document.removeEventListener("click", onClick);
+            globalThis.removeEventListener("popstate", onPopState);
+        };
     }, []);
 
     const activeContributions = dashboard.authRequired
@@ -151,6 +179,13 @@ export function Console(
         item.slot === "nav.tab" && uiContributionKey(item) === activeTab
     );
     const pageInfo = consolePageInfo(activePage, activePlugin[0]?.title);
+    useEffect(() => {
+        document.title = `Heimdall · ${pageInfo.label}`;
+        if (!navigationPending.current) return;
+        navigationPending.current = false;
+        document.getElementById("admin-main")?.scrollTo({ top: 0 });
+        pageHeading.current?.focus({ preventScroll: true });
+    }, [activePage, activeTab, pageInfo.label]);
     // Mirror the client-side page onto the SSR nav links.
     useEffect(() => {
         const key = activePage === "plugin"
@@ -210,12 +245,16 @@ export function Console(
             if (document.querySelector("dialog[open]")) return;
             if (event.key === "/") {
                 event.preventDefault();
-                globalThis.history.replaceState(
-                    null,
-                    "",
-                    "/admin?view=channels",
-                );
+                const url = new URL(globalThis.location.href);
+                if (parseConsoleView(url) !== "channels") {
+                    globalThis.history.pushState(
+                        null,
+                        "",
+                        "/admin?view=channels",
+                    );
+                }
                 setActivePage("channels");
+                setActiveTab(undefined);
                 queueMicrotask(() =>
                     document.getElementById("channel-search")?.focus()
                 );
@@ -285,7 +324,7 @@ export function Console(
 
     return (
         <div class="console-content">
-            <div class="console-toolbar">
+            <header class="console-toolbar" aria-label="工作区工具栏">
                 <span class="breadcrumb">
                     管理端 / {pageInfo.label}
                 </span>
@@ -304,7 +343,7 @@ export function Console(
                     >
                         <Icon name={theme === "dark" ? "sun" : "moon"} />
                     </button>
-                    {connected && (
+                    {connected && !desktop && (
                         <button
                             type="button"
                             class="icon-button"
@@ -317,12 +356,12 @@ export function Console(
                         </button>
                     )}
                 </div>
-            </div>
+            </header>
             <div class="console-panels" aria-busy={loading ? "true" : "false"}>
                 <div class="page-heading">
                     <div>
                         <p class="eyebrow">工作空间</p>
-                        <h1>
+                        <h1 ref={pageHeading} tabindex={-1}>
                             {pageInfo.label}
                         </h1>
                         <p>
@@ -352,7 +391,7 @@ export function Console(
                             class="icon-button"
                             disabled={loading}
                             aria-label={loading ? "刷新中…" : "刷新"}
-                            title={loading ? "刷新中…" : "刷新"}
+                            title={loading ? "刷新中…" : "刷新（R）"}
                             onClick={() => void refresh()}
                         >
                             <Icon name="refresh" />

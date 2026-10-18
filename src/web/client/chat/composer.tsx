@@ -45,6 +45,7 @@ export function ChatComposer(
         capabilities?: Child;
     },
 ) {
+    const composerRegion = useRef<HTMLDivElement | null>(null);
     const fileInput = useRef<HTMLInputElement | null>(null);
     const draftInput = useRef<HTMLTextAreaElement | null>(null);
     const assetsButton = useRef<HTMLButtonElement | null>(null);
@@ -99,6 +100,33 @@ export function ChatComposer(
         };
     }, []);
 
+    // A desktop window has no surrounding browser UI: dropping a file onto the
+    // transcript must use the same attachment path and never replace the app.
+    useEffect(() => {
+        const enter = (event: DragEvent) => {
+            if (!event.defaultPrevented) dragEnter(event);
+        };
+        const over = (event: DragEvent) => {
+            if (!event.defaultPrevented) dragOver(event);
+        };
+        const leave = (event: DragEvent) => {
+            if (!event.defaultPrevented) dragLeave(event);
+        };
+        const receive = (event: DragEvent) => {
+            if (!event.defaultPrevented) drop(event);
+        };
+        globalThis.addEventListener("dragenter", enter);
+        globalThis.addEventListener("dragover", over);
+        globalThis.addEventListener("dragleave", leave);
+        globalThis.addEventListener("drop", receive);
+        return () => {
+            globalThis.removeEventListener("dragenter", enter);
+            globalThis.removeEventListener("dragover", over);
+            globalThis.removeEventListener("dragleave", leave);
+            globalThis.removeEventListener("drop", receive);
+        };
+    }, [disabled, state.sending, state.attachmentsBusy, controller]);
+
     // Drafts also change after server acknowledgement, failed sends and history
     // selection. Resize those updates too, not just physical keystrokes.
     useLayoutEffect(() => {
@@ -126,11 +154,29 @@ export function ChatComposer(
             });
         observer?.observe(input);
         globalThis.addEventListener("resize", resize);
+        // A restored draft may be measured before the initial DOM is attached.
+        // Re-measure after paint even when its width and text stay unchanged.
+        resize();
         return () => {
             observer?.disconnect();
             globalThis.removeEventListener("resize", resize);
             cancelAnimationFrame(frame);
         };
+    }, []);
+
+    useEffect(() => {
+        const region = composerRegion.current;
+        const main = region?.parentElement;
+        if (!region || !main || typeof ResizeObserver === "undefined") return;
+        const measure = () =>
+            main.style.setProperty(
+                "--chat-composer-height",
+                `${region.getBoundingClientRect().height}px`,
+            );
+        const observer = new ResizeObserver(measure);
+        observer.observe(region);
+        measure();
+        return () => observer.disconnect();
     }, []);
 
     useEffect(() => {
@@ -205,6 +251,10 @@ export function ChatComposer(
 
     function attachFiles(files: readonly File[]) {
         if (!files.length) return;
+        if (document.body.querySelector("dialog[open]")) {
+            setInputNotice("请先关闭弹窗再添加图片");
+            return;
+        }
         if (disabled) {
             setInputNotice(
                 state.sending
@@ -248,19 +298,25 @@ export function ChatComposer(
         if (!hasDraggedFiles(event)) return;
         event.preventDefault();
         dragDepth.current = (dragDepth.current ?? 0) + 1;
-        if (!disabled) setDragging(true);
+        if (!disabled && !document.body.querySelector("dialog[open]")) {
+            setDragging(true);
+        }
     }
 
     function dragOver(event: DragEvent) {
         if (!hasDraggedFiles(event)) return;
         event.preventDefault();
         if (event.dataTransfer) {
-            event.dataTransfer.dropEffect = disabled ? "none" : "copy";
+            event.dataTransfer.dropEffect =
+                disabled || document.body.querySelector("dialog[open]")
+                    ? "none"
+                    : "copy";
         }
     }
 
     function dragLeave(event: DragEvent) {
         if (!hasDraggedFiles(event)) return;
+        event.preventDefault();
         dragDepth.current = Math.max(0, (dragDepth.current ?? 0) - 1);
         if (!dragDepth.current) setDragging(false);
     }
@@ -322,7 +378,7 @@ export function ChatComposer(
         : "Enter 发送 · Shift + Enter 换行 · 支持粘贴或拖入图片";
 
     return (
-        <div class="chat-composer-region">
+        <div ref={composerRegion} class="chat-composer-region">
             {capabilities}
             {state.suggestions.length > 0 && !state.sending && (
                 <div class="chat-suggestions" aria-label="推荐问题">
@@ -445,7 +501,7 @@ export function ChatComposer(
                         aria-describedby={inputNotice
                             ? "chat-composer-hint chat-composer-notice"
                             : "chat-composer-hint"}
-                        aria-keyshortcuts="Enter Shift+Enter Control+Enter Meta+Enter"
+                        aria-keyshortcuts="Enter Shift+Enter Control+Enter Meta+Enter Control+Shift+L Meta+Shift+L"
                     />
                     <div class="chat-composer-action-slot">
                         <button
@@ -569,13 +625,18 @@ export function ChatComposer(
                         ))}
                     </ul>
                 </div>
-                {dragging && (
-                    <div class="chat-composer-drop" role="status">
-                        <Icon name="image" />
-                        <span>松开以添加图片</span>
-                    </div>
-                )}
             </form>
+            {dragging && (
+                <div class="chat-window-drop" role="status">
+                    <div>
+                        <Icon name="image" size={32} />
+                        <strong>松开以添加图片</strong>
+                        <span>
+                            PNG、JPEG、WebP、GIF · 最多 4 张，每张 5 MiB
+                        </span>
+                    </div>
+                </div>
+            )}
             <div class="chat-composer-meta">
                 {inputNotice && (
                     <p

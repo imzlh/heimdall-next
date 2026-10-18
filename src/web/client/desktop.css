@@ -1,0 +1,177 @@
+[data-desktop="true"] {
+    --desktop-titlebar-height: 38px;
+}
+[data-desktop="true"] .admin-shell {
+    grid-template-rows: var(--desktop-titlebar-height) minmax(0, 1fr);
+}
+[data-desktop="true"] .chat-body {
+    display: grid;
+    grid-template-rows: var(--desktop-titlebar-height) minmax(0, 1fr);
+}
+[data-desktop="true"] #heimdall-chat {
+    min-height: 0;
+    min-width: 0;
+}
+.desktop-titlebar {
+    position: relative;
+    z-index: 50;
+    grid-column: 1 / -1;
+    display: flex;
+    align-items: stretch;
+    min-width: 0;
+    height: var(--desktop-titlebar-height);
+    border-bottom: 1px solid var(--border);
+    background: var(--sidebar-bg);
+    color: var(--text);
+    user-select: none;
+}
+.desktop-drag-region {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 12px;
+    min-width: 0;
+    padding-inline: 5px 16px;
+    touch-action: none;
+    cursor: default;
+}
+.desktop-window-brand {
+    flex-shrink: 0;
+    font-size: 12px;
+    font-weight: 650;
+}
+.desktop-workspace-name {
+    overflow: hidden;
+    color: var(--subtle);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.desktop-pinned {
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--accent);
+    background: var(--accent-soft);
+    font-size: 10px;
+}
+.desktop-window-controls {
+    display: flex;
+    flex-shrink: 0;
+}
+.desktop-window-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--muted);
+}
+.desktop-menu-button {
+    width: 38px;
+}
+.desktop-window-button:hover:not(:disabled) {
+    color: var(--text);
+    background: var(--surface-raised);
+}
+.desktop-window-button:focus-visible {
+    outline-offset: -3px;
+}
+.desktop-hide-button:hover:not(:disabled) {
+    color: #fff;
+    background: #c42b36;
+}
+/* Hit areas stay transparent and use only the outer 4px of the client area.
+   Clipped corners preserve the adjacent window buttons' clickable interiors. */
+.desktop-resize-handle {
+    position: fixed;
+    z-index: 1;
+    pointer-events: none;
+    touch-action: none;
+    user-select: none;
+}
+.desktop-titlebar[data-ready="true"]:not([data-expanded="true"]) .desktop-resize-handle {
+    pointer-events: auto;
+}
+.desktop-resize-n,
+.desktop-resize-s {
+    left: 12px;
+    right: 12px;
+    height: 4px;
+    cursor: ns-resize;
+}
+.desktop-resize-n {
+    top: 0;
+}
+.desktop-resize-s {
+    bottom: 0;
+}
+.desktop-resize-e,
+.desktop-resize-w {
+    top: 12px;
+    bottom: 12px;
+    width: 4px;
+    cursor: ew-resize;
+}
+.desktop-resize-e {
+    right: 0;
+}
+.desktop-resize-w {
+    left: 0;
+}
+.desktop-resize-ne,
+.desktop-resize-nw,
+.desktop-resize-se,
+.desktop-resize-sw {
+    width: 12px;
+    height: 12px;
+    clip-path: polygon(0 0, 100% 0, 100% 4px, 4px 4px, 4px 100%, 0 100%);
+}
+.desktop-resize-nw {
+    top: 0;
+    left: 0;
+    cursor: nwse-resize;
+}
+.desktop-resize-ne {
+    top: 0;
+    right: 0;
+    cursor: nesw-resize;
+    transform: rotate(90deg);
+}
+.desktop-resize-se {
+    right: 0;
+    bottom: 0;
+    cursor: nwse-resize;
+    transform: rotate(180deg);
+}
+.desktop-resize-sw {
+    left: 0;
+    bottom: 0;
+    cursor: nesw-resize;
+    transform: rotate(270deg);
+}
+[data-desktop="true"] .chat-window-drop {
+    top: calc(var(--desktop-titlebar-height) + 10px);
+}
+@media (max-width: 800px) {
+    [data-desktop="true"] .admin-shell {
+        grid-template-rows: var(--desktop-titlebar-height) auto minmax(0, 1fr);
+    }
+    [data-desktop="true"] .chat-layout:not(.chat-readonly) .chat-sidebar {
+        top: calc(var(--desktop-titlebar-height) + 12px);
+    }
+    [data-desktop="true"] .chat-sidebar-scrim {
+        top: var(--desktop-titlebar-height);
+        height: calc(100% - var(--desktop-titlebar-height));
+    }
+}
+@media print {
+    .desktop-titlebar {
+        display: none;
+    }
+    [data-desktop="true"] .chat-body {
+        display: block;
+    }
+}

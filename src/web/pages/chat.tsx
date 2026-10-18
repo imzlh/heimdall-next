@@ -284,6 +284,14 @@ export function ChatPageView({ initial }: { initial: ChatInitial }) {
                         </div>
                     </div>
                     <div class="chat-header-actions">
+                        <a
+                            class="chat-icon-button chat-admin-link"
+                            href="/admin"
+                            title="返回管理面板"
+                            aria-label="返回管理面板"
+                        >
+                            <Icon name="overview" />
+                        </a>
                         <div class="chat-model-field">
                             <span class="sr-only" id="chat-model-label">
                                 选择模型

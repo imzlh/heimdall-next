@@ -4,12 +4,16 @@ import { Console, type ConsoleProps } from "./console.tsx";
 import { clearAdminToken, configureAdminTransport } from "./api/admin.ts";
 import { login, logout, sendUiAction, sessionFetch } from "./session.ts";
 import { loadUiCatalog } from "./ui-catalog.ts";
+import { mountDesktopWindow } from "./desktop.ts";
 import "./style.css";
 import "./shell.css";
 import "./cards.css";
 import "./extensions/slots.css";
 import "./preset-auth.css";
 import "./journal.css";
+import "./desktop.css";
+
+mountDesktopWindow();
 
 const root = document.getElementById("heimdall-console");
 const boot = document.getElementById("heimdall-boot");

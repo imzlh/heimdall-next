@@ -17,6 +17,7 @@ import {
     setAdminToken,
 } from "./api/admin.ts";
 export interface ConsoleProps {
+    desktop?: boolean;
     initial?: DashboardData;
     initialPanels?: Omit<ConsoleSnapshot, "dashboard">;
     page?: ConsolePage;

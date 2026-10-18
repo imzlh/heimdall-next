@@ -2,12 +2,16 @@
 import { render } from "hono/jsx/dom";
 import type { ChatInitial } from "@heimdall/admin-contracts/chat.ts";
 import { ChatApp } from "./chat-app.tsx";
+import { mountDesktopWindow } from "./desktop.ts";
 import "./style.css";
 import "./chat/messages.css";
 import "./chat/composer.css";
 import "./chat/extensions.css";
 import "./extensions/slots.css";
 import "./chat.css";
+import "./desktop.css";
+
+mountDesktopWindow();
 
 const root = document.getElementById("heimdall-chat");
 const boot = document.getElementById("heimdall-chat-boot");

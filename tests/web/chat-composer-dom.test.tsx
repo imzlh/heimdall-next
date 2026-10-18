@@ -47,6 +47,7 @@ async function composer(patch: Partial<ChatState> = {}) {
     let sends = 0;
     let current = initialState(patch);
     let update = (_patch: Partial<ChatState>) => {};
+    let unmount = () => {};
     // Only actions used by these rendered composer interactions are mocked.
     const controller = {
         setDraft(text: string) {
@@ -64,9 +65,13 @@ async function composer(patch: Partial<ChatState> = {}) {
     } as ChatController;
     function Fixture() {
         const [state, setState] = useState(current);
+        const [mounted, setMounted] = useState(true);
         current = state;
         update = (next) => setState((value) => ({ ...value, ...next }));
-        return <ChatComposer state={state} controller={controller} />;
+        unmount = () => setMounted(false);
+        return mounted
+            ? <ChatComposer state={state} controller={controller} />
+            : null;
     }
     try {
         await dom.act(() =>
@@ -94,9 +99,9 @@ async function composer(patch: Partial<ChatState> = {}) {
         },
         update: (next: Partial<ChatState>) => dom.act(() => update(next)),
         async dispose() {
-            await dom.act(() =>
-                render(null, dom.root as unknown as HTMLElement)
-            );
+            // Hono render() replaces the root; a state update runs the actual
+            // component unmount, including window-listener effect cleanup.
+            await dom.act(unmount);
             dom.restore();
         },
     };
@@ -316,6 +321,72 @@ Deno.test("composer prevents repeated Enter and leaves IME confirmation untouche
         assert(send.defaultPrevented);
         assertEquals(view.sends, 1);
         assertStrictEquals(view.dom.document.activeElement, view.input);
+    } finally {
+        await view.dispose();
+    }
+});
+
+Deno.test("composer accepts a file dropped anywhere in the window without navigating or uploading twice", async () => {
+    const view = await composer();
+    const file = new File(["image"], "window.png", { type: "image/png" });
+    const dataTransfer = transfer([file]);
+    try {
+        const drag = event("dragover", { dataTransfer });
+        const drop = event("drop", { dataTransfer });
+        await view.dom.act(() => {
+            globalThis.dispatchEvent(event("dragenter", { dataTransfer }));
+            globalThis.dispatchEvent(drag);
+        });
+        assert(drag.defaultPrevented);
+        assertEquals(dataTransfer.dropEffect, "copy");
+        assertEquals(view.form.getAttribute("data-dragging"), "true");
+        assert(view.dom.root.querySelector('div[class="chat-window-drop"]'));
+        await view.dom.act(() => globalThis.dispatchEvent(drop));
+        assert(drop.defaultPrevented);
+        assertEquals(view.uploads.length, 1);
+        assertStrictEquals(view.uploads[0]![0], file);
+        assertEquals(view.form.getAttribute("data-dragging"), "false");
+        assertEquals(view.input.value, "existing draft");
+
+        // The helper has no bubbling. Dispatch the same handled event to the
+        // window to model what follows the form's native bubble handler.
+        const composerDrop = event("drop", { dataTransfer });
+        await view.dom.act(() => {
+            view.form.dispatchEvent(composerDrop);
+            globalThis.dispatchEvent(composerDrop);
+        });
+        assertEquals(view.uploads.length, 2);
+        const plainText = event("drop", { dataTransfer: transfer([], "text") });
+        await view.dom.act(() => globalThis.dispatchEvent(plainText));
+        assertEquals(plainText.defaultPrevented, false);
+    } finally {
+        await view.dispose();
+    }
+});
+
+Deno.test("composer window drops prevent navigation while uploads are unavailable", async () => {
+    const view = await composer({ sending: true });
+    const dataTransfer = transfer([
+        new File(["image"], "window.png", { type: "image/png" }),
+    ]);
+    try {
+        const drag = event("dragover", { dataTransfer });
+        const drop = event("drop", { dataTransfer });
+        await view.dom.act(() => {
+            globalThis.dispatchEvent(event("dragenter", { dataTransfer }));
+            globalThis.dispatchEvent(drag);
+            globalThis.dispatchEvent(drop);
+        });
+        assert(drag.defaultPrevented);
+        assert(drop.defaultPrevented);
+        assertEquals(dataTransfer.dropEffect, "none");
+        assertEquals(view.uploads, []);
+        assertEquals(view.form.getAttribute("data-dragging"), "false");
+        assertEquals(
+            view.dom.root.querySelector('[id="chat-composer-notice"]')
+                ?.textContent,
+            "请等待当前回复完成后再添加图片",
+        );
     } finally {
         await view.dispose();
     }
